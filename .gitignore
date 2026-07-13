@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+
+# 환경 변수 (API 키 절대 깃에 안 올림)
+.env
+
+# 벡터 DB (생성된 데이터)
+chroma_db/
+
+# 로그
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 모델 캐시
+.cache/
+models/
+
+# 평가 결과
+eval_results/
+*.csv
+
+# test
+test_retriever.py
+test_generator.py
