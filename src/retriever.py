@@ -11,8 +11,9 @@ import logging
 
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings 
-from langchain_core.vectorstores import VectorStoreRetriever 
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.vectorstores import VectorStoreRetriever
+from langchain_classic.indexes import SQLRecordManager, index as lc_index
 from src import config
 
 logger = logging.getLogger(__name__)
@@ -49,22 +50,60 @@ def get_vectorstore() -> Chroma:
     return _vectorstore
 
 
-# === 청크 추가 (인덱싱) === (3-1. 인덱싱)
-def add_documents(docs: list[Document]) -> None :
-    """Document 청크들을 벡터스토어에 추가. """
+# === 레코드 매니저 (증분 인덱싱용 해시 기록) ===
+_record_manager: SQLRecordManager | None = None
+
+
+def get_record_manager() -> SQLRecordManager:
+    """청크별 콘텐츠 해시를 SQLite에 기록하는 레코드 매니저 (모듈 레벨 싱글턴).
+
+    index_documents()가 이걸로 "지난번과 내용이 같은 청크"는 재임베딩을
+    건너뛰고, "이번엔 안 나온(삭제/축소된) 청크"는 벡터스토어에서 자동으로 지운다.
+    """
+    global _record_manager
+    if _record_manager is None:
+        _record_manager = SQLRecordManager(
+            namespace=f"chroma/{config.COLLECTION_NAME}",
+            db_url=f"sqlite:///{config.CHROMA_DIR / 'record_manager.sqlite'}",
+        )
+        _record_manager.create_schema()
+    return _record_manager
+
+
+# === 청크 추가 (증분 인덱싱) === (3-1. 인덱싱)
+def index_documents(docs: list[Document]) -> dict:
+    """Document 청크들을 해시 기반으로 증분 인덱싱.
+
+    내용이 바뀌지 않은 청크는 재임베딩을 스킵하고, source 기준으로
+    이번 호출에 포함된 파일들 중 없어진 청크는 자동 삭제한다.
+
+    cleanup="scoped_full" 사용: "incremental"은 100개 단위 배치 처리 도중
+    바로바로 청소를 실행해서, 한 파일의 청크 수가 배치 크기(100)보다 많으면
+    아직 처리 안 된 뒷부분 청크를 "없어진 청크"로 오인해 삭제 후 재추가하는
+    버그가 있음(batch_size에 의존하는 숨은 가정이 생김). scoped_full은 청소를
+    전체 배치 처리가 끝난 뒤, 이번 호출에 실제로 포함된 source로만 한정해서
+    실행하므로 이 문제가 없고, 나중에 파일 단위 부분 인덱싱을 추가해도 안전하다
+    (미포함 source는 절대 건드리지 않음 — cleanup="full"과의 차이).
+    """
     if not docs:
         logger.warning("추가할 문서가 없습니다.")
-        return
+        return {"num_added": 0, "num_updated": 0, "num_skipped": 0, "num_deleted": 0}
 
-    vectorstore = get_vectorstore() # Chroma 임베딩 객체생성
+    vectorstore = get_vectorstore()
+    record_manager = get_record_manager()
 
-    # ID 생성 (source + chunk_index로 고유성 보장)
-    ids = [
-        f"{d.metadata['source']}_{d.metadata['chunk_index']}"
-        for d in docs
-    ]
-    vectorstore.add_documents(documents=docs, ids=ids)  # docs에 ids 넣어서 임베딩 DB 저장(실행)
-    logger.info("벡터스토어에 %d개 문서 추가됨", len(docs))
+    result = lc_index(
+        docs,
+        record_manager,
+        vectorstore,
+        cleanup="scoped_full",
+        source_id_key="source",
+    )
+    logger.info(
+        "인덱싱 결과: 추가 %d, 갱신 %d, 스킵(변경없음) %d, 삭제 %d",
+        result["num_added"], result["num_updated"], result["num_skipped"], result["num_deleted"],
+    )
+    return result
 
 
 # === 검색 ===(3-2. 검색, 검색+점수) # 현재는 retriever써서 사용안함. but 디버깅/평가용으로 사용을 위함
@@ -120,11 +159,21 @@ def count_documents() -> int:
     return vectorstore._collection.count() # 카운트
 
 def reset_collection() -> None:
-    """컬렉션 전체 삭제 후 재생성. (재인덱싱 시 사용)"""
+    """컬렉션 전체 삭제 후 재생성 + 레코드 매니저 해시 기록도 초기화. (재인덱싱 시 사용)
+
+    해시 기록을 같이 지우지 않으면, 벡터스토어는 비었는데 레코드 매니저는
+    "이미 인덱싱됨"으로 착각해서 index_documents()가 재임베딩을 스킵해버린다.
+    """
     vectorstore = get_vectorstore()
     try:
-        vectorstore.delete_collection() # 삭제
+        vectorstore.reset_collection() # 삭제 + 빈 컬렉션으로 재생성 (delete_collection만 쓰면 재생성이 안 돼서 이후 add 시 에러남)
         logger.info("기존 컬렉션 삭제 완료")
     except Exception as e:
         logger.warning("컬렉션 삭세 실패 (없을 수도 있음): %s", e)
+
+    record_manager = get_record_manager()
+    keys = record_manager.list_keys()
+    if keys:
+        record_manager.delete_keys(keys)
+        logger.info("레코드 매니저 해시 기록 %d개 삭제 완료", len(keys))
 

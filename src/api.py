@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src import config
@@ -78,7 +79,12 @@ def root():
         "service": "RAG Chatbot API v3 (LangGraph)",
         "version": "3.0.0",
         "docs": "/docs",
+        "ui": "/ui",
     }
+
+
+# 정적 프론트엔드 (채팅 UI): http://localhost:8000/ui
+app.mount("/ui", StaticFiles(directory="src/static", html=True), name="ui")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["기본"])

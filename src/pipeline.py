@@ -22,7 +22,7 @@ from langchain_core.messages import ToolMessage
 from src import config
 from src.agent import graph
 from src.ingestion import ingest_all
-from src.retriever import add_documents, count_documents, reset_collection
+from src.retriever import index_documents, count_documents, reset_collection
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +39,15 @@ def ingest(reset: bool = False) -> int:
     if not docs:
         return 0
     
-    logger.info("문서 로딩 + 청킹 시작")
-    add_documents(docs)
+    logger.info("문서 로딩 + 청킹 완료, 증분 인덱싱 시작")
+    result = index_documents(docs)
 
     total = count_documents()
-    logger.info("인덱싱 완료: %d개 청크 (DB 총 %d개)", len(docs), total)
-    return len(docs) # 저장된 청크 수
+    logger.info(
+        "인덱싱 완료: 추가 %d / 갱신 %d / 스킵 %d / 삭제 %d (DB 총 %d개)",
+        result["num_added"], result["num_updated"], result["num_skipped"], result["num_deleted"], total,
+    )
+    return result["num_added"] + result["num_updated"] # 실제로 새로 (재)임베딩된 청크 수
 
 # [INFO] src.pipeline: 기존 컬렉션 초기화 중...
 # [INFO] src.retriever: 기존 컬렉션 삭제 완료
