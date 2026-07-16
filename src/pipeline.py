@@ -23,6 +23,7 @@ from src import config
 from src.agent import graph
 from src.ingestion import ingest_all
 from src.retriever import index_documents, count_documents, reset_collection
+from src import parent_store
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +35,14 @@ def ingest(reset: bool = False) -> int:
         logger.info("기존 컬렉션 초기화 중...")
         reset_collection()
 
-    docs = ingest_all()
+    docs, parent_records = ingest_all()
 
     if not docs:
         return 0
-    
+
     logger.info("문서 로딩 + 청킹 완료, 증분 인덱싱 시작")
     result = index_documents(docs)
+    parent_store.replace_all(parent_records)
 
     total = count_documents()
     logger.info(

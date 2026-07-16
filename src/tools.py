@@ -10,6 +10,7 @@ import logging
 from langchain_core.tools import tool
 
 from src import config
+from src import parent_store
 from src.retriever import keyword_search, search_with_score
 
 logger = logging.getLogger(__name__)
@@ -47,19 +48,35 @@ def search_regulations(query:str) -> str:
 
     if not results:
         return "관련 규정를 찾을 수 없습니다."
-    
+
+    # 부모-자식 청킹: 검색은 작은 자식 청크로 하되, LLM에는 그 조항 전체를 보여줌.
+    # 같은 조항의 자식 청크 여러 개가 매칭되면 한 번만 포함(중복 제거).
+    seen_articles: set[tuple[str, str]] = set()
     parts = []
-    for i, (doc, score) in enumerate(results, 1):
+    for doc, score in results:
         source = doc.metadata.get("source", "unknown")
+        article_id = doc.metadata.get("article_id")
+
+        if article_id is not None:
+            key = (source, article_id)
+            if key in seen_articles:
+                continue
+            seen_articles.add(key)
+
         category = doc.metadata.get("category", "unknown")
         chunk_idx = doc.metadata.get("chunk_index", "?")  # 두번째는 디폴트값
         similarity = 1 - score
-
         category_kr = CATEGORY_NAMES.get(category, category)
 
+        content = doc.page_content
+        if article_id is not None:
+            parent_content = parent_store.get_parent(source, article_id)
+            if parent_content is not None:
+                content = parent_content
+
         parts.append(
-            f"[문서 {i} | {category_kr}, 청크: {chunk_idx}, 유사도: {similarity:.3f}]\n"
-            f"{doc.page_content}"
+            f"[문서 {len(parts) + 1} | {category_kr}, 청크: {chunk_idx}, 유사도: {similarity:.3f}]\n"
+            f"{content}"
         )
 
     return "\n\n".join(parts)

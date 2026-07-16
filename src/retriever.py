@@ -27,6 +27,23 @@ embeddings = HuggingFaceEmbeddings(
     )
 
 
+# === 토크나이저 조회 (law_chunker의 토큰 기준 서브 청킹용) ===
+def get_tokenizer():
+    """임베딩 모델의 토크나이저 반환."""
+    return embeddings._client.tokenizer
+
+
+def get_max_chunk_tokens() -> int:
+    """청크 하나의 최대 토큰 수 (임베딩 모델 한도와 실용적 상한 중 작은 값).
+
+    이 값을 기준으로 청킹하면, 모델을 바꿔도(예: 128 → 512토큰) 코드 수정 없이
+    자동으로 새 모델의 한계에 맞춰 청크 크기가 조정된다. 다만 모델 한도가
+    아주 크더라도(예: 8192토큰), 검색 정밀도와 LLM 컨텍스트 예산을 위해
+    config.MAX_PRACTICAL_CHUNK_TOKENS를 넘지 않도록 상한을 둔다.
+    """
+    return min(embeddings._client.max_seq_length, config.MAX_PRACTICAL_CHUNK_TOKENS)
+
+
 # === Vectorstore 초기화 ===(2. Chroma 인스턴스 반환)
 _vectorstore: Chroma | None = None
 

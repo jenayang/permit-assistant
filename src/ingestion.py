@@ -15,6 +15,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from src import config
 from src.law_chunker import is_law_document, split_law_documents
+from src.retriever import get_max_chunk_tokens, get_tokenizer
 
 logger = logging.getLogger(__name__)  # "src.ingestion" 이름으로 로거 생성
 
@@ -74,13 +75,18 @@ def preprocess_documents(docs: list[Document]) -> list[Document]:
 
 
 # === 통합 처리 ===(나. 파일로드, 전처리, 청킹)
-def process_file(filepath: Path) -> list[Document]:
-    """파일 하나를 로드 → 전처리 → 청킹 """
+def process_file(filepath: Path) -> tuple[list[Document], list[dict]]:
+    """파일 하나를 로드 → 전처리 → 청킹.
+
+    Returns:
+        (청크 리스트, 부모 조항 레코드 리스트). 법령 문서가 아니면 부모
+        레코드는 빈 리스트.
+    """
     # 1. 파일 로딩 -> list[Document]
     docs = load_document(filepath)
     # 2. 전처리(각 Document의 .page_context 갈아끼기) -> list[Document]
     docs = preprocess_documents(docs)
-    
+
     # 2.5. metadata 보강
     # loader마다 metadata 형식이 달라서, 통일성 위해 명시적으로 설정
     try:
@@ -93,22 +99,29 @@ def process_file(filepath: Path) -> list[Document]:
         d.metadata["category"] = filepath.parent.name   # "laws"
         d.metadata["format"] = filepath.suffix.lstrip(".")
 
-    # 3. Split - 법령이면 조항 단위, 아니면 일반 청킹
+    # 3. Split - 법령이면 조항 단위(+ 토큰 한도 초과 시 서브 분할), 아니면 토큰 기준 일반 청킹
+    parent_records: list[dict] = []
     if is_law_document(filepath):
         logger.info("법령 청킹 적용: %s", filepath.name)
-        split_docs = split_law_documents(docs)
+        split_docs, parent_records = split_law_documents(
+            docs,
+            tokenizer=get_tokenizer(),
+            max_tokens=get_max_chunk_tokens(),
+            overlap=config.CHILD_CHUNK_OVERLAP_TOKENS,
+        )
     else:
-        splitter = RecursiveCharacterTextSplitter( 
-            chunk_size = config.CHUNK_SIZE,
-            chunk_overlap = config.CHUNK_OVERLAP
+        splitter = RecursiveCharacterTextSplitter.from_huggingface_tokenizer(
+            get_tokenizer(),
+            chunk_size=get_max_chunk_tokens(),
+            chunk_overlap=config.GENERAL_CHUNK_OVERLAP_TOKENS,
         )
         split_docs = splitter.split_documents(docs) # Document 리스트 분할
-    
+
     # 4. chunk_index 추가 (디버깅과 검색에 유용)
     for i, c in enumerate(split_docs):
         c.metadata["chunk_index"] = i
-    
-    return split_docs
+
+    return split_docs, parent_records
 
 
 # (가. 모든 파일 담기)
@@ -125,20 +138,26 @@ def discover_files(data_dir: Path = config.DATA_DIR) -> list[Path]:
     return sorted(files)
 
 
-def ingest_all(data_dir: Path = config.DATA_DIR) -> list[Document]: # ****
-    """data 폴더 전체를 청크로 변환."""
+def ingest_all(data_dir: Path = config.DATA_DIR) -> tuple[list[Document], list[dict]]:
+    """data 폴더 전체를 청크로 변환.
+
+    Returns:
+        (전체 청크 리스트, 전체 부모 조항 레코드 리스트).
+    """
     files = discover_files(data_dir) # (가.모든 파일 찾기 -> files[] 리스트)
     if not files:
         logger.warning("처리할 파일이 없습니다: %s", data_dir)
-        return []
+        return [], []
 
     all_docs: list[Document] = [] # 청킹된 모든 파일
+    all_parent_records: list[dict] = []
     for filepath in files: # 불러온 파일 하나씩 처리
         try:
-            split_docs = process_file(filepath) # (나. 파일 로딩 > 전처리 > 청킹)
+            split_docs, parent_records = process_file(filepath) # (나. 파일 로딩 > 전처리 > 청킹)
             all_docs.extend(split_docs)       # 각 파일의 청크들 -> all_청크에 append
+            all_parent_records.extend(parent_records)
             logger.info("[완료] %s → %d 청크", filepath.name, len(split_docs))
         except Exception as e:
             logger.error("[실패] %s: %s", filepath.name, e)
 
-    return all_docs # 전체 파일의 총 청크
+    return all_docs, all_parent_records # 전체 파일의 총 청크 + 부모 레코드

@@ -40,8 +40,17 @@ CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY")
 
 
 # === 청킹 ===
-CHUNK_SIZE = 500
-CHUNK_OVERLAP = 50
+# 임베딩 모델 자체 한도(예: 128토큰)가 이보다 작으면 모델 한도가 우선 적용됨.
+# 모델을 큰 것(예: 512, 8192토큰)으로 바꿔도 청크가 무한정 커지지 않도록,
+# 검색 정밀도 + LLM 컨텍스트 예산 관점에서 적절한 상한을 별도로 둔다.
+MAX_PRACTICAL_CHUNK_TOKENS = 300
+
+# 청크 경계끼리 겹치는 토큰 수(문맥 유실 완화용).
+# 청크 자체가 이보다 작으면(예: 128토큰 모델) 비율로 축소해서 적용한다.
+# 법령 자식 청크는 부모(조항 전체)가 문맥을 보장해줘서 적게 필요하고,
+# 일반 문서는 청크 자체가 그대로 LLM에 노출되므로 더 크게 잡는다.
+CHILD_CHUNK_OVERLAP_TOKENS = 20
+GENERAL_CHUNK_OVERLAP_TOKENS = 50
 
 
 # === 검색 ===
