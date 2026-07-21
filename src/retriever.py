@@ -1,7 +1,7 @@
 """임베딩 + 벡터DB + 검색.
 
 LangChain Chroma + HuggingFace 임베딩 사용.
-임베딩 모델: paraphrase-multilingual-MiniLM-L12-v2 (다국어 지원)
+임베딩 모델: intfloat/multilingual-e5-base (다국어 지원, 512토큰)
 """
 # v1 : sentence-transformers로 임베딩 → ChromaDB(로컬 영구 저장) → 코사인 검색.
 
@@ -20,10 +20,15 @@ logger = logging.getLogger(__name__)
 
 
 # === 임베딩 모델 (모듈 로드 시 1회 생성) ===(1. 임베딩 모델 로드)
+# e5 계열 모델은 "query: "/"passage: " 접두사를 붙여야 학습 때와 같은 조건으로
+# 동작함 (안 붙이면 에러는 안 나지만 검색 품질이 떨어짐). embed_documents()는
+# encode_kwargs를, embed_query()는 query_encode_kwargs를 쓰므로 문서/질문에
+# 서로 다른 접두사를 자동으로 붙일 수 있다.
 embeddings = HuggingFaceEmbeddings(
         model_name = config.EMBEDDING_MODEL,
         model_kwargs={"device": "cpu"},
-        encode_kwargs={"normalize_embeddings": True}
+        encode_kwargs={"normalize_embeddings": True, "prompt": "passage: "},
+        query_encode_kwargs={"normalize_embeddings": True, "prompt": "query: "},
     )
 
 
@@ -186,7 +191,7 @@ def reset_collection() -> None:
         vectorstore.reset_collection() # 삭제 + 빈 컬렉션으로 재생성 (delete_collection만 쓰면 재생성이 안 돼서 이후 add 시 에러남)
         logger.info("기존 컬렉션 삭제 완료")
     except Exception as e:
-        logger.warning("컬렉션 삭세 실패 (없을 수도 있음): %s", e)
+        logger.warning("컬렉션 삭제 실패 (없을 수도 있음): %s", e)
 
     record_manager = get_record_manager()
     keys = record_manager.list_keys()

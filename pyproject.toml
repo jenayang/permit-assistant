@@ -34,6 +34,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "langchain-cerebras>=0.8.2",
     "langchain-classic>=1.0.0",  # SQLRecordManager (증분 인덱싱용, langchain v1에서 여기로 이동)
+    "pyhwp>=0.1b15",
 ]
 
 [project.optional-dependencies]

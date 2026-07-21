@@ -27,8 +27,10 @@ EVAL_DIR = ROOT_DIR / "eval_results"
 
 
 # === 모델 ===
-# 다국어 지원 임베딩 모델 (한국어/영어 혼용 가능)
-EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
+# 다국어 지원 임베딩 모델 (한국어/영어 혼용 가능). 512토큰 한도.
+# e5 계열은 입력 앞에 "query: "/"passage: " 접두사를 붙여야 성능이 나옴
+# (retriever.py의 embeddings 생성부 참고).
+EMBEDDING_MODEL = "intfloat/multilingual-e5-base"
 
 # Gemini 모델 (무료 할당량이 가장 큰 모델)
 GEMINI_MODEL = "gemini-2.5-flash-lite"
@@ -43,7 +45,7 @@ CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY")
 # 임베딩 모델 자체 한도(예: 128토큰)가 이보다 작으면 모델 한도가 우선 적용됨.
 # 모델을 큰 것(예: 512, 8192토큰)으로 바꿔도 청크가 무한정 커지지 않도록,
 # 검색 정밀도 + LLM 컨텍스트 예산 관점에서 적절한 상한을 별도로 둔다.
-MAX_PRACTICAL_CHUNK_TOKENS = 300
+MAX_PRACTICAL_CHUNK_TOKENS = 500
 
 # 청크 경계끼리 겹치는 토큰 수(문맥 유실 완화용).
 # 청크 자체가 이보다 작으면(예: 128토큰 모델) 비율로 축소해서 적용한다.

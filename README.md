@@ -9,6 +9,7 @@
 - **상황 기반 진단**: 사용자 상황에 맞는 인허가 유형 자동 판별
 - **정확한 법령 인용**: 건축법, 서울시 조례 기반 답변
 - **사전 문제 감지**: 주차, 정화조, 소방 등 놓치기 쉬운 항목 자동 진단
+- **법령 구조 인식 청킹**: 본문(조항)/부칙/별표를 구분해서 별표 안 표 데이터가 가짜 조항으로 섞이는 걸 방지, 조항 원문은 부모-자식 청킹으로 검색은 짧게・답변은 잘리지 않게
 - **절차 로드맵**: 상황분석/필요절차/필수서류/사전진단/예상기간을 구조화해서 안내
 - **LLM 폴백**: Gemini 무료 티어 할당량 소진 시 Cerebras로 자동 전환
 - **증분 인덱싱**: 문서 변경분만 해시 비교 후 재임베딩 (전체 재인덱싱 불필요)
@@ -35,7 +36,7 @@
 ## 기술 스택
 
 - **LLM**: Google Gemini 2.5 Flash Lite (기본) → Cerebras(`gemma-4-31b` 등, 할당량 소진 시 자동 폴백)
-- **임베딩**: HuggingFace `paraphrase-multilingual-MiniLM-L12-v2` (로컬 CPU 추론)
+- **임베딩**: HuggingFace `intfloat/multilingual-e5-base` (로컬 CPU 추론)
 - **벡터DB**: ChromaDB (`chroma_db/`, 로컬 영구 저장)
 - **증분 인덱싱**: LangChain `SQLRecordManager` (콘텐츠 해시 기반, 변경분만 재임베딩)
 - **에이전트**: LangGraph (ReAct 패턴)
@@ -48,7 +49,8 @@ permit-assistant/
 ├── src/                    # 소스 코드
 │   ├── config.py           # 환경 설정
 │   ├── ingestion.py        # 문서 로딩 + 청킹
-│   ├── law_chunker.py      # 법령 조항 단위 청킹
+│   ├── law_chunker.py      # 법령 조항 단위 청킹 (본문/부칙/별표 구역 분리)
+│   ├── parent_store.py     # 조항 원문 저장소 (부모-자식 청킹의 부모)
 │   ├── retriever.py        # 벡터 검색 + 증분 인덱싱
 │   ├── tools.py            # 에이전트 도구
 │   ├── agent.py            # LangGraph 에이전트 (Gemini/Cerebras 폴백)
@@ -88,10 +90,14 @@ cp .env.example .env
 
 ### 3. 데이터 준비
 
-`data/` 폴더에 관련 자료 배치:
+`data/` 폴더에 관련 자료 배치 (지원 포맷: pdf, md, txt, html, hwp):
 - `laws/`: 건축법, 시행령, 시행규칙
 - `ordinances/`: 서울시 건축조례, 도시계획조례
 - `procedures/`: 인허가 절차 안내 문서
+
+법령 원문 PDF에 별표(첨부 표)가 이미지로 박혀 텍스트 추출이 안 되는 경우,
+국가법령정보센터에서 해당 별표만 한글(hwp) 파일로 따로 받아 같은 폴더에
+넣으면 자동으로 인덱싱된다(내부적으로 `hwp5html`로 표까지 변환).
 
 ### 4. 인덱싱
 

@@ -43,12 +43,17 @@ def replace_all(records: list[dict]) -> None:
 
     조항 수가 수백 개 수준으로 적어서, 증분 갱신 대신 매번 전체를
     지우고 다시 쓰는 게 더 단순하고 충분히 빠르다.
+
+    INSERT OR REPLACE 사용: (source, article_id)가 드물게 중복되는 경우
+    (예: "OO조부터 XX조까지" 같은 인용이 줄바꿈 때문에 가짜 조항 헤더로
+    오인식되는 극히 일부 케이스) PRIMARY KEY 충돌로 인덱싱 전체가
+    크래시나지 않도록 방어한다. 마지막 값으로 덮어써진다.
     """
     conn = _get_conn()
     with conn:
         conn.execute("DELETE FROM parent_articles")
         conn.executemany(
-            "INSERT INTO parent_articles (source, article_id, article_title, content) "
+            "INSERT OR REPLACE INTO parent_articles (source, article_id, article_title, content) "
             "VALUES (:source, :article_id, :article_title, :content)",
             records,
         )
