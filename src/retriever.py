@@ -8,6 +8,8 @@ LangChain Chroma + HuggingFace 임베딩 사용.
 from __future__ import annotations
 
 import logging
+import shutil
+import sqlite3
 
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
@@ -180,6 +182,30 @@ def count_documents() -> int:
     vectorstore = get_vectorstore()
     return vectorstore._collection.count() # 카운트
 
+def _cleanup_orphaned_segments() -> None:
+    """chromadb가 못 지운 예전 세그먼트 디렉토리를 카탈로그 기준으로 직접 정리.
+
+    chromadb는 세그먼트가 "현재 프로세스 메모리에 이미 로드돼 있을 때만"
+    디스크 파일을 지운다. 우리는 --ingest를 매번 새 CLI 프로세스로 돌리다
+    보니 예전 리셋 때 만들어진 세그먼트는 이 프로세스 메모리에 없어서
+    delete_collection()이 카탈로그(sqlite)에서만 지우고 디스크 폴더는
+    고아로 남긴다. chroma.sqlite3의 segments 테이블에 없는 UUID 폴더를
+    직접 지워서 이걸 보완한다.
+    """
+    db_path = config.CHROMA_DIR / "chroma.sqlite3"
+    if not db_path.exists():
+        return
+
+    conn = sqlite3.connect(db_path)
+    valid_ids = {row[0] for row in conn.execute("SELECT id FROM segments")}
+    conn.close()
+
+    for entry in config.CHROMA_DIR.iterdir():
+        if entry.is_dir() and entry.name not in valid_ids:
+            shutil.rmtree(entry)
+            logger.info("고아 세그먼트 폴더 삭제: %s", entry.name)
+
+
 def reset_collection() -> None:
     """컬렉션 전체 삭제 후 재생성 + 레코드 매니저 해시 기록도 초기화. (재인덱싱 시 사용)
 
@@ -192,6 +218,8 @@ def reset_collection() -> None:
         logger.info("기존 컬렉션 삭제 완료")
     except Exception as e:
         logger.warning("컬렉션 삭제 실패 (없을 수도 있음): %s", e)
+
+    _cleanup_orphaned_segments()
 
     record_manager = get_record_manager()
     keys = record_manager.list_keys()
