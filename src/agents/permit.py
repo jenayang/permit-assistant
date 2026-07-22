@@ -13,6 +13,7 @@ import logging
 from typing import Literal
 
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +213,60 @@ def classify_case(facts: dict) -> str | None:
         return "가설건축물허가"
 
     return None
+
+
+# --- 구조화 출력 경계 (PermitResult) --------------------------------------
+# 멀티 에이전트 설계서가 제안하는 Permit Agent의 구조화 출력 형태를 준비해두되,
+# 아직 agent.py/api.py 어디에도 연결하지 않는다(Phase 2 - 내부 모델만 추가,
+# 실제 연결은 Phase 5에서 Planner 도입과 함께 다시 논의). permit_type과
+# procedures는 이미 classify_case()/PROCEDURE_TREE가 결정론적으로 갖고 있는
+# 값이라 여기서도 규칙 기반으로 채운다 - LLM 판단으로 대체하지 않는다.
+# required_documents/related_laws/explanation은 PROCEDURE_TREE에 없는(RAG 검색
+# 결과가 필요한) 값이라 이 단계에서는 채우지 않고 LLM이 나중에 채울 자리로 남긴다.
+class PermitResult(BaseModel):
+    """Permit Agent의 구조화 출력. permit_type/procedures는 규칙 엔진 확정값,
+    required_documents/related_laws/explanation은 LLM이 채울 자리(현재는 빈 값)."""
+
+    permit_type: str = Field(description="classify_case()가 계산한 절차 결과(예: 건축허가)")
+    procedures: list[str] = Field(description="PROCEDURE_TREE에서 결정론적으로 뽑은 절차 단계 라벨 목록")
+    required_documents: list[str] = Field(default_factory=list, description="필수 서류 목록 - 아직 미채움")
+    related_laws: list[str] = Field(default_factory=list, description="근거 법령 목록 - 아직 미채움")
+    explanation: str = Field(default="", description="LLM이 생성할 설명 텍스트 - 아직 미채움")
+
+
+def _walk_procedures(result_type: str, ownership: str | None) -> list[str]:
+    """PROCEDURE_TREE의 root부터 stage 라벨을 순서대로 따라간다.
+
+    분기(owner_check 등)를 만나면 ownership과 일치하는 선택지를 따라가고,
+    모르면(None) 트리에 정의된 첫 선택지를 기본값으로 따라간다 - 두 선택지
+    모두 결국 같은 다음 단계로 합류하는 구조라 결과 라벨 하나만 달라진다.
+    """
+    tree = PROCEDURE_TREE[result_type]
+    nodes = tree["nodes"]
+    labels: list[str] = []
+    node_id: str | None = tree["root"]
+    while node_id is not None:
+        node = nodes[node_id]
+        if node["type"] == "branch":
+            choice = ownership if ownership in node["options"] else next(iter(node["options"]))
+            node_id = node["options"][choice]
+            continue
+        labels.append(node["label"])
+        node_id = node["next"]
+    return labels
+
+
+def build_permit_result(facts: dict) -> PermitResult | None:
+    """case_facts로 PermitResult를 만든다. classify_case()가 아직 판정을 못 내리면
+    (정보 부족) None을 반환 - 호출 쪽에서 이걸로 "아직 판정 전" 여부를 판단한다.
+    """
+    permit_type = classify_case(facts)
+    if permit_type is None:
+        return None
+    return PermitResult(
+        permit_type=permit_type,
+        procedures=_walk_procedures(permit_type, facts.get("ownership")),
+    )
 
 
 def procedure_stage_message(result_type: str, node_id: str) -> str:
