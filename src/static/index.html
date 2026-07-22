@@ -24,7 +24,13 @@
     background: var(--bg);
     color: var(--text);
   }
+  .layout {
+    display: flex;
+    height: 100vh;
+  }
   .app {
+    flex: 1;
+    min-width: 0;
     max-width: 760px;
     margin: 0 auto;
     height: 100vh;
@@ -59,6 +65,115 @@
     cursor: pointer;
   }
   #newChatBtn:hover { background: var(--bg); }
+
+  /* 사이드 패널: 인허가 등반 로드맵 */
+  .side-panel {
+    width: 240px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    background: var(--panel);
+    padding: 20px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-y: auto;
+  }
+  .side-panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+  .climb-hint {
+    margin: auto 0;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+  .climb-hint .peak {
+    font-size: 28px;
+    display: block;
+    margin-bottom: 8px;
+  }
+  .climb-path {
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: center;
+  }
+  .climb-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 2px;
+  }
+  .climb-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--panel);
+    border: 2px solid var(--border);
+    opacity: 0.45;
+  }
+  .climb-node.done .climb-dot {
+    background: var(--accent);
+    border-color: var(--accent);
+    opacity: 1;
+  }
+  .climb-node.current .climb-dot {
+    background: var(--panel);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+    opacity: 1;
+  }
+  .climb-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    max-width: 140px;
+    line-height: 1.4;
+  }
+  .climb-node.current .climb-label {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .climb-line {
+    width: 2px;
+    height: 22px;
+    background: var(--border);
+    border-radius: 1px;
+    opacity: 0.4;
+  }
+  .climb-line.done { background: var(--accent); opacity: 1; }
+  .stage-caption {
+    margin-top: 16px;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: center;
+    line-height: 1.5;
+  }
+  @media (max-width: 900px) {
+    .side-panel { display: none; }
+  }
+
+  .branch-prompt {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .branch-btn {
+    border: 1px solid var(--accent);
+    background: var(--panel);
+    color: var(--accent);
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .branch-btn:hover { background: var(--accent); color: var(--accent-text); }
 
   #chat {
     flex: 1;
@@ -159,26 +274,38 @@
 </style>
 </head>
 <body>
-<div class="app">
-  <header>
-    <div>
-      <h1>서울시 건축 인허가 어시스턴트</h1>
-      <div class="sub" id="userIdLabel"></div>
-    </div>
-    <button id="newChatBtn" type="button">새 대화</button>
-  </header>
+<div class="layout">
+  <div class="app">
+    <header>
+      <div>
+        <h1>서울시 건축 인허가 어시스턴트</h1>
+        <div class="sub" id="userIdLabel"></div>
+      </div>
+      <button id="newChatBtn" type="button">새 대화</button>
+    </header>
 
-  <div id="chat">
-    <div class="empty-hint" id="emptyHint">
-      지역, 시설 유형, 규모를 알려주시면 인허가 절차를 안내해드려요.<br>
-      예) "강남구에 20평 카페 창업하려는데 뭐부터 해야 해?"
+    <div id="chat">
+      <div class="empty-hint" id="emptyHint">
+        지역, 시설 유형, 규모를 알려주시면 인허가 절차를 안내해드려요.<br>
+        예) "강남구에 20평 카페 창업하려는데 뭐부터 해야 해?"
+      </div>
     </div>
+
+    <form id="composer">
+      <textarea id="question" rows="1" placeholder="질문을 입력하세요 (Enter로 전송, Shift+Enter로 줄바꿈)"></textarea>
+      <button id="sendBtn" type="submit">전송</button>
+    </form>
   </div>
 
-  <form id="composer">
-    <textarea id="question" rows="1" placeholder="질문을 입력하세요 (Enter로 전송, Shift+Enter로 줄바꿈)"></textarea>
-    <button id="sendBtn" type="submit">전송</button>
-  </form>
+  <aside class="side-panel">
+    <div class="side-panel-title">🏔️ 인허가 등반 로드맵</div>
+    <div class="climb-hint" id="climbHint">
+      <span class="peak">🏔️</span>
+      대화를 시작하면<br>여기에 진행 상황이 표시돼요
+    </div>
+    <div class="climb-path" id="climbPath" style="display:none;"></div>
+    <div class="stage-caption">실제 절차는 사안에 따라<br>다를 수 있어 참고용입니다.</div>
+  </aside>
 </div>
 
 <script>
@@ -190,6 +317,8 @@
   const sendBtn = document.getElementById("sendBtn");
   const userIdLabel = document.getElementById("userIdLabel");
   const newChatBtn = document.getElementById("newChatBtn");
+  const climbHintEl = document.getElementById("climbHint");
+  const climbPathEl = document.getElementById("climbPath");
 
   function getUserId() {
     let id = localStorage.getItem("permit_assistant_user_id");
@@ -202,6 +331,120 @@
 
   let userId = getUserId();
   userIdLabel.textContent = `세션: ${userId.slice(0, 8)}`;
+
+  let procedureTree = {};
+  // 대화 중 set_procedure_stage로 보고된 노드를 순서대로 누적 (분기 트리라
+  // "전체 경로"를 한 번에 알 수 없어서, 지금까지 실제로 지나온 노드만 기록)
+  let visitedNodes = [];
+
+  async function loadProcedureStages() {
+    try {
+      const res = await fetch(`${API_BASE}/procedure-stages`);
+      procedureTree = await res.json();
+    } catch (err) {
+      procedureTree = {};
+    }
+  }
+
+  function getNode(caseType, nodeId) {
+    return procedureTree[caseType]?.nodes?.[nodeId] || null;
+  }
+
+  function reportStageNode(caseType, nodeId) {
+    const last = visitedNodes[visitedNodes.length - 1];
+    if (last && last.caseType === caseType && last.nodeId === nodeId) return; // 직전과 동일하면 스킵
+    visitedNodes.push({ caseType, nodeId });
+    localStorage.setItem("permit_assistant_visited", JSON.stringify(visitedNodes));
+    renderStagePanel();
+  }
+
+  // 지금까지 확정된 노드(분기 포함, 연속 중복 제거) + 마지막이 "단계"면 다음
+  // 단계들을 미확정 미리보기로 이어붙인 전체 경로. 분기라서 그 뒤가 갈리는
+  // 지점(아직 답 안 한 분기)에서는 미리보기를 멈춘다(모르는 걸 지어내지 않음).
+  function buildPathNodes(caseType) {
+    const confirmedIds = visitedNodes
+      .filter(v => v.caseType === caseType)
+      .map(v => v.nodeId)
+      .filter((id, i, arr) => id !== arr[i - 1]);
+    if (confirmedIds.length === 0) return { ids: [], confirmedCount: 0 };
+
+    const ids = [...confirmedIds];
+    let last = getNode(caseType, ids[ids.length - 1]);
+    while (last && last.type === "stage" && last.next) {
+      ids.push(last.next);
+      last = getNode(caseType, last.next);
+    }
+    return { ids, confirmedCount: confirmedIds.length };
+  }
+
+  function renderStagePanel() {
+    if (visitedNodes.length === 0) {
+      climbHintEl.style.display = "block";
+      climbPathEl.style.display = "none";
+      return;
+    }
+    const last = visitedNodes[visitedNodes.length - 1];
+    const { caseType } = last;
+    const { ids, confirmedCount } = buildPathNodes(caseType);
+    if (ids.length === 0) return;
+
+    const currentIdx = confirmedCount - 1;
+
+    climbHintEl.style.display = "none";
+    climbPathEl.innerHTML = "";
+    climbPathEl.style.display = "flex";
+
+    // column-reverse 컨테이너라 배열 순서(시작→완료)대로 append하면 시작이
+    // 맨 아래, 완료(또는 아직 안 정해진 미래)가 맨 위로 렌더링돼서 "등반"
+    // 느낌이 나고, 확정 안 된 구간은 CSS 기본 투명도로 흐리게 보인다.
+    ids.forEach((id, i) => {
+      const node = getNode(caseType, id);
+      if (i > 0) {
+        const line = document.createElement("div");
+        line.className = "climb-line" + (i <= currentIdx ? " done" : "");
+        climbPathEl.appendChild(line);
+      }
+      const el = document.createElement("div");
+      const state = i < currentIdx ? "done" : i === currentIdx ? "current" : "upcoming";
+      el.className = `climb-node ${state}`;
+      // 분기 노드는 질문 내용을 로드맵에 미리 안 보여줌 - 대화로 알아가게 함
+      const label = node.type === "branch" ? "" : node.label;
+      el.innerHTML = `<div class="climb-dot"></div>` + (label ? `<div class="climb-label">${label}</div>` : "");
+      climbPathEl.appendChild(el);
+    });
+
+    // 현재 위치가 분기면, 경로 아래에 질문+선택지 버튼도 이어서 보여줌
+    const currentNode = getNode(caseType, ids[currentIdx]);
+    if (currentNode && currentNode.type === "branch") {
+      const prompt = document.createElement("div");
+      prompt.className = "branch-prompt";
+      Object.keys(currentNode.options).forEach(choice => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "branch-btn";
+        btn.textContent = choice;
+        btn.addEventListener("click", () => sendQuestion(choice));
+        prompt.appendChild(btn);
+      });
+      climbPathEl.appendChild(prompt);
+    }
+  }
+
+  function restoreStageIndicator() {
+    const saved = localStorage.getItem("permit_assistant_visited");
+    if (!saved) return;
+    try {
+      visitedNodes = JSON.parse(saved);
+      renderStagePanel();
+    } catch (err) { visitedNodes = []; }
+  }
+
+  function resetStageIndicator() {
+    visitedNodes = [];
+    climbPathEl.style.display = "none";
+    climbPathEl.innerHTML = "";
+    climbHintEl.style.display = "block";
+  }
 
   function addMessage(role, text, { toolCalls = [], isError = false } = {}) {
     emptyHint.remove();
@@ -265,6 +508,12 @@
       userIdLabel.textContent = `세션: ${userId.slice(0, 8)}`;
 
       addMessage("bot", data.answer, { toolCalls: data.tool_calls });
+
+      // 한 턴에 여러 번 호출될 수 있어(트리를 여러 노드 이어서 지나간 경우)
+      // 순서대로 전부 반영
+      (data.tool_calls || [])
+        .filter(tc => tc.tool === "set_procedure_stage")
+        .forEach(tc => reportStageNode(tc.args.case_type, tc.args.node_id));
     } catch (err) {
       removeTypingIndicator();
       addMessage("bot", `서버에 연결할 수 없습니다: ${err.message}`, { isError: true });
@@ -282,7 +531,11 @@
   });
 
   questionEl.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // e.isComposing: 한글 등 IME로 글자를 조합하는 중에 눌린 엔터는 무시.
+    // 이걸 안 걸러주면 조합 확정용 엔터랑 전송용 엔터가 겹쳐서, preventDefault가
+    // IME 조합 상태를 꼬아버려 마지막 글자가 다음 입력에 한 번 더 끼어드는
+    // 문제가 생긴다.
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       form.requestSubmit();
     }
@@ -295,12 +548,15 @@
 
   newChatBtn.addEventListener("click", () => {
     localStorage.removeItem("permit_assistant_user_id");
+    localStorage.removeItem("permit_assistant_visited");
     userId = getUserId();
     userIdLabel.textContent = `세션: ${userId.slice(0, 8)}`;
     chatEl.innerHTML = "";
     chatEl.appendChild(emptyHint);
+    resetStageIndicator();
   });
 
+  loadProcedureStages().then(restoreStageIndicator);
   questionEl.focus();
 </script>
 </body>

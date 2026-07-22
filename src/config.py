@@ -33,7 +33,7 @@ EVAL_DIR = ROOT_DIR / "eval_results"
 EMBEDDING_MODEL = "intfloat/multilingual-e5-base"
 
 # Gemini 모델 (무료 할당량이 가장 큰 모델)
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-3.1-flash-lite"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Cerebras 모델 (Gemini 무료 티어 일일 할당량 소진 시 자동 대체용, 한국어 지원)

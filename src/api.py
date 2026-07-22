@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from src import config
 from src.pipeline import ingest, query
 from src.retriever import count_documents
+from src.tools import PROCEDURE_TREE
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,12 @@ def health() -> HealthResponse:
         chunks_in_db=count_documents(),
         version="3.0.0"
     )
+
+
+@app.get("/procedure-stages", tags=["기본"])
+def procedure_stages() -> dict:
+    """케이스 유형별 절차 트리 (분기 포함, 프론트 로드맵/버튼 UI용, 시작 시 1회 캐싱)."""
+    return PROCEDURE_TREE
 
 
 @app.post("/query", response_model=QueryResponse, tags=["질의응답"])

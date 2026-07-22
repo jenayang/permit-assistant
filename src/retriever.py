@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import shutil
 import sqlite3
+import threading
 
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
@@ -53,6 +54,7 @@ def get_max_chunk_tokens() -> int:
 
 # === Vectorstore 초기화 ===(2. Chroma 인스턴스 반환)
 _vectorstore: Chroma | None = None
+_vectorstore_lock = threading.Lock()
 
 
 def get_vectorstore() -> Chroma:
@@ -62,20 +64,29 @@ def get_vectorstore() -> Chroma:
     매 호출마다 새 Chroma()를 생성하면 LangGraph가 도구를 병렬 실행할 때
     chromadb의 SharedSystemClient 내부 딕셔너리에 경쟁 상태(race condition)가
     생겨 KeyError가 발생할 수 있어 싱글턴으로 재사용한다.
+
+    싱글턴 초기화 자체도 락으로 감싼다: FastAPI는 요청마다 별도 스레드에서
+    처리하므로, 락 없이 "None이면 생성"만 하면 첫 호출이 겹칠 때(예: 여러
+    요청이 동시에 처음 들어옴) 두 스레드가 동시에 Chroma()를 만들려다가
+    위와 같은 SharedSystemClient 경쟁 상태가 그대로 재현된다(실제로 겪음:
+    'RustBindingsAPI' object has no attribute 'bindings' 에러).
     """
     global _vectorstore
     if _vectorstore is None:
-        _vectorstore = Chroma(
-            collection_name = config.COLLECTION_NAME,
-            embedding_function = embeddings, # HuggingFace 임베딩 모델 사용
-            persist_directory=str(config.CHROMA_DIR), # 디스크 자동저장
-            collection_metadata={"hnsw:space": config.DISTANCE_METRIC}, # 코사인 유사도
-        )
+        with _vectorstore_lock:
+            if _vectorstore is None:  # 락 대기 중 다른 스레드가 이미 만들었을 수 있음
+                _vectorstore = Chroma(
+                    collection_name = config.COLLECTION_NAME,
+                    embedding_function = embeddings, # HuggingFace 임베딩 모델 사용
+                    persist_directory=str(config.CHROMA_DIR), # 디스크 자동저장
+                    collection_metadata={"hnsw:space": config.DISTANCE_METRIC}, # 코사인 유사도
+                )
     return _vectorstore
 
 
 # === 레코드 매니저 (증분 인덱싱용 해시 기록) ===
 _record_manager: SQLRecordManager | None = None
+_record_manager_lock = threading.Lock()
 
 
 def get_record_manager() -> SQLRecordManager:
@@ -83,14 +94,17 @@ def get_record_manager() -> SQLRecordManager:
 
     index_documents()가 이걸로 "지난번과 내용이 같은 청크"는 재임베딩을
     건너뛰고, "이번엔 안 나온(삭제/축소된) 청크"는 벡터스토어에서 자동으로 지운다.
+    get_vectorstore()와 같은 이유로 초기화를 락으로 감싼다.
     """
     global _record_manager
     if _record_manager is None:
-        _record_manager = SQLRecordManager(
-            namespace=f"chroma/{config.COLLECTION_NAME}",
-            db_url=f"sqlite:///{config.CHROMA_DIR / 'record_manager.sqlite'}",
-        )
-        _record_manager.create_schema()
+        with _record_manager_lock:
+            if _record_manager is None:
+                _record_manager = SQLRecordManager(
+                    namespace=f"chroma/{config.COLLECTION_NAME}",
+                    db_url=f"sqlite:///{config.CHROMA_DIR / 'record_manager.sqlite'}",
+                )
+                _record_manager.create_schema()
     return _record_manager
 
 
