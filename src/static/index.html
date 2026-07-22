@@ -84,6 +84,28 @@
     margin-bottom: 16px;
     text-align: center;
   }
+  .fact-tags {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+  .fact-tag {
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .fact-tag.result {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--accent-text);
+    font-weight: 600;
+  }
   .climb-hint {
     margin: auto 0;
     text-align: center;
@@ -207,6 +229,27 @@
     background: #fef2f2;
     color: var(--error);
   }
+  .bubble ul, .bubble ol { margin: 4px 0; padding-left: 20px; }
+  .bubble li { margin: 2px 0; }
+  .bubble strong { font-weight: 700; }
+  .bubble hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 8px 0;
+  }
+  .bubble .md-h1, .bubble .md-h2 { font-size: 1.1em; font-weight: 700; margin: 6px 0 4px; }
+  .bubble .md-h3, .bubble .md-h4 { font-size: 1.03em; font-weight: 700; margin: 6px 0 4px; }
+  .bubble .md-h5, .bubble .md-h6 { font-weight: 700; margin: 6px 0 4px; }
+  .bubble code {
+    background: rgba(0, 0, 0, 0.08);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.9em;
+  }
+  @media (prefers-color-scheme: dark) {
+    .bubble code { background: rgba(255, 255, 255, 0.12); }
+  }
   .tool-tag {
     font-size: 11px;
     color: var(--text-muted);
@@ -299,6 +342,7 @@
 
   <aside class="side-panel">
     <div class="side-panel-title">🏔️ 인허가 등반 로드맵</div>
+    <div class="fact-tags" id="factTags" style="display:none;"></div>
     <div class="climb-hint" id="climbHint">
       <span class="peak">🏔️</span>
       대화를 시작하면<br>여기에 진행 상황이 표시돼요
@@ -319,6 +363,7 @@
   const newChatBtn = document.getElementById("newChatBtn");
   const climbHintEl = document.getElementById("climbHint");
   const climbPathEl = document.getElementById("climbPath");
+  const factTagsEl = document.getElementById("factTags");
 
   function getUserId() {
     let id = localStorage.getItem("permit_assistant_user_id");
@@ -336,6 +381,55 @@
   // 대화 중 set_procedure_stage로 보고된 노드를 순서대로 누적 (분기 트리라
   // "전체 경로"를 한 번에 알 수 없어서, 지금까지 실제로 지나온 노드만 기록)
   let visitedNodes = [];
+
+  // record_case_facts로 이번 대화에서 확인된 사실들을 로드맵 상단에 태그로
+  // 누적 표시(읽기 전용) - 사용자가 "내가 말한 게 이렇게 정리됐구나"를 실시간
+  // 확인하고, 빠지거나 틀린 게 있으면 대화로 스스로 정정하도록 유도하는 용도.
+  let caseFacts = {};
+  let caseTypeResult = null; // set_procedure_stage로 확정된 허가/신고/기재변경 등
+
+  // case_facts 필드 → 태그 텍스트 변환. 여기 없는 필드는 태그로 안 보임(값
+  // 하나만으로는 뜻이 안 통하는 필드는 아래에서 조합해서 별도 처리).
+  const FACT_TAG_LABELS = {
+    act_type: (v) => v,
+    ownership: (v) => v,
+    size_sqm: (v) => `연면적 ${v}㎡`,
+    floors: (v) => `${v}층`,
+    extension_size_sqm: (v) => `증축면적 ${v}㎡`,
+    land_zone: (v) => v,
+    renovation_scope: (v) => (v ? "대수선 해당" : "대수선 미해당"),
+    temporary_purpose: (v) => v,
+    temporary_duration_years: (v) => `존치 ${v}년`,
+    temporary_is_concrete: (v) => (v ? "철근콘크리트조" : "비철콘크리트조"),
+  };
+
+  function renderFactTags() {
+    const chips = [];
+    for (const [key, value] of Object.entries(caseFacts)) {
+      if (value == null || key === "_classified") continue;
+      if (key === "current_facility_group" || key === "desired_facility_group") continue;
+      const fmt = FACT_TAG_LABELS[key];
+      if (fmt) chips.push(fmt(value));
+    }
+    if (caseFacts.current_facility_group != null && caseFacts.desired_facility_group != null) {
+      chips.push(`시설군 ${caseFacts.current_facility_group}→${caseFacts.desired_facility_group}`);
+    }
+
+    factTagsEl.innerHTML = "";
+    chips.forEach((text) => {
+      const span = document.createElement("span");
+      span.className = "fact-tag";
+      span.textContent = text;
+      factTagsEl.appendChild(span);
+    });
+    if (caseTypeResult) {
+      const span = document.createElement("span");
+      span.className = "fact-tag result";
+      span.textContent = caseTypeResult;
+      factTagsEl.appendChild(span);
+    }
+    factTagsEl.style.display = chips.length || caseTypeResult ? "flex" : "none";
+  }
 
   async function loadProcedureStages() {
     try {
@@ -432,11 +526,16 @@
 
   function restoreStageIndicator() {
     const saved = localStorage.getItem("permit_assistant_visited");
-    if (!saved) return;
-    try {
-      visitedNodes = JSON.parse(saved);
+    if (saved) {
+      try { visitedNodes = JSON.parse(saved); } catch (err) { visitedNodes = []; }
       renderStagePanel();
-    } catch (err) { visitedNodes = []; }
+    }
+    const savedFacts = localStorage.getItem("permit_assistant_case_facts");
+    if (savedFacts) {
+      try { caseFacts = JSON.parse(savedFacts); } catch (err) { caseFacts = {}; }
+    }
+    caseTypeResult = localStorage.getItem("permit_assistant_case_type");
+    renderFactTags();
   }
 
   function resetStageIndicator() {
@@ -444,6 +543,61 @@
     climbPathEl.style.display = "none";
     climbPathEl.innerHTML = "";
     climbHintEl.style.display = "block";
+    caseFacts = {};
+    caseTypeResult = null;
+    renderFactTags();
+  }
+
+  // 봇 답변에 섞여오는 마크다운(**굵게**, - 목록, `코드`)을 그대로 텍스트로
+  // 찍으면 별표가 그대로 보여서 지저분해지므로, 안전하게 이스케이프한 뒤
+  // 최소한의 문법만 변환한다. 사용자 메시지는 대상이 아님(textContent 그대로).
+  function escapeHtml(str) {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function renderInline(line) {
+    return line
+      .replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>")
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+  }
+
+  function renderMarkdown(text) {
+    const lines = escapeHtml(text).split("\n");
+    const html = [];
+    let listType = null; // "ul" | "ol" | null
+
+    function closeList() {
+      if (listType) { html.push(`</${listType}>`); listType = null; }
+    }
+
+    lines.forEach(rawLine => {
+      const trimmed = rawLine.trim();
+      const headerMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
+      const hrMatch = trimmed.match(/^(-{3,}|\*{3,}|_{3,})$/);
+      const bulletMatch = trimmed.match(/^[-*]\s+(.*)$/);
+      const orderedMatch = trimmed.match(/^\d+\.\s+(.*)$/);
+
+      if (headerMatch) {
+        closeList();
+        html.push(`<div class="md-h${headerMatch[1].length}">${renderInline(headerMatch[2])}</div>`);
+      } else if (hrMatch) {
+        closeList();
+        html.push("<hr>");
+      } else if (bulletMatch) {
+        if (listType !== "ul") { closeList(); html.push("<ul>"); listType = "ul"; }
+        html.push(`<li>${renderInline(bulletMatch[1])}</li>`);
+      } else if (orderedMatch) {
+        if (listType !== "ol") { closeList(); html.push("<ol>"); listType = "ol"; }
+        html.push(`<li>${renderInline(orderedMatch[1])}</li>`);
+      } else {
+        closeList();
+        html.push(trimmed === "" ? "<br>" : `<div>${renderInline(rawLine)}</div>`);
+      }
+    });
+    closeList();
+    return html.join("");
   }
 
   function addMessage(role, text, { toolCalls = [], isError = false } = {}) {
@@ -453,7 +607,11 @@
 
     const bubble = document.createElement("div");
     bubble.className = "bubble" + (isError ? " error" : "");
-    bubble.textContent = text;
+    if (role === "bot") {
+      bubble.innerHTML = renderMarkdown(text);
+    } else {
+      bubble.textContent = text;
+    }
     wrap.appendChild(bubble);
 
     if (toolCalls && toolCalls.length > 0) {
@@ -509,11 +667,24 @@
 
       addMessage("bot", data.answer, { toolCalls: data.tool_calls });
 
-      // 한 턴에 여러 번 호출될 수 있어(트리를 여러 노드 이어서 지나간 경우)
-      // 순서대로 전부 반영
-      (data.tool_calls || [])
-        .filter(tc => tc.tool === "set_procedure_stage")
-        .forEach(tc => reportStageNode(tc.args.case_type, tc.args.node_id));
+      // 한 턴에 여러 번 호출될 수 있어(트리를 여러 노드 이어서 지나간 경우,
+      // 혹은 record_case_facts + set_procedure_stage가 같이 온 경우) 순서대로 전부 반영
+      let factsChanged = false;
+      (data.tool_calls || []).forEach(tc => {
+        if (tc.tool === "set_procedure_stage") {
+          caseTypeResult = tc.args.case_type;
+          localStorage.setItem("permit_assistant_case_type", caseTypeResult);
+          factsChanged = true;
+          reportStageNode(tc.args.case_type, tc.args.node_id);
+        } else if (tc.tool === "record_case_facts") {
+          for (const [k, v] of Object.entries(tc.args)) {
+            if (v !== null && v !== undefined) caseFacts[k] = v;
+          }
+          localStorage.setItem("permit_assistant_case_facts", JSON.stringify(caseFacts));
+          factsChanged = true;
+        }
+      });
+      if (factsChanged) renderFactTags();
     } catch (err) {
       removeTypingIndicator();
       addMessage("bot", `서버에 연결할 수 없습니다: ${err.message}`, { isError: true });
@@ -549,6 +720,8 @@
   newChatBtn.addEventListener("click", () => {
     localStorage.removeItem("permit_assistant_user_id");
     localStorage.removeItem("permit_assistant_visited");
+    localStorage.removeItem("permit_assistant_case_facts");
+    localStorage.removeItem("permit_assistant_case_type");
     userId = getUserId();
     userIdLabel.textContent = `세션: ${userId.slice(0, 8)}`;
     chatEl.innerHTML = "";

@@ -40,6 +40,10 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "gemma-4-31b")
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY")
 
+# 브이월드(VWorld) - 주소로 용도지역 자동 조회(지오코더 + 2D데이터 API).
+# 개발키는 지오코더만 즉시 열리고 2D데이터는 운영키 승인 후에 열림(2026-07-22 확인).
+VWORLD_API_KEY = os.getenv("VWORLD_API_KEY")
+
 
 # === 청킹 ===
 # 임베딩 모델 자체 한도(예: 128토큰)가 이보다 작으면 모델 한도가 우선 적용됨.
