@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from src import config
 from src.pipeline import ingest, query
 from src.retriever import count_documents
-from src.tools import PROCEDURE_TREE
+from src.agents.permit import PROCEDURE_TREE
 
 logger = logging.getLogger(__name__)
 

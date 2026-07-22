@@ -7,7 +7,7 @@
                     │  분류 결과를 답변에 자연스럽게 반영하도록)
                     └─ 그 외 → END
 
-classify는 LLM이 판단하는 게 아니라 파이썬 규칙 함수(src.tools.classify_case)를
+classify는 LLM이 판단하는 게 아니라 파이썬 규칙 함수(src.agents.permit.classify_case)를
 그래프가 강제로 실행하는 노드다 - 허가/신고/기재변경 판정처럼 법령상 객관적 기준으로
 정해지는 값을 LLM 재량에 맡기지 않기 위함(LLM이 도구 호출을 빼먹는 문제를 겪은 뒤 도입).
 """
@@ -26,7 +26,8 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 
 from src import config
-from src.tools import TOOLS, classify_case, procedure_stage_message, PROCEDURE_TREE
+from src.agents import TOOLS
+from src.agents.permit import PROCEDURE_TREE, classify_case, procedure_stage_message
 
 logger = logging.getLogger(__name__)
 

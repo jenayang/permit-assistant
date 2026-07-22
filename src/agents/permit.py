@@ -1,29 +1,21 @@
-"""에이전트가 사용할 도구 정의.
+"""Permit Agent - 허가/신고/기재변경 판정(규칙 기반) + 절차 로드맵.
 
-@tool 데코레이터로 정의된 함수는 LLM이 자동으로 호출 가능.
-docstring이 LLM에게 도구 선택 힌트 - 명확하게 작성 필수.
+설계서(4번 섹션)는 "Regulation Agent가 검색한 법령을 LLM이 보고 판단"하는
+구조를 제안하지만, 실제로는 허가/신고 여부가 법령상 객관적 기준(면적ᆞ층수ᆞ
+시설군)으로 정해지는 값이라 LLM 판단에 맡기지 않고 classify_case()가 파이썬
+규칙으로 결정론적으로 계산한다(LLM이 도구 호출을 빼먹거나 기준을 잘못
+계산하는 문제를 실제로 겪은 뒤 도입 - agent.py 참고). Regulation Agent가
+검색한 법령은 최종 설명(explanation) 문구를 만들 때만 LLM이 참고한다.
 """
 from __future__ import annotations
 
 import logging
 from typing import Literal
 
-import requests
 from langchain_core.tools import tool
-
-from src import config
-from src import parent_store
-from src.retriever import keyword_search, search_with_score
 
 logger = logging.getLogger(__name__)
 
-
-# 카테고리별 한글 이름 매핑
-CATEGORY_NAMES = {
-    "laws": "법령",
-    "ordinances": "서울시 조례",
-    "procedures": "절차 안내",
-}
 
 # 절차 결과(허가/신고/기재변경 등)별 로드맵. 예전엔 "케이스 유형(신축/용도변경/대수선)"
 # 기준으로 트리를 나누고 허가·신고 판정 자체를 사용자에게 되묻는 분기로 넣었었는데,
@@ -268,102 +260,6 @@ def generate_mermaid(tree: dict = PROCEDURE_TREE) -> str:
 
 
 @tool
-def search_regulations(query:str) -> str:
-    """건축 인허가 관련 법령/조례/절차 문서를 검색합니다.
-    
-    다음과 같은 경우에 사용하세요:
-    - 건축법, 시행령, 시행규칙 관련 조항
-    - 서울시 건축조례, 도시계획조례
-    - 건축신고, 건축허가, 용도변경 절차
-    - 근린생활시설(카페, 사무실 등) 관련 규정
-    - 주차, 정화조, 소방 등 부대시설 요구사항
-    - 필요 서류 및 처리 기간
-    
-    Args:
-        query: 검색할 키워드나 질문 (한국어)
-    
-    Returns:
-        관련 법령/조례 조항의 요약 텍스트.
-    """
-    logger.info("[도구] search_regulations(query=%r)", query)
-
-    results = search_with_score(query, k=config.TOP_K)
-
-    if not results:
-        return "관련 규정를 찾을 수 없습니다."
-
-    # 부모-자식 청킹: 검색은 작은 자식 청크로 하되, LLM에는 그 조항 전체를 보여줌.
-    # 같은 조항의 자식 청크 여러 개가 매칭되면 한 번만 포함(중복 제거).
-    seen_articles: set[tuple[str, str]] = set()
-    parts = []
-    for doc, score in results:
-        source = doc.metadata.get("source", "unknown")
-        article_id = doc.metadata.get("article_id")
-
-        if article_id is not None:
-            key = (source, article_id)
-            if key in seen_articles:
-                continue
-            seen_articles.add(key)
-
-        category = doc.metadata.get("category", "unknown")
-        chunk_idx = doc.metadata.get("chunk_index", "?")  # 두번째는 디폴트값
-        similarity = 1 - score
-        category_kr = CATEGORY_NAMES.get(category, category)
-
-        content = doc.page_content
-        if article_id is not None:
-            parent_content = parent_store.get_parent(source, article_id)
-            if parent_content is not None:
-                content = parent_content
-
-        parts.append(
-            f"[문서 {len(parts) + 1} | {category_kr}, 청크: {chunk_idx}, 유사도: {similarity:.3f}]\n"
-            f"{content}"
-        )
-
-    return "\n\n".join(parts)
-
-
-@tool
-def search_by_term(keyword: str) -> str:
-    """법률 용어의 정의/뜻을 물어보는 질문에 사용하는 키워드(정확 매칭) 검색 도구.
-
-    예: "건폐율이 뭐야", "용적률의 정의는?", "이격거리란 무엇인가요"
-    -> 이런 질문에서는 핵심 법률 용어(예: "건폐율")만 추출해서 이 도구에 전달하세요.
-
-    search_regulations(유사도 검색)는 조문이 딱딱한 문어체라 "~란 무엇인가요"
-    같은 자연어 질문과 의미 유사도가 낮게 나와 정의 조항을 놓칠 수 있습니다.
-    이 도구는 용어를 포함한 조항을 부분 문자열로 정확히 찾아냅니다.
-
-    Args:
-        keyword: 찾고자 하는 핵심 법률 용어 (예: "건폐율", "용적률", "대지면적")
-
-    Returns:
-        해당 용어가 포함된 조항들의 텍스트 (정의 조항 우선 정렬).
-    """
-    logger.info("[도구] search_by_term(keyword=%r)", keyword)
-
-    docs = keyword_search(keyword)
-
-    if not docs:
-        return f"'{keyword}'를 포함한 조항을 찾을 수 없습니다."
-
-    parts = []
-    for i, doc in enumerate(docs, 1):
-        category = doc.metadata.get("category", "unknown")
-        article_id = doc.metadata.get("article_id", "?")
-        category_kr = CATEGORY_NAMES.get(category, category)
-
-        parts.append(
-            f"[문서 {i} | {category_kr}, 조항: 제{article_id}조]\n"
-            f"{doc.page_content}"
-        )
-
-    return "\n\n".join(parts)
-
-
-@tool
 def record_case_facts(
     act_type: Literal[
         "신축", "증축", "개축", "재축", "이전", "대수선", "용도변경", "일반수선", "가설건축물"
@@ -412,122 +308,3 @@ def record_case_facts(
 record_case_facts.description += "\n\n시설군 매핑표(용도변경 시 current_facility_group/desired_facility_group에 이 번호를 쓰세요):\n" + "\n".join(
     f"{num}. {name}: {', '.join(items)}" for num, (name, items) in FACILITY_GROUPS.items()
 )
-
-
-# --- 용도지역 자동 조회 (브이월드 지오코더 + 2D데이터 API) ------------------
-# 일반 사용자는 자기 땅의 용도지역(관리ᆞ농림ᆞ자연환경보전지역 여부)을 모르는
-# 경우가 많아서, 매번 사용자에게 직접 물어보게 하는 대신 주소 기반으로 자동
-# 조회를 시도한다. 2026-07-22 기준: 지오코더는 개발키로 실제 호출해서 응답
-# 구조를 확인했지만, 2D데이터 API는 운영키 승인 전이라 INCORRECT_KEY로 막혀있어
-# 실제 응답을 못 봤다 - 아래 _vworld_query_land_zone의 레이어ID/속성 필드명은
-# 학습 시점 지식 기반 추정치이므로 운영키 승인 후 실제 응답으로 재검증 필요.
-_VWORLD_BASE = "https://api.vworld.kr/req"
-
-
-def _vworld_geocode(address: str) -> tuple[float, float] | None:
-    """주소 → (경도 x, 위도 y). 도로명/지번 둘 다 시도(사용자가 어느 형식으로
-    말할지 모름). 실패하면 None - 호출부에서 사용자에게 재질문하도록 유도.
-    """
-    for addr_type in ("road", "parcel"):
-        try:
-            resp = requests.get(
-                f"{_VWORLD_BASE}/address",
-                params={
-                    "service": "address",
-                    "request": "getcoord",
-                    "version": "2.0",
-                    "crs": "epsg:4326",
-                    "address": address,
-                    "format": "json",
-                    "type": addr_type,
-                    "key": config.VWORLD_API_KEY,
-                },
-                timeout=5,
-            )
-            response = resp.json().get("response", {})
-            if response.get("status") == "OK":
-                point = response["result"]["point"]
-                return float(point["x"]), float(point["y"])
-        except (requests.RequestException, ValueError, KeyError) as exc:
-            logger.warning("[lookup_land_zone] 지오코딩 실패(type=%s): %s", addr_type, exc)
-    return None
-
-
-def _map_land_zone_category(raw_name: str) -> str:
-    """국토계획법상 관리ᆞ농림ᆞ자연환경보전지역은 세부 명칭에 그 단어가 그대로
-    들어가므로(계획관리지역ᆞ생산관리지역ᆞ보전관리지역 등), 정확한 응답 필드
-    구조를 몰라도 부분 문자열 매칭이면 웬만해선 안전하다.
-    """
-    if "관리지역" in raw_name:
-        return "관리지역"
-    if "농림지역" in raw_name:
-        return "농림지역"
-    if "자연환경보전지역" in raw_name:
-        return "자연환경보전지역"
-    return "기타"
-
-
-def _vworld_query_land_zone(x: float, y: float) -> str | None:
-    """TODO(운영키 승인 후 검증): data=LT_C_UQ111(용도지역지구도_용도지역 추정)와
-    응답 속성 키(현재는 첫 속성값을 그냥 사용) 둘 다 미검증. 운영키로 실제 호출해
-    원본 응답(로그의 "2D데이터 API 원본 응답")을 보고 정확한 속성 키로 고칠 것.
-    """
-    try:
-        resp = requests.get(
-            f"{_VWORLD_BASE}/data",
-            params={
-                "service": "data",
-                "request": "GetFeature",
-                "data": "LT_C_UQ111",
-                "key": config.VWORLD_API_KEY,
-                "geomFilter": f"POINT({x} {y})",
-                "geometry": "false",
-                "attribute": "true",
-                "crs": "EPSG:4326",
-                "format": "json",
-            },
-            timeout=5,
-        )
-        data = resp.json()
-        logger.info("[lookup_land_zone] 2D데이터 API 원본 응답(검증용): %r", data)
-        response = data.get("response", {})
-        if response.get("status") != "OK":
-            logger.warning("[lookup_land_zone] 2D데이터 API 실패: %s", response.get("error"))
-            return None
-        features = response["result"]["featureCollection"]["features"]
-        if not features:
-            return None
-        raw_name = str(next(iter(features[0]["properties"].values())))
-        return _map_land_zone_category(raw_name)
-    except (requests.RequestException, ValueError, KeyError, IndexError) as exc:
-        logger.warning("[lookup_land_zone] 2D데이터 조회 실패: %s", exc)
-        return None
-
-
-@tool
-def lookup_land_zone(address: str) -> str:
-    """주소로 용도지역(관리ᆞ농림ᆞ자연환경보전지역 여부)을 자동 조회합니다.
-
-    - 신축/대수선 판정에 용도지역이 필요한데 사용자가 구/동 이상 수준의 주소를
-      언급했다면, "용도지역이 뭔가요?"라고 사용자에게 직접 묻지 말고 먼저 이
-      도구를 호출하세요(일반인은 자기 땅 용도지역을 모르는 경우가 많음).
-    - 조회에 성공하면 결과를 그 턴에 record_case_facts(land_zone=...)로 바로
-      기록하세요.
-    - "확인 불가" 응답이 오면(자동 조회 실패) 그때만 사용자에게 직접 물어보세요.
-    """
-    if not config.VWORLD_API_KEY:
-        return "용도지역 자동 조회가 설정되어 있지 않습니다(API 키 없음). 사용자에게 용도지역을 직접 물어보세요."
-
-    logger.info("[도구] lookup_land_zone(address=%r)", address)
-    coord = _vworld_geocode(address)
-    if coord is None:
-        return f"'{address}' 주소를 좌표로 변환하지 못했습니다. 사용자에게 더 정확한 주소를 요청하거나, 용도지역을 직접 물어보세요."
-
-    zone = _vworld_query_land_zone(*coord)
-    if zone is None:
-        return "용도지역 자동 조회에 실패했습니다(서비스 오류 또는 아직 운영키 미승인). 사용자에게 용도지역을 직접 물어보세요."
-
-    return f"'{address}'의 용도지역은 {zone}입니다. 이번 턴에 record_case_facts(land_zone='{zone}')로 기록하세요."
-
-
-TOOLS = [search_regulations, search_by_term, record_case_facts, lookup_land_zone]
