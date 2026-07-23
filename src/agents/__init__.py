@@ -13,10 +13,13 @@ from __future__ import annotations
 from src.agents.permit import (
     FACILITY_GROUPS,
     PROCEDURE_TREE,
+    PermitResult,
+    build_permit_result,
     classify_case,
     generate_mermaid,
     procedure_stage_message,
     record_case_facts,
+    record_permit_synthesis,
 )
 from src.agents.regulation import search_by_term, search_regulations
 from src.agents.site import lookup_building_ratio_limits, lookup_land_zone
@@ -27,4 +30,5 @@ TOOLS = [
     record_case_facts,
     lookup_land_zone,
     lookup_building_ratio_limits,
+    record_permit_synthesis,
 ]

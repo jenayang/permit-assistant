@@ -6,11 +6,14 @@
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 
 from langchain_core.tools import tool
 
 from src import config
 from src import parent_store
+from src.reranker import dedup_near_duplicates, rerank
 from src.retriever import keyword_search, search_with_score
 
 logger = logging.getLogger(__name__)
@@ -23,6 +26,28 @@ CATEGORY_NAMES = {
     "procedures": "절차 안내",
 }
 
+# 법령 계층(법/시행령/시행규칙/조례) 태그. data/laws, data/ordinances의 파일명이
+# 이미 "건축법(법률)(제21035호)(20260227).pdf"처럼 괄호로 계층을 포함하고
+# 있어서, 인제스천(law_chunker.py) 수정 없이 파일명 파싱만으로 뽑아낼 수 있다.
+# "법령 충돌 검사"를 자동 탐지가 아니라 이 태그 + 프롬프트 우선순위 안내로
+# 스코프를 좁힌 것(자동 충돌 탐지는 범위 밖 - agent.py SYSTEM_PROMPT 참고).
+_TIER_PATTERN = re.compile(r"\((법률|대통령령|총리령|국토교통부령|환경부고시|[가-힣]+조례)\)")
+_TIER_LABELS = {
+    "법률": "법", "대통령령": "시행령", "총리령": "시행규칙",
+    "국토교통부령": "시행규칙", "환경부고시": "고시",
+}
+
+
+def _law_tier(source: str) -> str:
+    # macOS(APFS)가 일부 파일을 유니코드 NFD(자모 분해형)로 저장해서, 같은
+    # 글자처럼 보여도 source 문자열이 바이트 단위로 달라 정규식이 안 맞는
+    # 경우가 있다(실제로 겪음) - NFC로 정규화한 뒤 매칭한다.
+    match = _TIER_PATTERN.search(unicodedata.normalize("NFC", source))
+    if not match:
+        return "기타"
+    tag = match.group(1)
+    return "조례" if tag.endswith("조례") else _TIER_LABELS.get(tag, "기타")
+
 
 @tool
 def search_regulations(query: str) -> str:
@@ -32,7 +57,7 @@ def search_regulations(query: str) -> str:
     - 건축법, 시행령, 시행규칙 관련 조항
     - 서울시 건축조례, 도시계획조례
     - 건축신고, 건축허가, 용도변경 절차
-    - 근린생활시설(카페, 사무실 등) 관련 규정
+    - 건축물 용도(근린생활시설ᆞ주거ᆞ업무ᆞ산업시설 등) 관련 규정
     - 주차, 정화조, 소방 등 부대시설 요구사항
     - 필요 서류 및 처리 기간
 
@@ -44,16 +69,22 @@ def search_regulations(query: str) -> str:
     """
     logger.info("[도구] search_regulations(query=%r)", query)
 
-    results = search_with_score(query, k=config.TOP_K)
-
+    # 1차로 넓게 후보를 뽑은 뒤(RERANK_CANDIDATE_K) CrossEncoder로 재정렬해서
+    # 상위 RERANK_TOP_K만 남기고, 준-중복(다른 조항인데 내용이 사실상 같은 경우)을
+    # 걸러낸다. 원래 벡터 유사도 점수는 재정렬 후 순서가 바뀌므로 더 안 쓴다.
+    results = search_with_score(query, k=config.RERANK_CANDIDATE_K)
     if not results:
         return "관련 규정를 찾을 수 없습니다."
+
+    candidates = [doc for doc, _ in results]
+    reranked = rerank(query, candidates, config.RERANK_TOP_K)
+    reranked = dedup_near_duplicates(reranked)
 
     # 부모-자식 청킹: 검색은 작은 자식 청크로 하되, LLM에는 그 조항 전체를 보여줌.
     # 같은 조항의 자식 청크 여러 개가 매칭되면 한 번만 포함(중복 제거).
     seen_articles: set[tuple[str, str]] = set()
     parts = []
-    for doc, score in results:
+    for doc in reranked:
         source = doc.metadata.get("source", "unknown")
         article_id = doc.metadata.get("article_id")
 
@@ -65,8 +96,8 @@ def search_regulations(query: str) -> str:
 
         category = doc.metadata.get("category", "unknown")
         chunk_idx = doc.metadata.get("chunk_index", "?")  # 두번째는 디폴트값
-        similarity = 1 - score
         category_kr = CATEGORY_NAMES.get(category, category)
+        tier = _law_tier(source)
 
         content = doc.page_content
         if article_id is not None:
@@ -75,7 +106,7 @@ def search_regulations(query: str) -> str:
                 content = parent_content
 
         parts.append(
-            f"[문서 {len(parts) + 1} | {category_kr}, 청크: {chunk_idx}, 유사도: {similarity:.3f}]\n"
+            f"[문서 {len(parts) + 1} | {category_kr} · {tier}, 청크: {chunk_idx}]\n"
             f"{content}"
         )
 
@@ -111,9 +142,10 @@ def search_by_term(keyword: str) -> str:
         category = doc.metadata.get("category", "unknown")
         article_id = doc.metadata.get("article_id", "?")
         category_kr = CATEGORY_NAMES.get(category, category)
+        tier = _law_tier(doc.metadata.get("source", ""))
 
         parts.append(
-            f"[문서 {i} | {category_kr}, 조항: 제{article_id}조]\n"
+            f"[문서 {i} | {category_kr} · {tier}, 조항: 제{article_id}조]\n"
             f"{doc.page_content}"
         )
 

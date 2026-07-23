@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from src import config
 from src.pipeline import ingest, query
 from src.retriever import count_documents
-from src.agents.permit import PROCEDURE_TREE
+from src.agents.permit import PROCEDURE_TREE, PermitResult
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,7 @@ class QueryResponse(BaseModel):
     answer: str
     user_id: str
     tool_calls: list[ToolCallInfo]
+    permit_result: Optional[PermitResult] = None
 
 
 class IngestResponse(BaseModel):
@@ -112,11 +113,12 @@ def query_endpoint(req: QueryRequest) -> QueryResponse:
     """
     try:
         result = query(req.question, user_id=req.user_id) # {"answer": "...", "sources": [...]}
-        return QueryResponse(                
+        return QueryResponse(
             question=req.question,
             answer=result["answer"],
             user_id=result["user_id"],
-            tool_calls=result["tool_calls"],  
+            tool_calls=result["tool_calls"],
+            permit_result=result["permit_result"],
         )
         
     except ValueError as e: # 400 클라이언트 잘못(빈 질문 등)

@@ -60,7 +60,13 @@ GENERAL_CHUNK_OVERLAP_TOKENS = 50
 
 
 # === 검색 ===
-TOP_K = 3
+TOP_K = 3  # search_by_term(키워드 검색)에서 계속 사용
+
+# search_regulations(벡터 검색)용: 1차로 넓게 후보를 뽑은 뒤(RERANK_CANDIDATE_K)
+# CrossEncoder로 재정렬해서 상위 RERANK_TOP_K만 LLM에 넘긴다. 리랭킹이 의미
+# 있으려면 후보 폭이 최종 개수보다 충분히 넉넉해야 한다.
+RERANK_CANDIDATE_K = 15
+RERANK_TOP_K = 5
 
 
 # === ChromaDB ===

@@ -15,6 +15,8 @@ from typing import Literal
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from src.agents.legal_data import get_thresholds
+
 logger = logging.getLogger(__name__)
 
 
@@ -121,8 +123,12 @@ PROCEDURE_TREE: dict[str, dict] = {
 # 사용자 상황(case_facts)을 받아 위 PROCEDURE_TREE의 어느 결과(허가/신고/기재변경 등)에
 # 해당하는지 "결정론적으로" 계산한다. LLM 판단에 안 맡기는 이유: 이 값들은 법령에 명시된
 # 객관적 기준(면적/층수/시설군 등)이라 애매함이 없고, LLM이 매번 정확히 계산해줄 거라고
-# 신뢰할 수 없다(오늘 실제로 도구 호출을 빼먹는 문제를 겪음). 여기 쓰인 수치는 모두
-# 건축법/시행령 원문 대조 완료(2026-07-22 세션).
+# 신뢰할 수 없다(오늘 실제로 도구 호출을 빼먹는 문제를 겪음). 판단 흐름(if/elif 분기
+# 구조)은 여기 파이썬 코드가 갖고 있지만, 그 흐름이 참조하는 숫자ᆞ집합 값은
+# permit_thresholds.yaml(get_thresholds())에서 가져온다 - 법령 개정으로 숫자만
+# 바뀌는 경우(예: 85㎡→90㎡) 이 파일을 안 건드리고 YAML 값만 고치면 되도록 분리한
+# 것. 다만 아예 새로운 조건/분기가 생기는 개정이면 이 if/elif 구조 자체를 고쳐야
+# 한다 - YAML 분리가 그런 구조 변경까지 없애주지는 않는다. 원문 대조 완료(2026-07-22 세션).
 #
 # 각 act_type별로 classify_case가 요구하는 case_facts 필드. 하나라도 비어있으면(None)
 # 아직 분류 안 함(None 반환) — 그래프가 이걸로 "정보 충분?" 판단.
@@ -173,13 +179,17 @@ def classify_case(facts: dict) -> str | None:
     if act_type is None or _missing_fields(act_type, facts):
         return None
 
+    thresholds = get_thresholds()
+
     if act_type in ("신축", "증축", "개축", "재축"):
-        # 건축법 제14조: 증축ᆞ개축ᆞ재축은 85㎡ 이내면 신고
-        if act_type in ("증축", "개축", "재축") and facts["extension_size_sqm"] <= 85:
+        # 건축법 제14조: 증축ᆞ개축ᆞ재축은 상한 이내면 신고
+        ext_limit = thresholds["증축개축재축_신고_상한_바닥면적_sqm"]
+        if act_type in ("증축", "개축", "재축") and facts["extension_size_sqm"] <= ext_limit:
             return "건축신고"
-        # 신축은 관리ᆞ농림ᆞ자연환경보전지역에서만 200㎡ 미만+3층 미만이면 신고
-        if act_type == "신축" and facts["land_zone"] in ("관리지역", "농림지역", "자연환경보전지역"):
-            if facts["size_sqm"] < 200 and facts["floors"] < 3:
+        # 신축은 관리ᆞ농림ᆞ자연환경보전지역에서만 연면적ᆞ층수가 둘 다 기준 미만이면 신고
+        new_build = thresholds["신축_신고"]
+        if act_type == "신축" and facts["land_zone"] in new_build["대상_용도지역"]:
+            if facts["size_sqm"] < new_build["연면적_미만_sqm"] and facts["floors"] < new_build["층수_미만"]:
                 return "건축신고"
         return "건축허가"
 
@@ -189,7 +199,8 @@ def classify_case(facts: dict) -> str | None:
     if act_type == "대수선":
         if not facts["renovation_scope"]:
             return "인허가불필요"  # 시행령 제3조의2 8개 기준 어디에도 안 걸림
-        if facts["size_sqm"] < 200 and facts["floors"] < 3:
+        renov = thresholds["대수선_신고"]
+        if facts["size_sqm"] < renov["연면적_미만_sqm"] and facts["floors"] < renov["층수_미만"]:
             return "건축신고"
         return "건축허가"
 
@@ -203,12 +214,12 @@ def classify_case(facts: dict) -> str | None:
         return "인허가불필요"
 
     if act_type == "가설건축물":
-        # 시행령 제15조: 존치 3년 이내 + 비철콘조가 신고 요건. 재해복구ᆞ전시박람회ᆞ
-        # 공사용ᆞ비닐하우스ᆞ컨테이너 등은 그 자체로 신고 대상.
-        notice_purposes = {"재해복구", "전시박람회", "공사용", "견본주택", "비닐하우스", "컨테이너"}
-        if facts["temporary_purpose"] in notice_purposes:
+        # 시행령 제15조: 존치기간 이내 + 비철콘조가 신고 요건. notice_purposes에
+        # 속하는 목적은 그 자체로(기간ᆞ구조 무관) 신고 대상.
+        temp = thresholds["가설건축물"]
+        if facts["temporary_purpose"] in temp["신고_목적_예외"]:
             return "가설건축물신고"
-        if facts["temporary_duration_years"] <= 3 and not facts["temporary_is_concrete"]:
+        if facts["temporary_duration_years"] <= temp["신고_존치기간_이하_년"] and not facts["temporary_is_concrete"]:
             return "가설건축물신고"
         return "가설건축물허가"
 
@@ -363,3 +374,22 @@ def record_case_facts(
 record_case_facts.description += "\n\n시설군 매핑표(용도변경 시 current_facility_group/desired_facility_group에 이 번호를 쓰세요):\n" + "\n".join(
     f"{num}. {name}: {', '.join(items)}" for num, (name, items) in FACILITY_GROUPS.items()
 )
+
+
+@tool
+def record_permit_synthesis(
+    required_documents: list[str] | None = None,
+    related_agencies: list[str] | None = None,
+) -> str:
+    """판정(permit_type)이 이미 확정된 뒤, 검색된 법령을 근거로 필요한 제출서류ᆞ
+    협의기관을 파악하면 기록하세요.
+
+    - record_case_facts와 마찬가지로 알게 되는 대로 부분적으로 호출해도
+      이전에 기록한 값 위에 누적됩니다.
+    - 아직 검색을 안 해서 모르면, 먼저 search_regulations/search_by_term으로
+      근거를 확보한 뒤에 호출하세요 - 추측해서 채우지 마세요.
+    """
+    logger.info("[도구] record_permit_synthesis(%r)", {
+        k: v for k, v in locals().items() if v is not None
+    })
+    return "기록됨."

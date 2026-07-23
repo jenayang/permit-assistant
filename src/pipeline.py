@@ -20,7 +20,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.messages import ToolMessage
 
 from src import config
-from src.agent import graph
+from src.agent import extract_text, graph
 from src.ingestion import ingest_all
 from src.retriever import index_documents, count_documents, reset_collection
 from src import parent_store
@@ -89,28 +89,23 @@ def query(question: str, user_id: Optional[str] = None) -> dict:
         config = config_dict
     )
 
-    # 마지막 AI 메시지 추출
-    final_message = result["messages"][-1]
-    content = final_message.content
+    # 마지막 AI 메시지 추출 (content가 리스트인 최신 Gemini 응답 형식도
+    # extract_text가 처리 - finalize_node의 explanation 추출과 동일 로직 공유)
+    answer = extract_text(result["messages"][-1].content)
 
-    # content가 리스트인 경우 (최신 Gemini 응답 형식) 처리
-    if isinstance(content, list):
-        # 텍스트 블록만 추출해서 합침
-        text_parts = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                text_parts.append(block.get("text", ""))
-            elif isinstance(block, str):
-                text_parts.append(block)
-        answer = "\n".join(text_parts)
+    # result["messages"]는 체크포인터가 대화 시작부터 지금까지 누적한 전체
+    # 이력이라, 그대로 훑으면 이전 턴에 불렀던 도구까지 이번 턴 결과에 계속
+    # 같이 잡힌다(실제로 겪음 - 대화가 길어질수록 도구 호출 목록이 끝없이
+    # 누적되어 보임). 이번 턴은 마지막 HumanMessage(방금 질문) 이후부터라서,
+    # 그 지점부터만 잘라서 본다.
+    last_human_idx = max(
+        i for i, msg in enumerate(result["messages"]) if isinstance(msg, HumanMessage)
+    )
+    current_turn_messages = result["messages"][last_human_idx:]
 
-    else:
-        answer = content
-
-
-    # 도구 호출 이력 추출
+    # 도구 호출 이력 추출 (이번 턴만)
     tool_calls = []
-    for msg in result["messages"]: # Human, AI, Tool message 일수 있음.
+    for msg in current_turn_messages:
         if isinstance(msg, AIMessage) and msg.tool_calls:  # msg.tool_calls: 실제 내용이 들어있는지 확인.(AIMessage는 항상 있음 [])
             for tc in msg.tool_calls:
                 tool_calls.append({
@@ -118,9 +113,9 @@ def query(question: str, user_id: Optional[str] = None) -> dict:
                     "args": tc["args"],
                 })
 
-    # 검색된 컨텍스트 추출 (RAGAS 등 평가에 사용 - 실제로 LLM에 들어간 근거 텍스트)
+    # 검색된 컨텍스트 추출 (이번 턴만 - RAGAS 등 평가에 사용, 실제로 LLM에 들어간 근거 텍스트)
     contexts = []
-    for msg in result["messages"]:
+    for msg in current_turn_messages:
         if isinstance(msg, ToolMessage):
             contexts.extend(part for part in msg.content.split("\n\n") if part.strip())
 
@@ -132,6 +127,7 @@ def query(question: str, user_id: Optional[str] = None) -> dict:
         "user_id": user_id,
         "tool_calls": tool_calls,
         "contexts": contexts,
+        "permit_result": result.get("permit_result"),
     }
 
 

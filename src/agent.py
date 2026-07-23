@@ -5,15 +5,21 @@
                     ├─ 실제 도구 호출 있음 → tools → agent (순환)
                     ├─ case_facts 다 모였고 아직 미분류 → classify → agent (한 번 더,
                     │  분류 결과를 답변에 자연스럽게 반영하도록)
+                    ├─ 분류 끝났고 아직 미종합 → finalize → END (LLM 재호출 없음)
                     └─ 그 외 → END
 
-classify는 LLM이 판단하는 게 아니라 파이썬 규칙 함수(src.agents.permit.classify_case)를
-그래프가 강제로 실행하는 노드다 - 허가/신고/기재변경 판정처럼 법령상 객관적 기준으로
-정해지는 값을 LLM 재량에 맡기지 않기 위함(LLM이 도구 호출을 빼먹는 문제를 겪은 뒤 도입).
+classify와 finalize는 둘 다 LLM이 아니라 그래프가 강제로 실행하는 결정론적 노드다:
+- classify: 파이썬 규칙 함수(src.agents.permit.classify_case)로 허가/신고/기재변경을
+  판정 - 법령상 객관적 기준으로 정해지는 값을 LLM 재량에 맡기지 않기 위함(LLM이
+  도구 호출을 빼먹거나 기준을 잘못 계산하는 문제를 실제로 겪은 뒤 도입).
+- finalize: classify가 확정한 permit_type/procedures + LLM이 record_permit_synthesis로
+  채운 required_documents/related_agencies + 최종 답변 텍스트를 모아 PermitResult로
+  조립. 판정(rule)과 종합(LLM)의 경계를 그래프 단계로 명확히 나눈다.
 """
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from typing import Annotated
 
@@ -27,7 +33,13 @@ from langgraph.prebuilt import ToolNode
 
 from src import config
 from src.agents import TOOLS
-from src.agents.permit import PROCEDURE_TREE, classify_case, procedure_stage_message
+from src.agents.permit import (
+    PROCEDURE_TREE,
+    PermitResult,
+    build_permit_result,
+    classify_case,
+    procedure_stage_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,110 +53,76 @@ def merge_facts(existing: dict, update: dict) -> dict:
 
 class AgentState(MessagesState):
     case_facts: Annotated[dict, merge_facts]
+    # record_permit_synthesis로 기록된 필수서류ᆞ협의기관. case_facts와 merge
+    # 로직이 동일해서(None 아닌 키만 누적) merge_facts를 그대로 재사용한다.
+    permit_synthesis: Annotated[dict, merge_facts]
+    # finalize_node가 한 번만 채우는 최종 구조화 결과. 리듀서 없이 기본
+    # 덮어쓰기로 충분(여러 노드가 동시에 쓰지 않음).
+    permit_result: PermitResult | None
 
 
 # === 시스템 프롬프트 ===
 SYSTEM_PROMPT = """당신은 서울시 건축 인허가 전문 어시스턴트입니다.
+건축ᆞ용도변경 등 인허가 절차를 건축법ᆞ시행령ᆞ시행규칙ᆞ서울시 조례
+기준으로 정확히 안내합니다.
 
-역할:
-- 소규모 상업시설(카페, 사무실, 소매점 등)의 인허가 절차 안내
-- 건축법, 시행령, 시행규칙 및 서울시 조례 기반 정확한 정보 제공
-- 사용자 상황에 맞는 사전 진단 및 주의사항 제시
+## 1. 정보 수집
+질문에서 지역ᆞ시설 유형ᆞ행위 유형(신축ᆞ증축ᆞ개축ᆞ재축ᆞ이전ᆞ대수선ᆞ
+용도변경ᆞ일반수선ᆞ가설건축물)ᆞ판정에 필요한 사실(규모ᆞ층수ᆞ용도지역ᆞ대수선
+해당 여부ᆞ시설군 등, 상황에 맞는 것만)ᆞ소유/임차 여부를 파악해 그 턴에
+record_case_facts로 기록하세요(알게 되는 대로 부분 호출해도 누적됨 - 사용자가
+이미 말한 수치를 빠뜨리면 판정이 안 됩니다).
 
-작업 방식:
-1. 사용자 질문에서 다음 정보를 파악하세요:
-   - 지역 (구/동)
-   - 시설 유형 (카페, 사무실 등)
-   - 행위 유형: 신축ᆞ증축ᆞ개축ᆞ재축ᆞ이전ᆞ대수선ᆞ용도변경ᆞ일반수선ᆞ가설건축물 중 어디인지
-   - 위 행위 유형 판정에 필요한 사실(규모, 층수, 용도지역, 대수선 해당 여부,
-     기존/희망 시설군, 가설건축물 목적ᆞ존치기간 등 - 상황에 맞는 것만)
-   - 소유자인지 임차인인지
+**허가/신고/기재변경 여부는 절대 사용자에게 묻지도, 당신이 계산하지도 마세요.**
+법령상 객관적 기준(면적ᆞ층수ᆞ시설군)으로 시스템이 자동 판정하며, 결과는
+다음 턴에 도구 응답으로 옵니다 - 그걸 참고해서 답변에 반영하세요. 정보가
+부족하면 결론을 암시하지 말고 부족한 사실만 되물으세요. 특히 **85㎡ 기준은
+증축ᆞ개축ᆞ재축 전용이며 신축에는 적용되지 않습니다** - 신축의 신고 대상
+여부는 용도지역(관리ᆞ농림ᆞ자연환경보전지역)ᆞ연면적 200㎡ 미만ᆞ층수 3층
+미만을 모두 봐야 합니다.
 
-   **허가 대상인지 신고 대상인지, 용도변경이 허가/신고/기재변경 중 무엇인지는
-   법령상 객관적 기준(면적ᆞ층수ᆞ시설군)으로 정해지는 값이라 사용자에게 직접
-   묻지 마세요** — 대신 위 사실들이 파악되는 대로 record_case_facts를
-   호출해서 기록하면, 정보가 충분히 모이는 순간 시스템이 자동으로 규칙에
-   따라 판정합니다(검색 도구와 같은 턴에 함께 호출 가능). 판정 결과는 다음
-   턴에 도구 응답으로 전달되니, 그걸 참고해서 답변에 자연스럽게 반영하세요.
+예외 - 용도지역: 일반인은 대부분 모르니 직접 묻지 말고, 주소를 알면 먼저
+lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts로
+기록하세요. 자동 조회가 실패했을 때만 사용자에게 직접 물어보세요.
 
-   **판정 결과가 아직 도구 응답으로 오지 않았다면, 허가/신고/기재변경 여부를
-   당신이 직접 계산하거나 단정하지 마세요.** 특히 다음을 절대 하지 마세요:
-   - "연면적 OO㎡ 초과라 허가 대상입니다"처럼 스스로 기준을 계산해서 결론 내리기
-   - **85㎡ 기준은 증축ᆞ개축ᆞ재축에만 적용됩니다. 신축에는 적용되지 않으니
-     절대 혼동하지 마세요** — 신축의 신고 대상 여부는 용도지역(관리ᆞ농림ᆞ
-     자연환경보전지역)ᆞ연면적 200㎡ 미만ᆞ층수 3층 미만을 모두 봐야 하며,
-     이 세 값 중 하나라도 모르면 판정 불가능한 것이지 85㎡와는 무관합니다.
-   - search_regulations/search_by_term으로 실제 검색하지 않은 조항을 지어내서
-     [출처: ...] 형태로 인용하기
-   - 사용자가 이미 말한 수치(예: "2층", "150㎡", "관리지역")를 record_case_facts에
-     빠뜨리고 넘어가기 — 질문에 등장한 규모ᆞ층수ᆞ용도지역 등은 반드시 그 턴에
-     전부 추출해서 기록하세요. 하나라도 놓치면 시스템이 판정을 못 합니다.
-   판정에 필요한 정보가 하나라도 비어 있으면, 결론을 내지 말고 부족한 사실을
-   채우세요. 단, **용도지역은 예외** - 일반인은 자기 땅 용도지역을 모르는 경우가
-   많으니 사용자에게 바로 묻지 말고, 구/동 이상 수준의 주소를 이미 알고 있다면
-   먼저 lookup_land_zone을 호출해서 자동으로 확인하세요(성공하면 그 결과를 같은
-   턴에 record_case_facts로 기록). 자동 조회가 실패했다는 응답이 왔을 때만
-   사용자에게 직접 물어보세요. 용도지역 외의 다른 부족한 사실(층수ᆞ면적 등)은
-   원래대로 사용자에게 짧게 되물으세요. "아마 허가 대상일 것 같다"처럼
-   애매하게라도 결론을 암시하지 마세요 — 모르면 모른다고 하고 되묻는 것이
-   정답입니다.
+## 2. 도구 선택
+- 법률 용어 정의("OO이 뭐야") → search_by_term (핵심 용어만 추출)
+- 절차ᆞ조건ᆞ서류 등 일반 질문 → search_regulations
+- 용도지역을 모르는데 주소는 아는 경우 → lookup_land_zone
+- 건폐율ㆍ용적률 질문 → lookup_building_ratio_limits (세부 용도지역을
+  모르면 계산하지 말고 직접 질문)
+- 여러 관점에서 검색이 필요하면 도구를 반복 사용하세요. 검색 결과에 법령
+  계층(법/시행령/시행규칙/조례)이 섞여 다르게 말하면 법 > 시행령 > 시행규칙
+  우선 원칙을 따르고, 조례는 상충이 아니라 지역 추가 규정으로 안내하세요.
 
-2. 도구 선택 기준:
-   - "OO이 뭐야", "OO의 정의는?", "OO란 무엇인가요" 처럼 법률 용어의 정의를
-     묻는 질문 → search_by_term에 핵심 용어만 추출해서 전달 (예: "건폐율")
-   - 상황 설명, 절차, 조건, 서류 등 일반적인 질문 → search_regulations 사용
-   - 용도지역을 모르는데 주소는 알고 있는 경우 → lookup_land_zone 사용(1번 참고)
-   - 건폐율ㆍ용적률(대지면적 대비 얼마나 크게/높게 지을 수 있는지)을 물으면
-     → lookup_building_ratio_limits 사용. 세부 용도지역(예: "제2종일반주거지역")을
-     모르면 스스로 계산하지 말고 사용자에게 직접 물어보세요.
+## 3. 답변 작성
+**(A) 판정 정보가 아직 부족함**: 부족한 사실을 되묻는 1~2문장으로 끝내세요.
+`[1단계]` 같은 헤더나 절차ᆞ서류 설명은 이번 턴에 꺼내지 마세요.
 
-3. 여러 관점(건축법, 조례, 절차)에서 검색이 필요하면 두 도구를 반복해서 사용하세요.
+**(B) 판정 완료(도구 응답으로 옴) 또는 판정이 필요 없는 질문**(정의 질문 등):
+아래 4단계로 나눠 순서대로 안내하세요. 각 단계는 핵심만 간결하게 - 이전
+단계/턴에서 말한 내용을 다시 설명하지 마세요. 각 단계 끝에 다음 단계를
+계속 안내할지 짧게 묻고, 사용자가 동의하거나 관련 질문을 이어가면 다음
+단계로 넘어가세요. "한 번에 다 알려줘" 요청 시에만 4단계를 모두 한 번에.
+판정 직후 필수서류ᆞ협의기관을 아직 검색 안 했다면, 마무리 전에
+search_regulations로 근거를 확보하고 record_permit_synthesis로
+기록하세요(required_documents, related_agencies).
 
-4. 답변 분기 - 아래 두 경우를 먼저 구분하고, 섞지 마세요:
+- [1단계: 상황 분석+필요 절차] 한 줄 요약, 단계명+관할기관만 나열(설명 1줄 이내)
+- [2단계: 필수 서류] 리스트만(설명 없이)
+- [3단계: 사전 진단] 주차대수ᆞ정화조 용량ᆞ소방시설ᆞ장애인 편의시설ᆞ위생
+  요구사항 중 실제 해당하는 것만 1~2줄+근거와 함께
+- [4단계: 예상 소요 기간] 한 줄로
 
-   **(A) 판정에 필요한 사실이 아직 부족한 경우** (1번 참고): 부족한 사실을
-   확인하는 질문 1~2문장으로만 끝내세요. `[1단계]` 같은 헤더나 절차ᆞ서류
-   설명은 이번 턴에 절대 꺼내지 마세요 - 정보 수집과 4단계 안내는 서로 다른
-   턴에서 일어나는 별개의 일입니다.
+## 4. 정확성 원칙
+- 모든 답변에 [출처: 건축법 제OO조] / [출처: 서울시 건축조례 제OO조] 형식으로
+  근거를 명시하세요. search_regulations/search_by_term으로 실제 검색하지
+  않은 조항은 절대 지어내지 마세요.
+- 확인되지 않는 정보는 "관련 규정에서 확인할 수 없습니다"라고 답하세요.
 
-   **(B) 판정이 끝났거나(도구 응답으로 옴) 애초에 판정이 필요 없는 질문**
-   (정의 질문 등): 아래 4단계로 나눠서 순서대로 안내하세요. 한 번에 다 주지
-   말고, 각 단계 끝에는 다음 단계를 계속 안내해도 될지 짧게 물어보세요.
-   사용자가 다음 턴에서 동의하거나 관련 질문을 이어가면 그 단계로 넘어가고,
-   "한 번에 다 알려줘"처럼 요청하면 예외적으로 4단계를 모두 한 번에
-   안내하세요. **각 단계는 핵심만 간결하게 - 이미 앞 단계나 이전 턴에서 말한
-   내용(상황 요약, 판정 결과 등)을 다음 단계에서 다시 설명하지 마세요.**
-
-   [1단계: 상황 분석 + 필요 절차]
-   - 사용자 상황 한 줄 요약, 해당하는 인허가 유형
-   - 절차는 단계 이름과 관할 기관만 나열(각 단계 설명은 1줄 이내)
-   - 마무리: "필수 서류도 안내해드릴까요?"처럼 다음 단계를 짧게 제안
-
-   [2단계: 필수 서류]
-   - 서류 리스트만(설명 없이)
-   - 마무리: "사전 진단(주차·정화조·소방 등)도 확인해드릴까요?"
-
-   [3단계: 사전 진단 - 주의사항]
-   - 다음 5가지 항목 중 실제 해당하는 것만, 항목당 1~2줄로 근거와 함께 안내:
-     1. 주차대수 (부설주차장 설치 기준)
-     2. 정화조 용량 (좌석 수/인원 기준)
-     3. 소방시설 (면적별 소방시설 완비증명/신고 여부)
-     4. 장애인 편의시설 (설치 대상 여부 및 기준)
-     5. 위생 요구사항 (영업 신고 등 위생 관련 절차)
-   - 마무리: "예상 소요 기간도 안내해드릴까요?"
-
-   [4단계: 예상 소요 기간]
-   - 대략적인 기간만 한 줄로
-
-5. 답변 시 반드시 근거 조항을 명시하세요:
-   - 형식: [출처: 건축법 제OO조] 또는 [출처: 서울시 건축조례 제OO조]
-
-6. 명확하지 않은 정보는 추측하지 말고 "관련 규정에서 확인할 수 없습니다"라고 답하세요.
-
-주의사항:
-- 최종 판단은 관할 구청 및 건축사 상담 권장 안내
-- 최신 개정 여부는 국가법령정보센터(law.go.kr) 확인 권장
-- 개별 사안의 세부 판단은 전문가 상담 필요
+주의사항: 최종 판단은 관할 구청ᆞ건축사 상담을 권장하고, 최신 개정 여부는
+국가법령정보센터(law.go.kr) 확인을 권장하세요. 개별 사안의 세부 판단은
+전문가 상담이 필요합니다.
 """
 
 # === LLM + 도구 바인딩 ===
@@ -214,19 +192,25 @@ def agent_node(state: AgentState) -> dict:
 
 
 def _agent_result(response: AIMessage) -> dict:
-    """LLM 응답에서 record_case_facts 호출을 찾아 case_facts 갱신분으로 뽑아낸다.
+    """LLM 응답에서 record_case_facts/record_permit_synthesis 호출을 찾아
+    각각 case_facts/permit_synthesis 갱신분으로 뽑아낸다.
 
-    record_case_facts 자체는 여전히 ToolNode가 정상 실행해서(확인 문자열만
-    반환) 도구 호출-응답 짝은 그대로 맞춰지고, 여기서는 그 인자를 그래프
-    상태(case_facts)에도 반영하는 부수 작업만 한다.
+    두 도구 자체는 여전히 ToolNode가 정상 실행해서(확인 문자열만 반환) 도구
+    호출-응답 짝은 그대로 맞춰지고, 여기서는 그 인자를 그래프 상태에도
+    반영하는 부수 작업만 한다.
     """
     facts_update: dict = {}
+    synthesis_update: dict = {}
     for tc in getattr(response, "tool_calls", None) or []:
         if tc["name"] == "record_case_facts":
             facts_update.update(tc["args"])
+        elif tc["name"] == "record_permit_synthesis":
+            synthesis_update.update(tc["args"])
     result: dict = {"messages": [response]}
     if facts_update:
         result["case_facts"] = facts_update
+    if synthesis_update:
+        result["permit_synthesis"] = synthesis_update
     return result
 
 
@@ -265,15 +249,80 @@ def classify_node(state: AgentState) -> dict:
     }
 
 
+_CITATION_PATTERN = re.compile(r"\[출처:\s*([^\]]+)\]")
+
+
+def extract_text(content) -> str:
+    """AIMessage.content에서 순수 텍스트만 뽑는다. 최신 Gemini는 content가
+    단순 문자열이 아니라 [{"type": "text", "text": "..."}] 같은 블록 리스트로
+    올 수 있어서(pipeline.py의 answer 추출과 동일한 처리 필요) 여기 한 곳에만
+    두고 pipeline.py도 이 함수를 가져다 쓰게 해서 두 곳이 서로 다르게
+    처리하다 어긋나는 걸 막는다(실제로 한 번 어긋나서 겪음).
+    """
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(parts)
+    return content or ""
+
+
+def finalize_node(state: AgentState) -> dict:
+    """분류가 끝난 뒤 딱 한 번, PermitResult를 조립한다(LLM 재호출 없는 순수
+    결정론적 노드). permit_type/procedures는 build_permit_result()가 규칙
+    엔진으로 그대로 채우고, required_documents/related_laws/explanation은
+    LLM이 record_permit_synthesis로 기록한 값 + 방금 낸 최종 답변에서 뽑는다.
+    """
+    facts = state.get("case_facts", {})
+    result = build_permit_result(facts)
+    if result is None:
+        return {"case_facts": {"_finalized": True}}
+
+    synthesis = state.get("permit_synthesis", {})
+    last_content = extract_text(state["messages"][-1].content)
+
+    result.required_documents = synthesis.get("required_documents", [])
+    result.related_laws = sorted(set(_CITATION_PATTERN.findall(last_content)))
+    result.explanation = last_content
+
+    logger.info("[finalize] permit_type=%s, required_documents=%d, related_laws=%d",
+                result.permit_type, len(result.required_documents), len(result.related_laws))
+    return {"permit_result": result, "case_facts": {"_finalized": True}}
+
+
+def route_after_tools(state: AgentState) -> str:
+    """tools 실행 직후: case_facts가 방금 완성됐으면(record_case_facts로 채워짐)
+    agent로 돌아가기 전에 classify부터 강제한다.
+
+    예전엔 이 체크를 route_after_agent(agent 응답 이후)에서만 했는데, 그러면
+    "case_facts는 이미 다 모였지만 LLM이 그 사실을 모른 채 도구 호출 없이
+    먼저 답변을 시도 -> 그래프가 그 답변을 무시하고 classify로 강제 전환 ->
+    다음 턴 LLM이 '이미 답했나?' 헷갈려하며 부실한 후속 답변을 내는" 문제가
+    실제로 발생했다. tools 직후로 당기면 LLM이 답변을 시도하기 전에 분류가
+    먼저 끝나서 이 문제가 구조적으로 사라진다.
+    """
+    facts = state.get("case_facts", {})
+    if not facts.get("_classified") and classify_case(facts) is not None:
+        return "classify"
+    return "agent"
+
+
 def route_after_agent(state: AgentState) -> str:
-    """agent 다음 어디로 갈지: 실제 도구 호출 > (정보 다 모였고 미분류면) 분류 > 종료."""
+    """agent 다음 어디로 갈지: 실제 도구 호출 > (분류 끝났고 아직 미종합이면) 종합 > 종료.
+
+    분류(classify)는 이제 route_after_tools에서 처리되므로, agent가 응답하는
+    시점엔 이미 분류가 끝나 있는 게 정상이라 여기선 다시 체크하지 않는다.
+    """
     last = state["messages"][-1]
     if isinstance(last, AIMessage) and last.tool_calls:
         return "tools"
 
     facts = state.get("case_facts", {})
-    if not facts.get("_classified") and classify_case(facts) is not None:
-        return "classify"
+    if facts.get("_classified") and not facts.get("_finalized"):
+        return "finalize"
 
     return END
 
@@ -294,6 +343,7 @@ def build_graph():
     builder.add_node("agent", agent_node)
     builder.add_node("tools", tool_node)
     builder.add_node("classify", classify_node)
+    builder.add_node("finalize", finalize_node)
 
     builder.add_edge(START, "agent")
     builder.add_conditional_edges(
@@ -301,12 +351,20 @@ def build_graph():
         route_after_agent,
         {
             "tools": "tools",
-            "classify": "classify",
+            "finalize": "finalize",
             END: END,
         }
     )
-    builder.add_edge("tools", "agent")      # 순환엣지
+    builder.add_conditional_edges(
+        "tools",
+        route_after_tools,
+        {
+            "classify": "classify",  # case_facts가 방금 완성됨 - agent가 답하기 전에 먼저 분류
+            "agent": "agent",        # 순환엣지 (기존과 동일)
+        }
+    )
     builder.add_edge("classify", "agent")   # 분류 결과를 LLM이 답변에 반영하도록 한 번 더
+    builder.add_edge("finalize", END)       # LLM 재호출 없이 그대로 종료
 
     # 체크포인터로 대화 이력 관리
     checkpointer = InMemorySaver()  # short-term memory
