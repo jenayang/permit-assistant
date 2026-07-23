@@ -34,6 +34,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "requests>=2.31.0",  # 브이월드(VWorld) 용도지역 조회 API 호출용
     "pyyaml>=6.0",  # 법정 임계값(permit_thresholds.yaml) 로딩용
+    "PublicDataReader>=1.1.0",  # 건축HUB(건축물대장) API 엔드포인트/컬럼 매핑
     "langchain-cerebras>=0.8.2",
     "langchain-classic>=1.0.0",  # SQLRecordManager (증분 인덱싱용, langchain v1에서 여기로 이동)
     "pyhwp>=0.1b15",

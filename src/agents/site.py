@@ -9,11 +9,17 @@ LLM 판단이 아니라 API 조회/정적 법령 표 중심으로 구현한다(�
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
+import threading
+from pathlib import Path
 from typing import Literal
 
+import pandas as pd
 import requests
 from langchain_core.tools import tool
+from PublicDataReader import BuildingLedger
 
 from src import config
 from src.agents.legal_data import get_thresholds
@@ -183,3 +189,196 @@ def lookup_building_ratio_limits(zone: BuildingZone) -> str:
         " 지구단위계획ㆍ완화 조항에 따라 실제 적용치는 달라질 수 있으니 최종 확정은 관할 구청에 확인하세요."
     )
     return msg
+
+
+# --- 건축물대장 표제부 자동 조회 (건축HUB 건축물대장정보 서비스) --------------
+# 용도변경ᆞ대수선ᆞ증축처럼 "기존 건물"이 있는 케이스에서, 그 건물의 현재 등록
+# 정보(용도ᆞ연면적ᆞ층수ᆞ건폐율ᆞ용적률ᆞ사용승인일)를 사용자에게 직접 묻는 대신
+# 자동 조회한다. 신축(빈 땅)에는 대장이 없으므로 이 도구는 그 경우 쓸모없다.
+#
+# 건축HUB는 주소가 아니라 (시군구코드, 법정동코드, 번지)로 조회하므로, 먼저 전국
+# 법정동코드 표(공개 데이터, WooilJeong/code 저장소)를 내려받아 캐싱해두고 주소
+# 텍스트와 이름을 매칭해서 코드를 찾는다. PublicDataReader(오픈소스 라이브러리)로
+# API 엔드포인트 URL과 영문→한글 컬럼 매핑을 가져다 쓴다(2026-07-23 실제 설치해서
+# meta_dict/translate_columns 결과 직접 확인 완료 - 필드명 추측 아님).
+_BDONG_JSON_URL = "https://raw.githubusercontent.com/WooilJeong/code/main/code/code_dong/code_bdong.json"
+_BDONG_CACHE_PATH = Path(config.ROOT_DIR) / ".cache" / "code_bdong.json"
+_BDONG_FETCH_TIMEOUT = 30
+
+_bdong_table: pd.DataFrame | None = None
+_bdong_lock = threading.Lock()
+
+# 번지 토큰: '680', '680-63', '680번지'. 주소 문자열에서 지역명 부분과 분리해 뽑는다.
+# 주의: "번지?"는 "번"만 필수고 "지"만 선택이 되는 실수라(전체가 선택이어야 함),
+# "(?:번지)?"로 묶어야 한다 - 실제로 "2-2"처럼 "번지" 글자가 없는 주소에서
+# 매칭이 통째로 실패하는 버그로 나타났다(2026-07-23 실측 테스트로 발견).
+_BUNJI_PATTERN = re.compile(r"(\d{1,4})(?:-(\d{1,4}))?(?:번지)?")
+
+
+def _load_bdong_table() -> pd.DataFrame:
+    """전국 법정동코드 표를 최초 호출 시 1회 내려받아 디스크+메모리에 캐싱.
+    말소(폐지)된 동은 제외해서 현재 유효한 코드만 남긴다.
+    """
+    global _bdong_table
+    if _bdong_table is not None:
+        return _bdong_table
+    with _bdong_lock:
+        if _bdong_table is not None:
+            return _bdong_table
+        if _BDONG_CACHE_PATH.exists():
+            raw = json.loads(_BDONG_CACHE_PATH.read_text(encoding="utf-8"))
+        else:
+            resp = requests.get(_BDONG_JSON_URL, timeout=_BDONG_FETCH_TIMEOUT)
+            resp.raise_for_status()
+            raw = resp.json()
+            _BDONG_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            _BDONG_CACHE_PATH.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+        df = pd.DataFrame(raw["data"]).fillna("")
+        df = df[df["말소일자"].astype(str).str.strip() == ""].copy()
+        code = df["법정동코드"].astype(str)
+        df["sigungu_code"] = code.str[:5]
+        df["bdong_code"] = code.str[5:]
+        _bdong_table = df
+        return df
+
+
+def _find_region_codes(address: str) -> tuple[str, str] | None:
+    """주소 텍스트에서 번지 토큰을 제외한 지역명 부분으로 법정동코드 표를 AND 매칭.
+
+    TODO(도로명주소 미지원, 2026-07-23 확인): 이 표는 읍면동명ᆞ동리명(법정동
+    체계)만 있고 도로명 컬럼이 없어서, "능동로 87"처럼 도로명 주소를 주면
+    매칭이 안 된다. 건축HUB API 자체도 지번(bun/ji) 기준이라 도로명 번호를
+    그대로 넣으면 안 됨(같은 건물이 도로명ᆞ지번 번호가 서로 다름 - VWorld
+    지오코딩 테스트로 실측 확인). 나중에 지번 대신 도로명 주소로도 찾을 수
+    있게 할 예정 - lookup_land_zone의 VWorld 지오코더(도로명 입력에도 법정동
+    이름을 같이 돌려줌)를 재사용하는 방향이 유력한 후보.
+    """
+    df = _load_bdong_table()
+    hay = df["시도명"] + " " + df["시군구명"] + " " + df["읍면동명"] + " " + df["동리명"]
+    terms = [t for t in re.split(r"[\s,]+", address) if t and not _BUNJI_PATTERN.fullmatch(t)]
+    if not terms:
+        return None
+    mask = pd.Series([True] * len(df), index=df.index)
+    for term in terms:
+        mask &= hay.str.contains(term, na=False, regex=False)
+    matched = df[mask]
+    if len(matched) == 0:
+        return None
+    row = matched.iloc[0]
+    return row["sigungu_code"], row["bdong_code"]
+
+
+def _extract_bunji(address: str) -> tuple[str, str]:
+    """공백으로 나눈 토큰 중 번지 패턴과 완전히 일치하는 토큰만 채택한다.
+    .search()로 문자열 전체를 훑으면 "성수동2가"처럼 동 이름 안에 포함된
+    숫자(2)를 번지로 잘못 집어낸다(2026-07-23 실측 버그: '성수동2가 275-5'가
+    번지 '2'로 잘못 추출됨) - _find_region_codes의 fullmatch 방식과 동일하게
+    토큰 단위로 정확히 매칭해야 한다.
+    """
+    for token in re.split(r"[\s,]+", address):
+        match = _BUNJI_PATTERN.fullmatch(token)
+        if match:
+            return match.group(1), match.group(2) or ""
+    return "", ""
+
+
+def _format_date(raw: str) -> str:
+    """건축HUB 날짜 필드(YYYYMMDD 문자열)를 YYYY-MM-DD로 변환. 형식이 아니면 원본 그대로."""
+    raw = str(raw).strip()
+    if re.fullmatch(r"\d{8}", raw):
+        return f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
+    return raw or "정보없음"
+
+
+_ledger_client: BuildingLedger | None = None
+
+
+def _get_ledger_client() -> BuildingLedger:
+    global _ledger_client
+    if _ledger_client is None:
+        _ledger_client = BuildingLedger(config.ARCHHUB_SERVICE_KEY or "")
+    return _ledger_client
+
+
+def _query_building_ledger(sigungu_code: str, bdong_code: str, bun: str, ji: str) -> pd.DataFrame | None:
+    """건축HUB 표제부 API를 직접 REST 호출(PublicDataReader는 URL/컬럼매핑만 재사용).
+    결과 없으면 None.
+    """
+    inst = _get_ledger_client()
+    # PublicDataReader가 하드코딩한 BldRgstService_v2는 폐지된 URL이라 항상
+    # 500 "Unexpected errors"를 반환한다(2026-07-23 실측: garbage/빈 키로도
+    # 동일하게 실패, 다른 data.go.kr API는 정상 401을 반환해 게이트웨이 자체는
+    # 정상임을 확인) - 실제 승인ᆞ정상 동작하는 BldRgstHubService를 직접 호출.
+    # meta_dict/translate_columns 등 컬럼 매핑은 계속 라이브러리 걸 재사용한다.
+    url = f"{config.ARCHHUB_LEDGER_ENDPOINT}/getBrTitleInfo"
+    params = {
+        "serviceKey": config.ARCHHUB_SERVICE_KEY,
+        "sigunguCd": sigungu_code,
+        "bjdongCd": bdong_code,
+        "numOfRows": 20,
+        "pageNo": 1,
+        "_type": "json",
+    }
+    if bun:
+        params["bun"] = bun.zfill(4)
+    if ji:
+        params["ji"] = ji.zfill(4)
+
+    resp = requests.get(url, params=params, timeout=20)  # 정부 API가 가끔 느려서(10초 타임아웃 실측) 여유있게
+    resp.raise_for_status()
+    data = resp.json()
+    body = data.get("response", {}).get("body", {})
+    items = body.get("items")
+    item = (items.get("item") if isinstance(items, dict) else items) if items else None
+    if not item:
+        return None
+    if isinstance(item, dict):
+        item = [item]
+    df = pd.DataFrame(item)
+    return inst.translate_columns(df)
+
+
+@tool
+def lookup_building_ledger(address: str) -> str:
+    """주소(번지 포함)로 건축물대장 표제부(기존 건물의 현재 등록 정보)를 자동 조회합니다.
+
+    - 용도변경ᆞ대수선ᆞ증축처럼 "기존 건물이 있는" 케이스에서만 의미가 있습니다.
+      신축(빈 땅에 새로 짓는 경우)에는 대장이 없으니 이 도구를 쓰지 마세요.
+    - 조회 성공 시 결과(현재 등록된 용도ᆞ연면적ᆞ층수 등)를 참고해서 record_case_facts를
+      채우되, 사용자가 말한 "희망 용도"와 대장상 "기존 용도"를 혼동하지 마세요.
+    - 조회 실패나 결과 없음이 오면 사용자에게 직접 물어보세요.
+    """
+    if not config.ARCHHUB_SERVICE_KEY:
+        return "건축물대장 자동 조회가 설정되어 있지 않습니다(API 키 없음). 사용자에게 직접 물어보세요."
+
+    logger.info("[도구] lookup_building_ledger(address=%r)", address)
+    codes = _find_region_codes(address)
+    if codes is None:
+        return f"'{address}' 주소의 법정동 코드를 찾지 못했습니다. 사용자에게 더 정확한 주소(구/동 이름)를 요청하세요."
+    sigungu_code, bdong_code = codes
+
+    bun, ji = _extract_bunji(address)
+    if not bun:
+        return f"'{address}'에서 번지를 찾지 못했습니다. 사용자에게 번지까지 포함한 주소를 요청하세요."
+
+    try:
+        df = _query_building_ledger(sigungu_code, bdong_code, bun, ji)
+    except (requests.RequestException, ValueError, KeyError) as exc:
+        logger.warning("[lookup_building_ledger] 조회 실패: %s", exc)
+        return "건축물대장 조회에 실패했습니다(서비스 오류). 사용자에게 직접 물어보세요."
+
+    if df is None or len(df) == 0:
+        return f"'{address}'에 등록된 건축물대장이 없습니다(신축 예정 대지이거나 미등록 상태일 수 있음)."
+
+    row = df.iloc[0]
+    parts = [f"'{address}' 건축물대장 표제부 조회 결과:"]
+    if row.get("건물명"):
+        parts.append(f"- 건물명: {row['건물명']}")
+    parts.append(f"- 주용도: {row.get('주용도코드명', '정보없음')}")
+    parts.append(f"- 구조: {row.get('구조코드명', '정보없음')}")
+    parts.append(f"- 연면적: {row.get('연면적', '?')}㎡ / 대지면적: {row.get('대지면적', '?')}㎡")
+    parts.append(f"- 지상 {row.get('지상층수', '?')}층 / 지하 {row.get('지하층수', '?')}층")
+    parts.append(f"- 건폐율: {row.get('건폐율', '?')}% / 용적률: {row.get('용적률', '?')}%")
+    parts.append(f"- 사용승인일: {_format_date(row.get('사용승인일', ''))}")
+    parts.append("[출처: 국토교통부 건축HUB 건축물대장정보 서비스]")
+    return "\n".join(parts)

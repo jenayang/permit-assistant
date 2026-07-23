@@ -44,6 +44,18 @@ CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY")
 # 개발키는 지오코더만 즉시 열리고 2D데이터는 운영키 승인 후에 열림(2026-07-22 확인).
 VWORLD_API_KEY = os.getenv("VWORLD_API_KEY")
 
+# 건축HUB - 건축물대장정보 서비스(BldRgstHubService). 기존 건물의 현재 등록 정보
+# (용도ᆞ연면적ᆞ층수ᆞ건폐율ᆞ용적률ᆞ사용승인일) 자동 조회용 - 용도변경ᆞ대수선ᆞ
+# 증축처럼 "기존 건물"이 있는 케이스에서만 의미가 있다(신축엔 대장이 없음).
+# PublicDataReader 패키지가 하드코딩한 BldRgstService_v2 URL은 2026-07-23 실측
+# 결과 모든 요청에 500 "Unexpected errors"를 반환(garbage/빈 키로도 동일 - 키
+# 문제가 아니라 엔드포인트 자체가 폐지/구버전). 실제 승인ᆞ정상 동작 확인된
+# BldRgstHubService로 직접 호출한다.
+ARCHHUB_SERVICE_KEY = os.getenv("ARCHHUB_SERVICE_KEY")
+ARCHHUB_LEDGER_ENDPOINT = os.getenv(
+    "ARCHHUB_LEDGER_ENDPOINT", "https://apis.data.go.kr/1613000/BldRgstHubService"
+)
+
 
 # === 청킹 ===
 # 임베딩 모델 자체 한도(예: 128토큰)가 이보다 작으면 모델 한도가 우선 적용됨.

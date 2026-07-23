@@ -73,13 +73,20 @@ SYSTEM_PROMPT = """당신은 서울시 건축 인허가 전문 어시스턴트�
 record_case_facts로 기록하세요(알게 되는 대로 부분 호출해도 누적됨 - 사용자가
 이미 말한 수치를 빠뜨리면 판정이 안 됩니다).
 
+**한 메시지에서 뽑아낼 수 있는 사실은 그 턴에 전부(다른 도구 호출과 같은 턴에
+함께) 기록하세요 - 미루면 판정이 그만큼 늦어지고, 그 사이 턴에 결론을 지어내는
+실수로 이어집니다.** 특히 시설군(예: "카페"→7, 시설군 매핑표 참고)은 검색이나
+외부 조회 없이 그 자리에서 바로 계산 가능하니 나중으로 미루지 마세요.
+
 **허가/신고/기재변경 여부는 절대 사용자에게 묻지도, 당신이 계산하지도 마세요.**
 법령상 객관적 기준(면적ᆞ층수ᆞ시설군)으로 시스템이 자동 판정하며, 결과는
 다음 턴에 도구 응답으로 옵니다 - 그걸 참고해서 답변에 반영하세요. 정보가
 부족하면 결론을 암시하지 말고 부족한 사실만 되물으세요. 특히 **85㎡ 기준은
 증축ᆞ개축ᆞ재축 전용이며 신축에는 적용되지 않습니다** - 신축의 신고 대상
 여부는 용도지역(관리ᆞ농림ᆞ자연환경보전지역)ᆞ연면적 200㎡ 미만ᆞ층수 3층
-미만을 모두 봐야 합니다.
+미만을 모두 봐야 합니다. **용도변경도 current_facility_group과
+desired_facility_group이 둘 다 모여야 판정되니**, 하나만 아는 상태에서
+"기재변경일 가능성이 높다"처럼 예상을 언급하지 마세요.
 
 예외 - 용도지역: 일반인은 대부분 모르니 직접 묻지 말고, 주소를 알면 먼저
 lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts로
@@ -91,6 +98,9 @@ lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts�
 - 용도지역을 모르는데 주소는 아는 경우 → lookup_land_zone
 - 건폐율ㆍ용적률 질문 → lookup_building_ratio_limits (세부 용도지역을
   모르면 계산하지 말고 직접 질문)
+- 용도변경ᆞ대수선ᆞ증축처럼 **기존 건물이 있는** 케이스에서 그 건물의 현재
+  용도ᆞ연면적ᆞ층수 등이 필요하면 → lookup_building_ledger(주소, 번지 포함).
+  신축(빈 땅)에는 대장이 없으니 쓰지 마세요.
 - 여러 관점에서 검색이 필요하면 도구를 반복 사용하세요. 검색 결과에 법령
   계층(법/시행령/시행규칙/조례)이 섞여 다르게 말하면 법 > 시행령 > 시행규칙
   우선 원칙을 따르고, 조례는 상충이 아니라 지역 추가 규정으로 안내하세요.
@@ -306,7 +316,9 @@ def route_after_tools(state: AgentState) -> str:
     """
     facts = state.get("case_facts", {})
     if not facts.get("_classified") and classify_case(facts) is not None:
+        logger.info("[route_after_tools] case_facts=%r → classify", facts)
         return "classify"
+    logger.info("[route_after_tools] case_facts=%r → agent (분류 조건 미충족 또는 이미 분류됨)", facts)
     return "agent"
 
 
@@ -318,12 +330,15 @@ def route_after_agent(state: AgentState) -> str:
     """
     last = state["messages"][-1]
     if isinstance(last, AIMessage) and last.tool_calls:
+        logger.info("[route_after_agent] tool_calls=%r → tools", [tc["name"] for tc in last.tool_calls])
         return "tools"
 
     facts = state.get("case_facts", {})
     if facts.get("_classified") and not facts.get("_finalized"):
+        logger.info("[route_after_agent] case_facts=%r → finalize", facts)
         return "finalize"
 
+    logger.info("[route_after_agent] case_facts=%r, 도구 호출 없음 → END (자유 텍스트 답변으로 종료)", facts)
     return END
 
 
