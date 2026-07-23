@@ -7,18 +7,18 @@
 - **Part B**: 다양한 사용자 페르소나·표현 방식을 가정한 대화형 시나리오 (모델 전체 파이프라인 확인)
 
 새 케이스가 늘거나 규칙이 바뀌면 이 문서도 같이 갱신할 것 — 특히 Part A는
-`src/tools.py`의 `REQUIRED_FIELDS`/`classify_case`와 항상 1:1로 맞아야 의미가 있다.
+`src/agents/permit.py`의 `REQUIRED_FIELDS`/`classify_case`와 항상 1:1로 맞아야 의미가 있다.
 
 ---
 
 ## Part A. `classify_case()` 경계값 검증표
 
-`src/tools.py:classify_case()`가 법령 경계값을 정확히 나누는지 코드 레벨에서 먼저
+`src/agents/permit.py:classify_case()`가 법령 경계값을 정확히 나누는지 코드 레벨에서 먼저
 검증한다. LLM 없이 바로 실행 가능:
 
 ```bash
 python -c "
-from src.tools import classify_case
+from src.agents.permit import classify_case
 print(classify_case({'act_type': '신축', 'size_sqm': 199, 'floors': 2, 'land_zone': '관리지역'}))
 "
 ```
