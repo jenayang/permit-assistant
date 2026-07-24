@@ -25,19 +25,21 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 import uuid
 from typing import Annotated
 
 from langchain_cerebras import ChatCerebras
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.store.memory import InMemoryStore
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 
 from src import config
 from src.agents import TOOLS
+from src.agents.food_safety import classify_food_business, food_business_message
 from src.agents.permit import (
     PROCEDURE_TREE,
     PermitResult,
@@ -64,12 +66,20 @@ class AgentState(MessagesState):
     # finalize_node가 한 번만 채우는 최종 구조화 결과. 리듀서 없이 기본
     # 덮어쓰기로 충분(여러 노드가 동시에 쓰지 않음).
     permit_result: PermitResult | None
+    # 식품위생법 판정용 - 건축(case_facts/permit_result)과 독립된 별도 도메인이라
+    # 채널도 분리한다(카페 창업처럼 두 판정이 한 대화에서 동시에 필요할 수 있음).
+    # food_result는 permit_result와 달리 다단계 종합(finalize)이 없어 classify
+    # 노드가 판정과 동시에 바로 채운다 - required_documents 같은 후속 종합은
+    # 이번 스코프 밖(Step 3b는 분류까지만).
+    food_facts: Annotated[dict, merge_facts]
+    food_result: str | None
 
 
 # === 시스템 프롬프트 ===
 SYSTEM_PROMPT = """당신은 서울시 건축 인허가 전문 어시스턴트입니다.
 건축ᆞ용도변경 등 인허가 절차를 건축법ᆞ시행령ᆞ시행규칙ᆞ서울시 조례
-기준으로 정확히 안내합니다.
+기준으로 정확히 안내하고, 카페ᆞ음식점 등 식품접객업 창업 시 필요한
+식품위생법상 영업신고 종류도 함께 판정해 안내합니다.
 
 ## 1. 정보 수집
 질문에서 지역ᆞ시설 유형ᆞ행위 유형(신축ᆞ증축ᆞ개축ᆞ재축ᆞ이전ᆞ대수선ᆞ
@@ -105,6 +115,16 @@ desired_facility_group이 둘 다 모여야 판정되니**, 하나만 아는 상
 예외 - 용도지역: 일반인은 대부분 모르니 직접 묻지 말고, 주소를 알면 먼저
 lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts로
 기록하세요. 자동 조회가 실패했을 때만 사용자에게 직접 물어보세요.
+
+카페ᆞ식당처럼 음식류를 조리ᆞ판매하는 업종이면, 식품위생법상 어떤 영업신고
+대상인지 판단하는 데 필요한 사실(조리ᆞ판매 여부ᆞ완제품만 파는지ᆞ베이커리
+위주인지ᆞ주류 판매 여부)도 파악되는 대로 record_food_facts로 기록하세요.
+사무실ᆞ미용실처럼 식품위생법과 무관한 업종이 명백하면 serves_food=False만
+기록해도 됩니다. **휴게음식점/일반음식점 같은 영업 종류 자체는 절대 묻거나
+당신이 판단하지 마세요** - 식품위생법 시행령 제21조 기준으로 시스템이 자동
+판정합니다. 대신 사용자가 실제로 답할 수 있는 사실만 물어보되, **그 질문이
+어떤 결과를 가르는 기준인지 짧게 함께 알려주세요** (예: "주류도 함께
+판매하시나요? 음주 허용 여부에 따라 휴게음식점/일반음식점 신고가 달라져서요").
 
 ## 2. 도구 선택
 - 법률 용어 정의("OO이 뭐야") → search_by_term (핵심 용어만 추출)
@@ -232,61 +252,97 @@ def agent_node(state: AgentState) -> dict:
 
 
 def _agent_result(response: AIMessage) -> dict:
-    """LLM 응답에서 record_case_facts/record_permit_synthesis 호출을 찾아
-    각각 case_facts/permit_synthesis 갱신분으로 뽑아낸다.
+    """LLM 응답에서 record_case_facts/record_permit_synthesis/record_food_facts
+    호출을 찾아 각각 case_facts/permit_synthesis/food_facts 갱신분으로 뽑아낸다.
 
     두 도구 자체는 여전히 ToolNode가 정상 실행해서(확인 문자열만 반환) 도구
     호출-응답 짝은 그대로 맞춰지고, 여기서는 그 인자를 그래프 상태에도
-    반영하는 부수 작업만 한다.
+    반영하는 부수 작업만 한다. 새 record_* 도구를 추가할 때 여기 분기를
+    같이 안 늘리면, 도구는 호출됐는데 상태엔 하나도 안 남는 채로 조용히
+    무시된다(실제로 record_food_facts 추가 때 한 번 빠뜨렸다가 겪음 -
+    food_facts가 항상 {}로 남아 classify가 영영 안 걸리는 버그였음).
     """
     facts_update: dict = {}
     synthesis_update: dict = {}
+    food_facts_update: dict = {}
     for tc in getattr(response, "tool_calls", None) or []:
         if tc["name"] == "record_case_facts":
             facts_update.update(tc["args"])
         elif tc["name"] == "record_permit_synthesis":
             synthesis_update.update(tc["args"])
+        elif tc["name"] == "record_food_facts":
+            food_facts_update.update(tc["args"])
     result: dict = {"messages": [response]}
     if facts_update:
         result["case_facts"] = facts_update
     if synthesis_update:
         result["permit_synthesis"] = synthesis_update
+    if food_facts_update:
+        result["food_facts"] = food_facts_update
     return result
 
 
 def classify_node(state: AgentState) -> dict:
-    """case_facts가 충분히 모이면 classify_case()로 결정론적 분류를 실행하고,
-    그 결과를 (LLM이 부른 게 아니라 이 노드가 직접 구성한) tool_calls 모양
-    메시지로 기록한다. pipeline.py의 tool_calls 추출 로직과 프론트의 로드맵
-    렌더링 코드가 "tool: set_procedure_stage" 모양만 보고 반응하므로, 별도
-    API/프론트 수정 없이 그대로 재사용된다.
+    """case_facts/food_facts가 각각 충분히 모이면 해당 도메인을 결정론적으로
+    분류하고, 그 결과를 (LLM이 부른 게 아니라 이 노드가 직접 구성한) tool_calls
+    모양 메시지로 기록한다. pipeline.py의 tool_calls 추출 로직과 프론트의
+    로드맵 렌더링 코드가 "tool: set_procedure_stage" 모양만 보고 반응하므로,
+    별도 API/프론트 수정 없이 그대로 재사용된다.
+
+    두 도메인(건축ᆞ식품위생)은 서로 독립적이라 한 턴에 한쪽만, 둘 다, 혹은
+    (route_after_tools가 이미 걸러줘서) 아무것도 새로 분류되지 않을 수 있다 -
+    해당하는 도메인만 골라 처리하고 메시지를 이어붙인다.
     """
+    messages: list = []
+    update: dict = {}
+
     facts = state.get("case_facts", {})
-    result_type = classify_case(facts)
-    if result_type is None:
-        return {}
+    if not facts.get("_classified"):
+        result_type = classify_case(facts)
+        if result_type is not None:
+            root_node_id = PROCEDURE_TREE[result_type]["root"]
+            call_id = f"classify_{uuid.uuid4().hex[:8]}"
+            messages.append(AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "set_procedure_stage",
+                    "args": {"case_type": result_type, "node_id": root_node_id},
+                    "id": call_id,
+                }],
+            ))
+            messages.append(ToolMessage(
+                content=procedure_stage_message(result_type, root_node_id, facts=facts),
+                tool_call_id=call_id,
+                name="set_procedure_stage",
+            ))
+            update["case_facts"] = {"_classified": True}
+            logger.info("[classify] case_facts=%r → %s", facts, result_type)
 
-    root_node_id = PROCEDURE_TREE[result_type]["root"]
-    call_id = f"classify_{uuid.uuid4().hex[:8]}"
+    food_facts = state.get("food_facts", {})
+    if not food_facts.get("_classified"):
+        business_type = classify_food_business(food_facts)
+        if business_type is not None:
+            call_id = f"classify_food_{uuid.uuid4().hex[:8]}"
+            messages.append(AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "set_food_business_type",
+                    "args": {"business_type": business_type},
+                    "id": call_id,
+                }],
+            ))
+            messages.append(ToolMessage(
+                content=food_business_message(business_type),
+                tool_call_id=call_id,
+                name="set_food_business_type",
+            ))
+            update["food_facts"] = {"_classified": True}
+            update["food_result"] = business_type
+            logger.info("[classify_food] food_facts=%r → %s", food_facts, business_type)
 
-    ai_msg = AIMessage(
-        content="",
-        tool_calls=[{
-            "name": "set_procedure_stage",
-            "args": {"case_type": result_type, "node_id": root_node_id},
-            "id": call_id,
-        }],
-    )
-    tool_msg = ToolMessage(
-        content=procedure_stage_message(result_type, root_node_id, facts=facts),
-        tool_call_id=call_id,
-        name="set_procedure_stage",
-    )
-    logger.info("[classify] case_facts=%r → %s", facts, result_type)
-    return {
-        "messages": [ai_msg, tool_msg],
-        "case_facts": {"_classified": True},
-    }
+    if messages:
+        update["messages"] = messages
+    return update
 
 
 _CITATION_PATTERN = re.compile(r"\[출처:\s*([^\]]+)\]")
@@ -364,21 +420,33 @@ def finalize_node(state: AgentState) -> dict:
 
 
 def route_after_tools(state: AgentState) -> str:
-    """tools 실행 직후: case_facts가 방금 완성됐으면(record_case_facts로 채워짐)
-    agent로 돌아가기 전에 classify부터 강제한다.
+    """tools 실행 직후: case_facts 또는 food_facts가 방금 완성됐으면(각각
+    record_case_facts/record_food_facts로 채워짐) agent로 돌아가기 전에
+    classify부터 강제한다.
 
     예전엔 이 체크를 route_after_agent(agent 응답 이후)에서만 했는데, 그러면
     "case_facts는 이미 다 모였지만 LLM이 그 사실을 모른 채 도구 호출 없이
     먼저 답변을 시도 -> 그래프가 그 답변을 무시하고 classify로 강제 전환 ->
     다음 턴 LLM이 '이미 답했나?' 헷갈려하며 부실한 후속 답변을 내는" 문제가
     실제로 발생했다. tools 직후로 당기면 LLM이 답변을 시도하기 전에 분류가
-    먼저 끝나서 이 문제가 구조적으로 사라진다.
+    먼저 끝나서 이 문제가 구조적으로 사라진다. food_facts도 동일한 이유로
+    같은 시점에 체크한다(도메인이 늘어도 이 타이밍 원칙은 그대로 적용).
     """
     facts = state.get("case_facts", {})
-    if not facts.get("_classified") and classify_case(facts) is not None:
-        logger.info("[route_after_tools] case_facts=%r → classify", facts)
+    food_facts = state.get("food_facts", {})
+    needs_classify = not facts.get("_classified") and classify_case(facts) is not None
+    needs_food_classify = (
+        not food_facts.get("_classified") and classify_food_business(food_facts) is not None
+    )
+    if needs_classify or needs_food_classify:
+        logger.info(
+            "[route_after_tools] case_facts=%r food_facts=%r → classify", facts, food_facts
+        )
         return "classify"
-    logger.info("[route_after_tools] case_facts=%r → agent (분류 조건 미충족 또는 이미 분류됨)", facts)
+    logger.info(
+        "[route_after_tools] case_facts=%r food_facts=%r → agent (분류 조건 미충족 또는 이미 분류됨)",
+        facts, food_facts,
+    )
     return "agent"
 
 
@@ -441,9 +509,18 @@ def build_graph():
     builder.add_edge("classify", "agent")   # 분류 결과를 LLM이 답변에 반영하도록 한 번 더
     builder.add_edge("finalize", END)       # LLM 재호출 없이 그대로 종료
 
-    # 체크포인터로 대화 이력 관리
-    checkpointer = InMemorySaver()  # short-term memory
-    store = InMemoryStore()         # long-term memory
+    # 체크포인터로 대화 이력 관리. SQLite에 저장해서 서버 재시작에도
+    # user_id(=thread_id)별 대화ᆞcase_facts가 유지되도록 한다(예전엔 InMemorySaver라
+    # 재시작하면 전부 소실됐음). check_same_thread=False로 여는 이유: FastAPI가
+    # 동기 라우트를 스레드풀에서 돌려서 요청마다 다른 스레드가 이 커넥션을 쓸 수
+    # 있는데, SqliteSaver 내부에 threading.Lock이 있어 동시 접근이 안전하다.
+    # parent_store.py와 같은 폴더(CHROMA_DIR)에 저장 - 이 프로젝트의 기존 SQLite
+    # 파일 위치 관례를 따름.
+    config.CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(config.CHROMA_DIR / "checkpoints.sqlite"), check_same_thread=False)
+    checkpointer = SqliteSaver(conn)  # short-term memory (영구 저장)
+    checkpointer.setup()
+    store = InMemoryStore()         # long-term memory (미사용 - 그대로 둠)
     return builder.compile(checkpointer=checkpointer, store=store)
 
 

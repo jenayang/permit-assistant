@@ -128,6 +128,7 @@ def query(question: str, user_id: Optional[str] = None) -> dict:
         "tool_calls": tool_calls,
         "contexts": contexts,
         "permit_result": result.get("permit_result"),
+        "food_result": result.get("food_result"),
     }
 
 

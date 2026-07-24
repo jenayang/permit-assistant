@@ -60,6 +60,7 @@ class QueryResponse(BaseModel):
     user_id: str
     tool_calls: list[ToolCallInfo]
     permit_result: Optional[PermitResult] = None
+    food_result: Optional[str] = None
 
 
 class IngestResponse(BaseModel):
@@ -119,6 +120,7 @@ def query_endpoint(req: QueryRequest) -> QueryResponse:
             user_id=result["user_id"],
             tool_calls=result["tool_calls"],
             permit_result=result["permit_result"],
+            food_result=result["food_result"],
         )
         
     except ValueError as e: # 400 클라이언트 잘못(빈 질문 등)

@@ -3,6 +3,7 @@
 - regulation: 법령/조례/절차 문서 검색(RAG) - 판단하지 않고 검색만 담당.
 - site: 주소 기반 부지 정보 자동 조회(용도지역ᆞ건축물대장 등, API 중심) + 건폐율ㆍ용적률 법정 상한 조회(정적 표).
 - permit: 허가/신고/기재변경 판정(규칙 기반) + 절차 로드맵.
+- food_safety: 식품위생법상 영업 종류 판정(규칙 기반) - 카페ᆞ음식점 등 식품접객업 창업 시 영업신고 종류.
 
 아직 별도 서브그래프/오케스트레이터는 아니고, agent.py의 단일 ReAct 루프가
 이 모듈들을 도구로 바인딩해서 쓰는 구조. 향후 Planner 도입 시 이 경계를
@@ -10,6 +11,7 @@
 """
 from __future__ import annotations
 
+from src.agents.food_safety import classify_food_business, food_business_message, record_food_facts
 from src.agents.permit import (
     FACILITY_GROUPS,
     PROCEDURE_TREE,
@@ -32,4 +34,5 @@ TOOLS = [
     lookup_building_ratio_limits,
     lookup_building_ledger,
     record_permit_synthesis,
+    record_food_facts,
 ]
