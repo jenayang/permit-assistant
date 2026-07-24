@@ -118,55 +118,140 @@
     display: block;
     margin-bottom: 8px;
   }
-  .climb-path {
-    display: flex;
-    flex-direction: column-reverse;
-    align-items: center;
-  }
-  .climb-node {
+
+  /* 등반 고도계(게이지): 0~4단계 진행 상황. 체크리스트가 실제로 다 채워져야
+     (record_case_facts/record_permit_synthesis 구조화 데이터 기준) 다음
+     단계로 넘어간다 - 봇 답변이 한 번에 여러 단계를 다 설명해버려도 실제
+     데이터가 안 채워졌으면 넘어가지 않는다(2026-07-24: 텍스트 헤더 감지
+     방식은 LLM이 한 턴에 4단계를 몰아 써버리면 곧장 "등반완료"로 오판하는
+     문제가 있어서 폐기). 패널의 남는 세로 공간을 거의 다 채우도록 flex:1. */
+  .gauge {
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: stretch;
+    align-self: stretch;
+    gap: 12px;
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+  }
+  .gauge-readout {
+    font: 700 12.5px/1 ui-monospace, "SF Mono", "Roboto Mono", monospace;
+    color: var(--accent);
+    letter-spacing: 0.01em;
     text-align: center;
-    gap: 2px;
+    flex-shrink: 0;
   }
-  .climb-dot {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--panel);
-    border: 2px solid var(--border);
-    opacity: 0.45;
+  .gauge-readout.complete { color: #1f9d55; }
+  .gauge-wrap {
+    display: flex;
+    gap: 14px;
+    align-items: stretch;
+    width: 100%;
+    flex: 1;
+    min-height: 0;
   }
-  .climb-node.done .climb-dot {
-    background: var(--accent);
-    border-color: var(--accent);
-    opacity: 1;
+  .gauge-track {
+    width: 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
   }
-  .climb-node.current .climb-dot {
-    background: var(--panel);
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
-    opacity: 1;
+  .gauge-fill {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: linear-gradient(180deg, var(--accent), #1f9d55);
+    border-radius: 6px;
+    transition: height 0.5s ease;
   }
-  .climb-label {
-    font-size: 11px;
+  .gauge-fill.complete { background: #1f9d55; }
+  .gauge-ticks {
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: space-between;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .gauge-tick {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 6px 0;
+  }
+  .gauge-tick-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .gauge-tick-mark {
+    width: 10px;
+    height: 1.5px;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+  .gauge-tick.done .gauge-tick-mark,
+  .gauge-tick.current .gauge-tick-mark {
+    background: var(--text-muted);
+  }
+  .gauge-tick-label {
+    font-size: 11.5px;
     color: var(--text-muted);
-    max-width: 140px;
+    line-height: 1.3;
+  }
+  .gauge-tick.done .gauge-tick-label { color: var(--text); }
+  .gauge-tick.current .gauge-tick-label {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .gauge-tick.current .gauge-tick-mark {
+    position: relative;
+  }
+  .gauge-tick.current .gauge-tick-mark::after {
+    content: "";
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    transform: translate(-50%, -50%);
+    animation: gaugePulse 1.8s ease-in-out infinite;
+  }
+  @keyframes gaugePulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.35); }
+    50% { box-shadow: 0 0 0 4px rgba(37, 99, 235, 0); }
+  }
+  .gauge-tick.upcoming .gauge-tick-label { opacity: 0.5; }
+
+  /* 각 단계의 체크리스트(요구 사실ᆞ필수서류ᆞ사전진단 항목) */
+  .gauge-checklist {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 0 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .gauge-check-item {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 10.5px;
+    color: var(--text-muted);
     line-height: 1.4;
   }
-  .climb-node.current .climb-label {
-    color: var(--accent);
-    font-weight: 600;
+  .gauge-check-icon { flex-shrink: 0; }
+  .gauge-check-item.checked { color: var(--text); }
+  .gauge-check-item.checked .gauge-check-icon { color: #1f9d55; }
+  .gauge-check-item:not(.checked) .gauge-check-icon { color: var(--border); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .gauge-tick.current .gauge-tick-mark::after { animation: none; }
+    .gauge-fill { transition: none; }
   }
-  .climb-line {
-    width: 2px;
-    height: 22px;
-    background: var(--border);
-    border-radius: 1px;
-    opacity: 0.4;
-  }
-  .climb-line.done { background: var(--accent); opacity: 1; }
   .stage-caption {
     margin-top: 16px;
     font-size: 10px;
@@ -347,7 +432,14 @@
       <span class="peak">🏔️</span>
       대화를 시작하면<br>여기에 진행 상황이 표시돼요
     </div>
-    <div class="climb-path" id="climbPath" style="display:none;"></div>
+    <div class="gauge" id="gauge" style="display:none;">
+      <div class="gauge-readout" id="gaugeReadout"></div>
+      <div class="gauge-wrap">
+        <div class="gauge-track"><div class="gauge-fill" id="gaugeFill"></div></div>
+        <div class="gauge-ticks" id="gaugeTicks"></div>
+      </div>
+    </div>
+    <div class="branch-prompt" id="branchPrompt" style="display:none;"></div>
     <div class="stage-caption">실제 절차는 사안에 따라<br>다를 수 있어 참고용입니다.</div>
   </aside>
 </div>
@@ -362,7 +454,11 @@
   const userIdLabel = document.getElementById("userIdLabel");
   const newChatBtn = document.getElementById("newChatBtn");
   const climbHintEl = document.getElementById("climbHint");
-  const climbPathEl = document.getElementById("climbPath");
+  const gaugeEl = document.getElementById("gauge");
+  const gaugeReadoutEl = document.getElementById("gaugeReadout");
+  const gaugeFillEl = document.getElementById("gaugeFill");
+  const gaugeTicksEl = document.getElementById("gaugeTicks");
+  const branchPromptEl = document.getElementById("branchPrompt");
   const factTagsEl = document.getElementById("factTags");
 
   function getUserId() {
@@ -378,9 +474,6 @@
   userIdLabel.textContent = `세션: ${userId.slice(0, 8)}`;
 
   let procedureTree = {};
-  // 대화 중 set_procedure_stage로 보고된 노드를 순서대로 누적 (분기 트리라
-  // "전체 경로"를 한 번에 알 수 없어서, 지금까지 실제로 지나온 노드만 기록)
-  let visitedNodes = [];
 
   // record_case_facts로 이번 대화에서 확인된 사실들을 로드맵 상단에 태그로
   // 누적 표시(읽기 전용) - 사용자가 "내가 말한 게 이렇게 정리됐구나"를 실시간
@@ -444,107 +537,186 @@
     return procedureTree[caseType]?.nodes?.[nodeId] || null;
   }
 
-  function reportStageNode(caseType, nodeId) {
-    const last = visitedNodes[visitedNodes.length - 1];
-    if (last && last.caseType === caseType && last.nodeId === nodeId) return; // 직전과 동일하면 스킵
-    visitedNodes.push({ caseType, nodeId });
-    localStorage.setItem("permit_assistant_visited", JSON.stringify(visitedNodes));
-    renderStagePanel();
+  // 케이스 유형과 무관하게 공통인 0~4단계 고도계. 이전엔 봇 답변 텍스트에서
+  // "[1단계]"~"[4단계]" 헤더를 감지해서 단계를 올렸는데, LLM이 정보가 충분하면
+  // 한 턴에 1~4단계를 몰아서 다 써버리는 경우가 실제로 많아 곧장 "등반완료"로
+  // 잘못 판정되는 문제가 있었다(2026-07-24 실측). 대신 각 단계마다 실제로
+  // 채워져야 하는 구조화 데이터(case_facts, permit_result의 required_documents/
+  // pre_diagnosis_items)를 체크리스트로 만들고, 그 리스트가 전부(또는 최소
+  // 1개 이상) 채워져야만 다음 단계로 넘어가게 한다 - 텍스트 분량과 무관하게
+  // 실제로 그 단계에 필요한 정보가 기록됐는지만 본다.
+  const STAGE_LABELS = [
+    "사용자 현황 진단",
+    "상황 분석 · 필요 절차",
+    "필수 서류",
+    "사전 진단",
+    "등반완료",
+  ];
+
+  // src/agents/permit.py의 REQUIRED_FIELDS를 그대로 미러링(행위 유형별로
+  // 판정에 필요한 사실 목록) - 0단계 체크리스트를 만드는 데 사용.
+  const REQUIRED_FIELDS = {
+    "신축": ["size_sqm", "floors", "land_zone"],
+    "증축": ["extension_size_sqm"],
+    "개축": ["extension_size_sqm"],
+    "재축": ["extension_size_sqm"],
+    "이전": [],
+    "대수선": ["renovation_scope", "size_sqm", "floors"],
+    "용도변경": ["current_facility_group", "desired_facility_group"],
+    "일반수선": [],
+    "가설건축물": ["temporary_purpose", "temporary_duration_years", "temporary_is_concrete"],
+  };
+
+  let lastBranch = null; // { caseType, nodeId } - 새로고침 후에도 분기 버튼 복원용
+  let latestPermitResult = null; // /query 응답의 permit_result를 그대로 보관(백엔드가 이미 결정론적으로 계산한 값)
+
+  // 각 단계의 체크리스트 + 완료 여부를 case_facts/permit_result 같은 실제
+  // 데이터에서 뽑아낸다. 여기서 "done"으로 계산된 것 외에는 아무것도 지어내지
+  // 않는다(도구 호출 없이 텍스트만 보고 단계를 올리는 일이 없도록).
+  function buildChecklists() {
+    const actType = caseFacts.act_type;
+    const classified = !!(latestPermitResult && latestPermitResult.permit_type);
+
+    const stage0Items = actType
+      ? (REQUIRED_FIELDS[actType] || []).map(f => ({
+          text: FACT_TAG_LABELS[f] ? FACT_TAG_LABELS[f](caseFacts[f]) : f,
+          done: caseFacts[f] != null,
+        }))
+      : [{ text: "신축ᆞ증축ᆞ용도변경 등 행위 유형 파악", done: false }];
+
+    const stage1Items = [{ text: "허가ᆞ신고ᆞ기재변경 여부 판정", done: classified }];
+
+    const docs = latestPermitResult?.required_documents || [];
+    const stage2Items = docs.length
+      ? docs.map(d => ({ text: d, done: true }))
+      : [{ text: "필수 서류 확인 중", done: false }];
+
+    const diag = latestPermitResult?.pre_diagnosis_items || [];
+    const stage3Items = diag.length
+      ? diag.map(d => ({ text: d, done: true }))
+      : [{ text: "사전 진단 확인 중", done: false }];
+
+    return [
+      { items: stage0Items, done: classified },
+      { items: stage1Items, done: classified },
+      { items: stage2Items, done: docs.length > 0 },
+      { items: stage3Items, done: diag.length > 0 },
+    ];
   }
 
-  // 지금까지 확정된 노드(분기 포함, 연속 중복 제거) + 마지막이 "단계"면 다음
-  // 단계들을 미확정 미리보기로 이어붙인 전체 경로. 분기라서 그 뒤가 갈리는
-  // 지점(아직 답 안 한 분기)에서는 미리보기를 멈춘다(모르는 걸 지어내지 않음).
-  function buildPathNodes(caseType) {
-    const confirmedIds = visitedNodes
-      .filter(v => v.caseType === caseType)
-      .map(v => v.nodeId)
-      .filter((id, i, arr) => id !== arr[i - 1]);
-    if (confirmedIds.length === 0) return { ids: [], confirmedCount: 0 };
-
-    const ids = [...confirmedIds];
-    let last = getNode(caseType, ids[ids.length - 1]);
-    while (last && last.type === "stage" && last.next) {
-      ids.push(last.next);
-      last = getNode(caseType, last.next);
+  // 앞에서부터 연속으로 done인 단계 수 = 현재 단계(0~4). 중간에 하나라도
+  // 안 끝났으면 그 이후는 절대 먼저 완료로 안 침(순서 보장).
+  function computeCurrentStage(checklists) {
+    let stage = 0;
+    for (const c of checklists) {
+      if (!c.done) break;
+      stage += 1;
     }
-    return { ids, confirmedCount: confirmedIds.length };
+    return stage;
   }
 
-  function renderStagePanel() {
-    if (visitedNodes.length === 0) {
-      climbHintEl.style.display = "block";
-      climbPathEl.style.display = "none";
-      return;
-    }
-    const last = visitedNodes[visitedNodes.length - 1];
-    const { caseType } = last;
-    const { ids, confirmedCount } = buildPathNodes(caseType);
-    if (ids.length === 0) return;
-
-    const currentIdx = confirmedCount - 1;
+  function renderGauge() {
+    const checklists = buildChecklists();
+    const currentStage = computeCurrentStage(checklists);
 
     climbHintEl.style.display = "none";
-    climbPathEl.innerHTML = "";
-    climbPathEl.style.display = "flex";
+    gaugeEl.style.display = "flex";
 
-    // column-reverse 컨테이너라 배열 순서(시작→완료)대로 append하면 시작이
-    // 맨 아래, 완료(또는 아직 안 정해진 미래)가 맨 위로 렌더링돼서 "등반"
-    // 느낌이 나고, 확정 안 된 구간은 CSS 기본 투명도로 흐리게 보인다.
-    ids.forEach((id, i) => {
-      const node = getNode(caseType, id);
-      if (i > 0) {
-        const line = document.createElement("div");
-        line.className = "climb-line" + (i <= currentIdx ? " done" : "");
-        climbPathEl.appendChild(line);
+    const complete = currentStage >= 4;
+    gaugeReadoutEl.textContent = complete ? "🏁 등반완료!" : `${currentStage} / 4단계 진행 중`;
+    gaugeReadoutEl.className = "gauge-readout" + (complete ? " complete" : "");
+    gaugeFillEl.style.height = `${(currentStage / 4) * 100}%`;
+    gaugeFillEl.className = "gauge-fill" + (complete ? " complete" : "");
+
+    gaugeTicksEl.innerHTML = "";
+    STAGE_LABELS.forEach((label, i) => {
+      const state = i < currentStage ? "done" : i === currentStage ? "current" : "upcoming";
+      const row = document.createElement("div");
+      row.className = `gauge-tick ${state}`;
+
+      const head = document.createElement("div");
+      head.className = "gauge-tick-head";
+      head.innerHTML = `<span class="gauge-tick-mark"></span><span class="gauge-tick-label">${i} · ${label}</span>`;
+      row.appendChild(head);
+
+      // 마지막(등반완료)엔 체크리스트가 없고, 현재ᆞ완료 단계만 체크리스트를 보여줌
+      const stageChecklist = checklists[i];
+      if (stageChecklist && (state === "current" || state === "done")) {
+        const list = document.createElement("ul");
+        list.className = "gauge-checklist";
+        stageChecklist.items.forEach(item => {
+          const li = document.createElement("li");
+          li.className = "gauge-check-item" + (item.done ? " checked" : "");
+          li.innerHTML = `<span class="gauge-check-icon">${item.done ? "✓" : "○"}</span><span>${item.text}</span>`;
+          list.appendChild(li);
+        });
+        row.appendChild(list);
       }
-      const el = document.createElement("div");
-      const state = i < currentIdx ? "done" : i === currentIdx ? "current" : "upcoming";
-      el.className = `climb-node ${state}`;
-      // 분기 노드는 질문 내용을 로드맵에 미리 안 보여줌 - 대화로 알아가게 함
-      const label = node.type === "branch" ? "" : node.label;
-      el.innerHTML = `<div class="climb-dot"></div>` + (label ? `<div class="climb-label">${label}</div>` : "");
-      climbPathEl.appendChild(el);
+      gaugeTicksEl.appendChild(row);
     });
+  }
 
-    // 현재 위치가 분기면, 경로 아래에 질문+선택지 버튼도 이어서 보여줌
-    const currentNode = getNode(caseType, ids[currentIdx]);
-    if (currentNode && currentNode.type === "branch") {
-      const prompt = document.createElement("div");
-      prompt.className = "branch-prompt";
-      Object.keys(currentNode.options).forEach(choice => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "branch-btn";
-        btn.textContent = choice;
-        btn.addEventListener("click", () => sendQuestion(choice));
-        prompt.appendChild(btn);
-      });
-      climbPathEl.appendChild(prompt);
+  // 분기(owner_check 등) 질문에 버튼으로 바로 답할 수 있게 - 세부 로드맵
+  // 경로 표시는 없어졌지만, 이 편의 기능은 그대로 유지.
+  function renderBranchPrompt(caseType, nodeId) {
+    const node = getNode(caseType, nodeId);
+    if (!node || node.type !== "branch") {
+      branchPromptEl.style.display = "none";
+      branchPromptEl.innerHTML = "";
+      lastBranch = null;
+      localStorage.removeItem("permit_assistant_branch");
+      return;
     }
+    lastBranch = { caseType, nodeId };
+    localStorage.setItem("permit_assistant_branch", JSON.stringify(lastBranch));
+    branchPromptEl.innerHTML = "";
+    Object.keys(node.options).forEach(choice => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "branch-btn";
+      btn.textContent = choice;
+      btn.addEventListener("click", () => sendQuestion(choice));
+      branchPromptEl.appendChild(btn);
+    });
+    branchPromptEl.style.display = "flex";
   }
 
   function restoreStageIndicator() {
-    const saved = localStorage.getItem("permit_assistant_visited");
-    if (saved) {
-      try { visitedNodes = JSON.parse(saved); } catch (err) { visitedNodes = []; }
-      renderStagePanel();
-    }
     const savedFacts = localStorage.getItem("permit_assistant_case_facts");
     if (savedFacts) {
       try { caseFacts = JSON.parse(savedFacts); } catch (err) { caseFacts = {}; }
     }
+    const savedPermitResult = localStorage.getItem("permit_assistant_permit_result");
+    if (savedPermitResult) {
+      try { latestPermitResult = JSON.parse(savedPermitResult); } catch (err) { latestPermitResult = null; }
+    }
     caseTypeResult = localStorage.getItem("permit_assistant_case_type");
+
+    // 이번 대화에서 뭔가 진행된 게 하나라도 있어야 게이지를 보여준다(빈
+    // 대화에서까지 0단계 게이지를 먼저 보여줄 필요는 없음 - climbHint 유지).
+    if (Object.keys(caseFacts).length > 0 || latestPermitResult) {
+      renderGauge();
+    }
+
+    const savedBranch = localStorage.getItem("permit_assistant_branch");
+    if (savedBranch) {
+      try {
+        const { caseType, nodeId } = JSON.parse(savedBranch);
+        renderBranchPrompt(caseType, nodeId);
+      } catch (err) { /* ignore */ }
+    }
     renderFactTags();
   }
 
   function resetStageIndicator() {
-    visitedNodes = [];
-    climbPathEl.style.display = "none";
-    climbPathEl.innerHTML = "";
+    gaugeEl.style.display = "none";
     climbHintEl.style.display = "block";
+    branchPromptEl.style.display = "none";
+    branchPromptEl.innerHTML = "";
+    lastBranch = null;
     caseFacts = {};
     caseTypeResult = null;
+    latestPermitResult = null;
     renderFactTags();
   }
 
@@ -667,15 +839,18 @@
 
       addMessage("bot", data.answer, { toolCalls: data.tool_calls });
 
-      // 한 턴에 여러 번 호출될 수 있어(트리를 여러 노드 이어서 지나간 경우,
-      // 혹은 record_case_facts + set_procedure_stage가 같이 온 경우) 순서대로 전부 반영
+      // 한 턴에 여러 번 호출될 수 있어(record_case_facts + set_procedure_stage가
+      // 같이 온 경우 등) 순서대로 전부 반영. 게이지에 필요한 required_documents/
+      // pre_diagnosis_items는 여기서 도구 호출을 직접 재구성하지 않고, 서버가
+      // finalize_node에서 이미 조립한 data.permit_result를 그대로 신뢰한다
+      // (동일한 잠금 로직을 프론트에서 다시 구현하면 서버 로직과 어긋날 위험이 있음).
       let factsChanged = false;
       (data.tool_calls || []).forEach(tc => {
         if (tc.tool === "set_procedure_stage") {
           caseTypeResult = tc.args.case_type;
           localStorage.setItem("permit_assistant_case_type", caseTypeResult);
           factsChanged = true;
-          reportStageNode(tc.args.case_type, tc.args.node_id);
+          renderBranchPrompt(tc.args.case_type, tc.args.node_id);
         } else if (tc.tool === "record_case_facts") {
           for (const [k, v] of Object.entries(tc.args)) {
             if (v !== null && v !== undefined) caseFacts[k] = v;
@@ -685,6 +860,12 @@
         }
       });
       if (factsChanged) renderFactTags();
+
+      if (data.permit_result) {
+        latestPermitResult = data.permit_result;
+        localStorage.setItem("permit_assistant_permit_result", JSON.stringify(latestPermitResult));
+      }
+      if (Object.keys(caseFacts).length > 0 || latestPermitResult) renderGauge();
     } catch (err) {
       removeTypingIndicator();
       addMessage("bot", `서버에 연결할 수 없습니다: ${err.message}`, { isError: true });
@@ -719,9 +900,10 @@
 
   newChatBtn.addEventListener("click", () => {
     localStorage.removeItem("permit_assistant_user_id");
-    localStorage.removeItem("permit_assistant_visited");
+    localStorage.removeItem("permit_assistant_branch");
     localStorage.removeItem("permit_assistant_case_facts");
     localStorage.removeItem("permit_assistant_case_type");
+    localStorage.removeItem("permit_assistant_permit_result");
     userId = getUserId();
     userIdLabel.textContent = `세션: ${userId.slice(0, 8)}`;
     chatEl.innerHTML = "";

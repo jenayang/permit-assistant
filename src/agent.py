@@ -141,14 +141,17 @@ lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts�
 단계/턴에서 말한 내용을 다시 설명하지 마세요. 각 단계 끝에 다음 단계를
 계속 안내할지 짧게 묻고, 사용자가 동의하거나 관련 질문을 이어가면 다음
 단계로 넘어가세요. "한 번에 다 알려줘" 요청 시에만 4단계를 모두 한 번에.
-판정 직후 필수서류ᆞ협의기관을 아직 검색 안 했다면, 마무리 전에
-search_regulations로 근거를 확보하고 record_permit_synthesis로
-기록하세요(required_documents, related_agencies).
+[2단계: 필수 서류]를 아직 검색 안 했다면 search_regulations로 근거를
+확보하고 record_permit_synthesis로 기록하세요(required_documents,
+related_agencies). [3단계: 사전 진단]도 마찬가지로, 안내한 항목들을
+같은 도구의 pre_diagnosis_items에 답변과 동일한 문구로 기록하세요 -
+프론트엔드 진행 표시가 이 두 목록의 존재 여부로 단계 완료를 판단하니,
+텍스트로만 안내하고 기록을 빠뜨리면 안 됩니다.
 
 - [1단계: 상황 분석+필요 절차] 한 줄 요약, 단계명+관할기관만 나열(설명 1줄 이내)
-- [2단계: 필수 서류] 리스트만(설명 없이)
+- [2단계: 필수 서류] 리스트만(설명 없이) - record_permit_synthesis(required_documents=[...])
 - [3단계: 사전 진단] 주차대수ᆞ정화조 용량ᆞ소방시설ᆞ장애인 편의시설ᆞ위생
-  요구사항 중 실제 해당하는 것만 1~2줄+근거와 함께
+  요구사항 중 실제 해당하는 것만 1~2줄+근거와 함께 - record_permit_synthesis(pre_diagnosis_items=[...])
 - [4단계: 예상 소요 기간] 한 줄로
 
 ## 4. 정확성 원칙
@@ -310,26 +313,30 @@ def extract_text(content) -> str:
 def finalize_node(state: AgentState) -> dict:
     """PermitResult를 조립한다(LLM 재호출 없는 순수 결정론적 노드).
     permit_type/procedures는 build_permit_result()가 규칙 엔진으로 그대로
-    채우고, required_documents/related_laws/explanation은 LLM이
-    record_permit_synthesis로 기록한 값 + 방금 낸 최종 답변에서 뽑는다.
+    채우고, required_documents/pre_diagnosis_items/related_laws/explanation은
+    LLM이 record_permit_synthesis로 기록한 값 + 방금 낸 최종 답변에서 뽑는다.
 
-    잠금(`_finalized`) 조건을 두 번 잘못 잡아본 뒤 정착한 버전이다:
+    잠금(`_finalized`) 조건을 세 번 잘못 잡아본 뒤 정착한 버전이다:
     1) "분류 직후 딱 한 번만 실행 후 영구 잠금" - 분류 직후 첫 응답이 실제로는
-       owner_check 같은 분기 질문이라 required_documents/related_laws가
-       아직 비어있는 시점에 결과가 굳어버리고, 이후 턴에서 search_regulations로
-       근거를 실제로 찾아도 permit_result가 다시는 갱신되지 않았다.
+       owner_check 같은 분기 질문이라 아직 아무것도 안 채워진 시점에 결과가
+       굳어버리고, 이후 턴에서 search_regulations로 근거를 실제로 찾아도
+       permit_result가 다시는 갱신되지 않았다.
     2) "분류된 이후 매 턴 무조건 재실행"(잠금 완전 제거) - 위 문제는 풀리지만,
        종합이 끝난 뒤 사용자가 "감사합니다" 같은 무관한 말을 하면 그 턴에도
        또 실행되어 explanation이 방금 만든 완성된 설명 대신 그 잡담 텍스트로
-       덮어써지는 새 문제가 생겼다(둘 다 2026-07-24 실측 확인).
-    지금 버전: required_documents가 채워지기 전까지는(=아직 분기 질문 등
-    미완성 단계) 매 턴 다시 실행해서 최신 상태로 갱신하고, 채워지면(=
-    record_permit_synthesis가 실제로 호출된 시점) 그 결과를 최종 스냅샷으로
-    잠가서 이후의 무관한 대화가 덮어쓰지 못하게 한다. related_laws는 잠금
-    신호로 안 쓴다 - record_permit_synthesis처럼 "이제 끝났다"는 의도적
-    호출이 아니라, 어느 턴이든 답변에 [출처: ...] 인용이 하나만 있어도
-    채워지는 값이라 너무 일찍(서류는 아직 안 나온 시점에) 잠겨버릴 수 있다
-    (2026-07-24 실측 확인).
+       덮어써지는 새 문제가 생겼다.
+    3) "required_documents가 채워지면 잠금" - related_laws는 잠금 신호로 안
+       쓰겠다고 docstring에는 적어놓고 실제 조건문은 안 고쳐서 한동안 여전히
+       `or result.related_laws`가 남아있었다([출처: ...] 인용 하나만 있어도
+       서류가 비어있는 채로 조기에 잠기는 버그) - 코드 리뷰 없이 docstring만
+       고치면 실제로 이렇게 어긋난다는 걸 보여주는 사례라 남겨둔다.
+    지금 버전: required_documents와 pre_diagnosis_items가 **둘 다** 채워지기
+    전까지는(=아직 분기 질문이거나 서류ᆞ사전진단 중 하나만 끝난 미완성 단계)
+    매 턴 다시 실행해서 최신 상태로 갱신하고, 둘 다 채워지면(=SYSTEM_PROMPT가
+    유도하는 2ᆞ3단계가 서로 다른 턴에 걸쳐 나올 수 있어서 하나만으로는
+    부족함) 그 결과를 최종 스냅샷으로 잠가서 이후의 무관한 대화가 덮어쓰지
+    못하게 한다. related_laws는 여전히 잠금 신호로 안 쓴다(2026-07-24 실측
+    확인, 위 3번 참고).
     """
     facts = state.get("case_facts", {})
     result = build_permit_result(facts)
@@ -340,14 +347,18 @@ def finalize_node(state: AgentState) -> dict:
     last_content = extract_text(state["messages"][-1].content)
 
     result.required_documents = synthesis.get("required_documents", [])
+    result.pre_diagnosis_items = synthesis.get("pre_diagnosis_items", [])
     result.related_laws = sorted(set(_CITATION_PATTERN.findall(last_content)))
     result.explanation = last_content
 
-    logger.info("[finalize] permit_type=%s, required_documents=%d, related_laws=%d",
-                result.permit_type, len(result.required_documents), len(result.related_laws))
+    logger.info(
+        "[finalize] permit_type=%s, required_documents=%d, pre_diagnosis_items=%d, related_laws=%d",
+        result.permit_type, len(result.required_documents),
+        len(result.pre_diagnosis_items), len(result.related_laws),
+    )
 
     update: dict = {"permit_result": result}
-    if result.required_documents or result.related_laws:
+    if result.required_documents and result.pre_diagnosis_items:
         update["case_facts"] = {"_finalized": True}
     return update
 

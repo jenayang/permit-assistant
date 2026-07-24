@@ -236,11 +236,14 @@ def classify_case(facts: dict) -> str | None:
 # 결과가 필요한) 값이라 이 단계에서는 채우지 않고 LLM이 나중에 채울 자리로 남긴다.
 class PermitResult(BaseModel):
     """Permit Agent의 구조화 출력. permit_type/procedures는 규칙 엔진 확정값,
-    required_documents/related_laws/explanation은 LLM이 채울 자리(현재는 빈 값)."""
+    required_documents/pre_diagnosis_items/related_laws/explanation은 LLM이 채울 자리."""
 
     permit_type: str = Field(description="classify_case()가 계산한 절차 결과(예: 건축허가)")
     procedures: list[str] = Field(description="PROCEDURE_TREE에서 결정론적으로 뽑은 절차 단계 라벨 목록")
     required_documents: list[str] = Field(default_factory=list, description="필수 서류 목록 - 아직 미채움")
+    pre_diagnosis_items: list[str] = Field(
+        default_factory=list, description="사전 진단 항목(주차ᆞ정화조ᆞ소방 등) 목록 - 아직 미채움"
+    )
     related_laws: list[str] = Field(default_factory=list, description="근거 법령 목록 - 아직 미채움")
     explanation: str = Field(default="", description="LLM이 생성할 설명 텍스트 - 아직 미채움")
 
@@ -422,14 +425,19 @@ record_case_facts.description += "\n\n시설군 매핑표(용도변경 시 curre
 def record_permit_synthesis(
     required_documents: list[str] | None = None,
     related_agencies: list[str] | None = None,
+    pre_diagnosis_items: list[str] | None = None,
 ) -> str:
     """판정(permit_type)이 이미 확정된 뒤, 검색된 법령을 근거로 필요한 제출서류ᆞ
-    협의기관을 파악하면 기록하세요.
+    협의기관ᆞ사전 진단 항목을 파악하면 기록하세요.
 
     - record_case_facts와 마찬가지로 알게 되는 대로 부분적으로 호출해도
       이전에 기록한 값 위에 누적됩니다.
     - 아직 검색을 안 해서 모르면, 먼저 search_regulations/search_by_term으로
       근거를 확보한 뒤에 호출하세요 - 추측해서 채우지 마세요.
+    - pre_diagnosis_items: [3단계: 사전 진단]에서 안내한 항목(예: "주차대수
+      기준 확인", "정화조 용량 확인")을 답변과 동일한 문구로 기록하세요 -
+      프론트엔드가 이 목록의 존재 여부로 3단계 완료를 판단합니다(빈 목록이면
+      아직 3단계 진행 중으로 취급됨).
     """
     logger.info("[도구] record_permit_synthesis(%r)", {
         k: v for k, v in locals().items() if v is not None
