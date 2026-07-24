@@ -5,7 +5,8 @@
                     ├─ 실제 도구 호출 있음 → tools → agent (순환)
                     ├─ case_facts 다 모였고 아직 미분류 → classify → agent (한 번 더,
                     │  분류 결과를 답변에 자연스럽게 반영하도록)
-                    ├─ 분류 끝났고 아직 미종합 → finalize → END (LLM 재호출 없음)
+                    ├─ 분류 끝났고 아직 미종합 → finalize → END (LLM 재호출
+                    │  없음 - 아래 finalize 설명 참고)
                     └─ 그 외 → END
 
 classify와 finalize는 둘 다 LLM이 아니라 그래프가 강제로 실행하는 결정론적 노드다:
@@ -15,6 +16,10 @@ classify와 finalize는 둘 다 LLM이 아니라 그래프가 강제로 실행�
 - finalize: classify가 확정한 permit_type/procedures + LLM이 record_permit_synthesis로
   채운 required_documents/related_agencies + 최종 답변 텍스트를 모아 PermitResult로
   조립. 판정(rule)과 종합(LLM)의 경계를 그래프 단계로 명확히 나눈다.
+  required_documents/related_laws가 하나라도 채워지기 전까지는(=아직 owner_check
+  같은 분기 질문 단계) 매 턴 다시 실행해서 최신 상태로 갱신하고, 한 번이라도
+  채워지면(=실제 종합이 끝난 시점) 그 결과를 잠가서 이후 무관한 대화가 덮어쓰지
+  못하게 한다 - 자세한 배경은 finalize_node docstring 참고.
 """
 from __future__ import annotations
 
@@ -88,6 +93,15 @@ record_case_facts로 기록하세요(알게 되는 대로 부분 호출해도 �
 desired_facility_group이 둘 다 모여야 판정되니**, 하나만 아는 상태에서
 "기재변경일 가능성이 높다"처럼 예상을 언급하지 마세요.
 
+**용도변경 판정 사유(시설군 이동 방향)는 재구성하지 말고 그대로 옮기세요.**
+도구 응답에 "(사유: OO시설군(n)→XX시설군(m)는 ... 이동)"처럼 이미 계산ᆞ검증된
+문장이 같이 옵니다 - 어순만 자연스럽게 다듬어 답변에 넣되, "번호가 작아지니
+하위군" 같은 식으로 방향을 스스로 다시 판단해서 새로 문장을 만들지 마세요.
+이미 맞는 문장이 있는데 왜 다시 판단하냐고 물을 수 있는데, 정확히 그 이유
+때문입니다 - 시설군 번호는 작을수록 상위군이라 직관과 반대라서, 이 문장을
+참고만 하고 나름대로 재해석하면 실제로 반복해서 방향을 뒤집어 말하는
+사례가 있었습니다(허가↔신고 반대로 결론).
+
 예외 - 용도지역: 일반인은 대부분 모르니 직접 묻지 말고, 주소를 알면 먼저
 lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts로
 기록하세요. 자동 조회가 실패했을 때만 사용자에게 직접 물어보세요.
@@ -99,8 +113,21 @@ lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts�
 - 건폐율ㆍ용적률 질문 → lookup_building_ratio_limits (세부 용도지역을
   모르면 계산하지 말고 직접 질문)
 - 용도변경ᆞ대수선ᆞ증축처럼 **기존 건물이 있는** 케이스에서 그 건물의 현재
-  용도ᆞ연면적ᆞ층수 등이 필요하면 → lookup_building_ledger(주소, 번지 포함).
-  신축(빈 땅)에는 대장이 없으니 쓰지 마세요.
+  용도ᆞ연면적ᆞ층수를 사용자가 아직 말 안 해서 모르면 → lookup_building_ledger
+  (주소, 번지 포함)로 채우세요. 신축(빈 땅)에는 대장이 없으니 쓰지 마세요.
+  **사용자가 현재 용도를 이미 말해서 판정이 끝났어도, 주소를 알거나 받으면
+  lookup_building_ledger로 건축물대장상 공식 용도를 조회해서 대조하세요** -
+  일반인은 자기 건물의 공식 등록 용도를 모르거나 착각하는 경우가 흔합니다
+  (예: 실제로는 "사무소"로 등록돼 있는데 본인은 "그냥 사무실 자리"로만
+  인지). 조회 결과가 사용자가 말한 용도와 다르면:
+  1) 불일치를 사용자에게 명확히 알리고, 실제 절차 판단은 공식 기록 기준을
+     따라야 함을 설명하세요.
+  2) 공식 기록에 맞는 시설군으로 record_case_facts를 다시 호출해
+     current_facility_group을 정정하세요(재판정이 자동으로 다시 일어납니다).
+  다만 **이 대조 자체가 1~2단계(상황 분석ᆞ필수 서류) 안내를 막는 필수
+  조건은 아닙니다** - 주소를 모르면 사용자가 말한 정보로 먼저 1~2단계를
+  안내하고, 정확성 확인 차원에서 "정확한 판정을 위해 주소를 확인해드릴까요?"
+  처럼 병행 질문으로 자연스럽게 물어보세요.
 - 여러 관점에서 검색이 필요하면 도구를 반복 사용하세요. 검색 결과에 법령
   계층(법/시행령/시행규칙/조례)이 섞여 다르게 말하면 법 > 시행령 > 시행규칙
   우선 원칙을 따르고, 조례는 상충이 아니라 지역 추가 규정으로 안내하세요.
@@ -248,7 +275,7 @@ def classify_node(state: AgentState) -> dict:
         }],
     )
     tool_msg = ToolMessage(
-        content=procedure_stage_message(result_type, root_node_id),
+        content=procedure_stage_message(result_type, root_node_id, facts=facts),
         tool_call_id=call_id,
         name="set_procedure_stage",
     )
@@ -281,15 +308,33 @@ def extract_text(content) -> str:
 
 
 def finalize_node(state: AgentState) -> dict:
-    """분류가 끝난 뒤 딱 한 번, PermitResult를 조립한다(LLM 재호출 없는 순수
-    결정론적 노드). permit_type/procedures는 build_permit_result()가 규칙
-    엔진으로 그대로 채우고, required_documents/related_laws/explanation은
-    LLM이 record_permit_synthesis로 기록한 값 + 방금 낸 최종 답변에서 뽑는다.
+    """PermitResult를 조립한다(LLM 재호출 없는 순수 결정론적 노드).
+    permit_type/procedures는 build_permit_result()가 규칙 엔진으로 그대로
+    채우고, required_documents/related_laws/explanation은 LLM이
+    record_permit_synthesis로 기록한 값 + 방금 낸 최종 답변에서 뽑는다.
+
+    잠금(`_finalized`) 조건을 두 번 잘못 잡아본 뒤 정착한 버전이다:
+    1) "분류 직후 딱 한 번만 실행 후 영구 잠금" - 분류 직후 첫 응답이 실제로는
+       owner_check 같은 분기 질문이라 required_documents/related_laws가
+       아직 비어있는 시점에 결과가 굳어버리고, 이후 턴에서 search_regulations로
+       근거를 실제로 찾아도 permit_result가 다시는 갱신되지 않았다.
+    2) "분류된 이후 매 턴 무조건 재실행"(잠금 완전 제거) - 위 문제는 풀리지만,
+       종합이 끝난 뒤 사용자가 "감사합니다" 같은 무관한 말을 하면 그 턴에도
+       또 실행되어 explanation이 방금 만든 완성된 설명 대신 그 잡담 텍스트로
+       덮어써지는 새 문제가 생겼다(둘 다 2026-07-24 실측 확인).
+    지금 버전: required_documents가 채워지기 전까지는(=아직 분기 질문 등
+    미완성 단계) 매 턴 다시 실행해서 최신 상태로 갱신하고, 채워지면(=
+    record_permit_synthesis가 실제로 호출된 시점) 그 결과를 최종 스냅샷으로
+    잠가서 이후의 무관한 대화가 덮어쓰지 못하게 한다. related_laws는 잠금
+    신호로 안 쓴다 - record_permit_synthesis처럼 "이제 끝났다"는 의도적
+    호출이 아니라, 어느 턴이든 답변에 [출처: ...] 인용이 하나만 있어도
+    채워지는 값이라 너무 일찍(서류는 아직 안 나온 시점에) 잠겨버릴 수 있다
+    (2026-07-24 실측 확인).
     """
     facts = state.get("case_facts", {})
     result = build_permit_result(facts)
     if result is None:
-        return {"case_facts": {"_finalized": True}}
+        return {}
 
     synthesis = state.get("permit_synthesis", {})
     last_content = extract_text(state["messages"][-1].content)
@@ -300,7 +345,11 @@ def finalize_node(state: AgentState) -> dict:
 
     logger.info("[finalize] permit_type=%s, required_documents=%d, related_laws=%d",
                 result.permit_type, len(result.required_documents), len(result.related_laws))
-    return {"permit_result": result, "case_facts": {"_finalized": True}}
+
+    update: dict = {"permit_result": result}
+    if result.required_documents or result.related_laws:
+        update["case_facts"] = {"_finalized": True}
+    return update
 
 
 def route_after_tools(state: AgentState) -> str:

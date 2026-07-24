@@ -280,22 +280,64 @@ def build_permit_result(facts: dict) -> PermitResult | None:
     )
 
 
-def procedure_stage_message(result_type: str, node_id: str) -> str:
+def _facility_group_reason(result_type: str, facts: dict) -> str:
+    """용도변경 판정 사유를 이미 확정된 result_type을 근거로 문장으로 서술한다.
+
+    build_permit_result(facts)와 동일하게 facts 전체를 받는다 - 필요한 필드만
+    콕 집어 파라미터로 받으면 다른 act_type(신축ᆞ증축 등)의 판정 사유를 추가할
+    때마다 procedure_stage_message의 시그니처가 계속 늘어나야 해서(size_sqm,
+    floors, land_zone, ...) 대신 facts를 통째로 넘기고 내부에서 result_type에
+    맞는 키만 꺼내 쓰게 한다.
+
+    classify_case()가 "dst < cur → 허가"를 판정할 때 이미 방향을 확정했으므로,
+    여기서는 그 비교를 다시 하지 않고 result_type(있는 그대로의 결과)에 맞는
+    설명만 붙인다 - 같은 비교를 두 곳에서 따로 하면 나중에 한쪽만 고쳐서
+    서로 어긋날 수 있음(단일 진실 공급원 원칙). LLM에게 "번호가 작을수록
+    상위군"이라는 규칙만 던져주고 스스로 방향을 재추론하게 하면 실제로
+    반복해서 뒤집어 말하는 문제가 있었다(8→7을 "하위군 이동(신고)"으로
+    착각 - 상위군 이동(허가)이 맞음, 2026-07-24 실측 확인) - 그래서 방향
+    판단 자체를 LLM에게 맡기지 않고 이미 확정된 결과를 그대로 서술한다.
+    """
+    current_facility_group = facts.get("current_facility_group")
+    desired_facility_group = facts.get("desired_facility_group")
+    if current_facility_group is None or desired_facility_group is None:
+        return ""
+    if current_facility_group not in FACILITY_GROUPS or desired_facility_group not in FACILITY_GROUPS:
+        return ""
+    cur_label = f"{FACILITY_GROUPS[current_facility_group][0]}({current_facility_group})"
+    dst_label = f"{FACILITY_GROUPS[desired_facility_group][0]}({desired_facility_group})"
+    if result_type == "건축물대장기재변경":
+        return f" (사유: {cur_label} 내에서의 변경)"
+    if result_type == "용도변경허가":
+        return f" (사유: {cur_label}→{dst_label}는 번호가 작아지는 상위군 이동 - 번호가 작을수록 상위군)"
+    if result_type == "용도변경신고":
+        return f" (사유: {cur_label}→{dst_label}는 번호가 커지는 하위군 이동 - 번호가 작을수록 상위군)"
+    return ""
+
+
+def procedure_stage_message(result_type: str, node_id: str, facts: dict | None = None) -> str:
     """(result_type, node_id)에 해당하는 안내 문구를 만든다.
 
     LLM이 직접 부르는 도구가 아니라, agent.py의 classify_case 그래프 노드가
     분류 결과를 답변에 반영할 때 참고용으로 쓰는 헬퍼 함수 - 허가/신고 판정
     자체는 이제 규칙 기반이라 LLM이 이 판단을 직접 할 필요가 없어졌다.
+    판정 사유(예: 용도변경의 시설군 이동 방향)까지 이미 확정된 result_type
+    기준으로 미리 문장을 만들어 같이 넘긴다(facts 전체를 받는 이유는
+    _facility_group_reason 참고).
     """
     tree = PROCEDURE_TREE.get(result_type)
     if tree is None or node_id not in tree["nodes"]:
         return f"'{node_id}'는 {result_type} 트리에 없는 노드입니다."
 
+    reason = _facility_group_reason(result_type, facts or {})
     node = tree["nodes"][node_id]
     if node["type"] == "branch":
         options = ", ".join(node["options"].keys())
-        return f'현재 절차 결과: {result_type}. 다음을 사용자에게 물어보세요: "{node["question"]}" (선택지: {options})'
-    return f"현재 절차 결과: {result_type} - {node['label']}."
+        return (
+            f'현재 절차 결과: {result_type}{reason}. 다음을 사용자에게 물어보세요: '
+            f'"{node["question"]}" (선택지: {options})'
+        )
+    return f"현재 절차 결과: {result_type}{reason} - {node['label']}."
 
 
 def generate_mermaid(tree: dict = PROCEDURE_TREE) -> str:
