@@ -32,8 +32,11 @@ logger = logging.getLogger(__name__)
 # 경우가 많아서, 매번 사용자에게 직접 물어보게 하는 대신 주소 기반으로 자동
 # 조회를 시도한다. 2026-07-22 기준: 지오코더는 개발키로 실제 호출해서 응답
 # 구조를 확인했지만, 2D데이터 API는 운영키 승인 전이라 INCORRECT_KEY로 막혀있어
-# 실제 응답을 못 봤다 - 아래 _vworld_query_land_zone의 레이어ID/속성 필드명은
-# 학습 시점 지식 기반 추정치이므로 운영키 승인 후 실제 응답으로 재검증 필요.
+# 실제 응답을 못 봤었다. 2026-07-24 운영키 승인 후에도 한 번 더 INCORRECT_KEY가
+# 났는데, 원인은 키가 아니라 domain 파라미터 누락이었다(운영키는 서버사이드
+# 호출 시 VWorld 콘솔에 등록한 서비스URL과 문자 그대로 일치하는 domain
+# 파라미터가 필수 - Referer로 판별하는 개발키와 다름). domain 추가 후 실제
+# 응답으로 레이어ID(LT_C_UQ111)ᆞ속성 필드명(uname)까지 검증 완료.
 _VWORLD_BASE = "https://api.vworld.kr/req"
 
 
@@ -81,9 +84,18 @@ def _map_land_zone_category(raw_name: str) -> str:
 
 
 def _vworld_query_land_zone(x: float, y: float) -> str | None:
-    """TODO(운영키 승인 후 검증): data=LT_C_UQ111(용도지역지구도_용도지역 추정)와
-    응답 속성 키(현재는 첫 속성값을 그냥 사용) 둘 다 미검증. 운영키로 실제 호출해
-    원본 응답(로그의 "2D데이터 API 원본 응답")을 보고 정확한 속성 키로 고칠 것.
+    """data=LT_C_UQ111(용도지역지구도_용도지역) 조회. domain 파라미터 추가 후
+    운영키로 실제 호출해 응답 구조 검증 완료(2026-07-24) - 용도지역명은
+    `uname` 속성 필드에 담겨 온다(예: "제2종일반주거지역"). 같은 좌표에 여러
+    feature가 겹쳐 오면서 그중 일부는 uname이 빈 문자열인 경우가 실측으로
+    확인돼서, features[0]을 무조건 쓰지 않고 uname이 채워진 첫 feature를
+    찾는다.
+
+    domain 파라미터가 필수인 이유: 운영키는 브라우저의 Referer 헤더로 도메인을
+    판별하는 개발키와 달리, 서버사이드 호출(Referer 없음)에서는 요청에 domain
+    파라미터를 직접 실어 보내야 한다 - 이 값이 VWorld 콘솔에 등록한 서비스URL과
+    문자 그대로 일치해야 통과된다(안 그러면 키 자체는 맞아도 INCORRECT_KEY가
+    남 - 2026-07-24 실측 확인).
     """
     try:
         resp = requests.get(
@@ -93,6 +105,7 @@ def _vworld_query_land_zone(x: float, y: float) -> str | None:
                 "request": "GetFeature",
                 "data": "LT_C_UQ111",
                 "key": config.VWORLD_API_KEY,
+                "domain": config.VWORLD_DOMAIN,
                 "geomFilter": f"POINT({x} {y})",
                 "geometry": "false",
                 "attribute": "true",
@@ -108,9 +121,12 @@ def _vworld_query_land_zone(x: float, y: float) -> str | None:
             logger.warning("[lookup_land_zone] 2D데이터 API 실패: %s", response.get("error"))
             return None
         features = response["result"]["featureCollection"]["features"]
-        if not features:
+        raw_name = next(
+            (f["properties"]["uname"] for f in features if f["properties"].get("uname")),
+            None,
+        )
+        if not raw_name:
             return None
-        raw_name = str(next(iter(features[0]["properties"].values())))
         return _map_land_zone_category(raw_name)
     except (requests.RequestException, ValueError, KeyError, IndexError) as exc:
         logger.warning("[lookup_land_zone] 2D데이터 조회 실패: %s", exc)

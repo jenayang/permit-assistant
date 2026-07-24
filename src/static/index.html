@@ -106,6 +106,11 @@
     color: var(--accent-text);
     font-weight: 600;
   }
+  .fact-tag.result.food {
+    border-color: #b45309;
+    background: #b45309;
+    color: #ffffff;
+  }
   .climb-hint {
     margin: auto 0;
     text-align: center;
@@ -480,6 +485,7 @@
   // 확인하고, 빠지거나 틀린 게 있으면 대화로 스스로 정정하도록 유도하는 용도.
   let caseFacts = {};
   let caseTypeResult = null; // set_procedure_stage로 확정된 허가/신고/기재변경 등
+  let latestFoodResult = null; // /query 응답의 food_result(식품위생법상 영업 종류)를 그대로 보관
 
   // case_facts 필드 → 태그 텍스트 변환. 여기 없는 필드는 태그로 안 보임(값
   // 하나만으로는 뜻이 안 통하는 필드는 아래에서 조합해서 별도 처리).
@@ -521,7 +527,16 @@
       span.textContent = caseTypeResult;
       factTagsEl.appendChild(span);
     }
-    factTagsEl.style.display = chips.length || caseTypeResult ? "flex" : "none";
+    // "해당없음"(식품위생법 영업신고 대상 아님)은 칩으로 안 보여줌 - 정보성이
+    // 낮고 사무실 등 무관한 업종에서 매번 뜨면 UI만 어수선해짐.
+    const showFoodTag = latestFoodResult && latestFoodResult !== "해당없음";
+    if (showFoodTag) {
+      const span = document.createElement("span");
+      span.className = "fact-tag result food";
+      span.textContent = `🍽 ${latestFoodResult}`;
+      factTagsEl.appendChild(span);
+    }
+    factTagsEl.style.display = chips.length || caseTypeResult || showFoodTag ? "flex" : "none";
   }
 
   async function loadProcedureStages() {
@@ -691,6 +706,7 @@
       try { latestPermitResult = JSON.parse(savedPermitResult); } catch (err) { latestPermitResult = null; }
     }
     caseTypeResult = localStorage.getItem("permit_assistant_case_type");
+    latestFoodResult = localStorage.getItem("permit_assistant_food_result");
 
     // 이번 대화에서 뭔가 진행된 게 하나라도 있어야 게이지를 보여준다(빈
     // 대화에서까지 0단계 게이지를 먼저 보여줄 필요는 없음 - climbHint 유지).
@@ -717,6 +733,7 @@
     caseFacts = {};
     caseTypeResult = null;
     latestPermitResult = null;
+    latestFoodResult = null;
     renderFactTags();
   }
 
@@ -865,6 +882,11 @@
         latestPermitResult = data.permit_result;
         localStorage.setItem("permit_assistant_permit_result", JSON.stringify(latestPermitResult));
       }
+      if (data.food_result) {
+        latestFoodResult = data.food_result;
+        localStorage.setItem("permit_assistant_food_result", latestFoodResult);
+        renderFactTags();
+      }
       if (Object.keys(caseFacts).length > 0 || latestPermitResult) renderGauge();
     } catch (err) {
       removeTypingIndicator();
@@ -904,6 +926,7 @@
     localStorage.removeItem("permit_assistant_case_facts");
     localStorage.removeItem("permit_assistant_case_type");
     localStorage.removeItem("permit_assistant_permit_result");
+    localStorage.removeItem("permit_assistant_food_result");
     userId = getUserId();
     userIdLabel.textContent = `세션: ${userId.slice(0, 8)}`;
     chatEl.innerHTML = "";

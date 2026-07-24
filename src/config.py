@@ -41,8 +41,13 @@ CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "gemma-4-31b")
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY")
 
 # 브이월드(VWorld) - 주소로 용도지역 자동 조회(지오코더 + 2D데이터 API).
-# 개발키는 지오코더만 즉시 열리고 2D데이터는 운영키 승인 후에 열림(2026-07-22 확인).
+# 개발키는 지오코더만 즉시 열리고 2D데이터는 운영키 승인 후에 열림(2026-07-22
+# 확인, 2026-07-24 운영키 승인됨). 운영키는 브라우저 Referer 대신 요청에
+# domain 파라미터를 직접 실어 보내야 하고, 이 값이 VWorld 콘솔에 등록한
+# 서비스URL과 문자 그대로 일치해야 한다(안 그러면 INCORRECT_KEY) - 로컬
+# 개발 서버라 서비스URL을 localhost로 등록해뒀다.
 VWORLD_API_KEY = os.getenv("VWORLD_API_KEY")
+VWORLD_DOMAIN = os.getenv("VWORLD_DOMAIN", "localhost")
 
 # 건축HUB - 건축물대장정보 서비스(BldRgstHubService). 기존 건물의 현재 등록 정보
 # (용도ᆞ연면적ᆞ층수ᆞ건폐율ᆞ용적률ᆞ사용승인일) 자동 조회용 - 용도변경ᆞ대수선ᆞ

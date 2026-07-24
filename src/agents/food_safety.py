@@ -8,8 +8,7 @@ data/laws/식품위생법 시행령(대통령령)(제35811호)(20251001).pdf, �
 
 이 챗봇의 타깃(카페ᆞ음식점ᆞ베이커리 등 소규모 창업)과 거리가 먼
 단란주점ᆞ유흥주점ᆞ위탁급식영업(제21조8호다ᆞ라ᆞ마)은 범위 밖으로 둔다 -
-필요해지면 classify_food_business에 분기만 추가하면 된다(REQUIRED_FIELDS_FOOD도
-같이 확장 필요).
+필요해지면 classify_food_business에 분기만 추가하면 된다.
 
 건축(permit.py)과 식품위생(이 파일)은 서로 다른 법령 도메인이라 판정에 쓰는
 사실(facts)도 독립적이다 - 카페 창업처럼 두 판정이 동시에 필요한 경우
@@ -25,48 +24,45 @@ from langchain_core.tools import tool
 logger = logging.getLogger(__name__)
 
 
-# classify_food_business가 판정에 참조하는 사실 목록. 하나라도 비어있으면(None)
-# 아직 분류 안 함 - agent.py 그래프가 이걸로 "정보 충분?" 판단(permit.py의
-# REQUIRED_FIELDS와 동일한 역할).
-REQUIRED_FIELDS_FOOD: list[str] = [
-    "serves_food", "sells_ready_made_only", "primarily_bakery", "serves_alcohol",
-]
-
-
-def _missing_fields_food(facts: dict) -> list[str]:
-    return [f for f in REQUIRED_FIELDS_FOOD if facts.get(f) is None]
-
-
 def classify_food_business(facts: dict) -> str | None:
     """food_facts로 식품위생법 시행령 제21조상 영업 종류를 결정. 정보 부족하면 None.
 
     facts에서 쓰는 키(전부 bool):
       serves_food: 음식류를 조리ᆞ판매하는 업종인지. False면 식품위생법상
         영업신고 대상 자체가 아님(예: 사무실ᆞ일반 소매업ᆞ미용실).
+      primarily_bakery: 주로 빵ᆞ떡ᆞ과자를 제조ᆞ판매하는지 - 제21조8호바
+        제과점영업 기준. sells_ready_made_only보다 먼저 판단한다(직접
+        조리ᆞ제조해서 판매하는 경우는 "완제품만 되파는" 게 아니므로).
       sells_ready_made_only: 조리 없이 이미 완성된 식품(포장 완제품)만
         최종소비자에게 판매하는지 - 제21조2호 즉석판매제조ᆞ가공업 기준.
-      primarily_bakery: 주로 빵ᆞ떡ᆞ과자를 제조ᆞ판매하는지 - 제21조8호바
-        제과점영업 기준(직접 조리ᆞ제조해 판매하는 베이커리는 여기 해당,
-        sells_ready_made_only보다 우선 판단).
       serves_alcohol: 식사와 함께 음주행위(주류 판매)가 허용되는지 - 이게
         휴게음식점(불허, 제21조8호가)과 일반음식점(허용, 제21조8호나)을
         가르는 핵심 기준.
 
-    네 값이 전부 모여야 판정한다(미확정 상태로 추측 판정하지 않음 -
-    _missing_fields_food가 먼저 걸러줌).
+    네 필드를 전부 미리 요구하지 않고, 이미 확정된 사실만으로 결론이 나면
+    그 자리에서 바로 판정한다(예: primarily_bakery=True만 알아도 제과점영업으로
+    확정 - sells_ready_made_only/serves_alcohol은 더 물을 필요 없음). 처음엔
+    네 필드가 전부 모여야만 판정하게 짰었는데, "빵ᆞ과자 직접 제조ᆞ판매" +
+    "주류 안 팔음"까지 답한 사용자가 sells_ready_made_only 하나를 LLM이 안
+    물어봤다는 이유만으로 계속 미분류로 남는 문제를 실측으로 확인해서
+    분기 순서 그대로 단락(short-circuit) 평가하도록 고쳤다(2026-07-24).
     """
-    if _missing_fields_food(facts):
+    if facts.get("serves_food") is None:
         return None
-
     if not facts["serves_food"]:
         return "해당없음"  # 식품위생법 영업신고 대상 아님
 
-    if facts["sells_ready_made_only"]:
+    if facts.get("primarily_bakery"):
+        return "제과점영업"  # 시행령 제21조8호바
+    if facts.get("sells_ready_made_only"):
         return "즉석판매제조가공업"  # 시행령 제21조2호
 
-    if facts["primarily_bakery"]:
-        return "제과점영업"  # 시행령 제21조8호바
-
+    # 여기까지 왔다는 건 베이커리ᆞ즉석판매 둘 다 아니라고 확정됐거나(False),
+    # 아직 안 물어봤을(None) 수 있다 - 후자면 아직 결론 낼 수 없다.
+    if facts.get("primarily_bakery") is None or facts.get("sells_ready_made_only") is None:
+        return None
+    if facts.get("serves_alcohol") is None:
+        return None
     return "일반음식점영업" if facts["serves_alcohol"] else "휴게음식점영업"  # 시행령 제21조8호나ᆞ가
 
 
