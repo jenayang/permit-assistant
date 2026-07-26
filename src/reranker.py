@@ -8,6 +8,7 @@ CrossEncoder로 후보를 다시 정렬해서 상위 몇 개만 추린다 - sent
 from __future__ import annotations
 
 import difflib
+import threading
 
 from langchain_core.documents import Document
 from sentence_transformers import CrossEncoder
@@ -17,12 +18,25 @@ from sentence_transformers import CrossEncoder
 # 실제 한국어 품질은 첫 사용 시 스모크 테스트로 확인할 것.
 _MODEL_NAME = "BAAI/bge-reranker-v2-m3"
 _cross_encoder: CrossEncoder | None = None
+_cross_encoder_lock = threading.Lock()
 
 
 def _get_cross_encoder() -> CrossEncoder:
+    """CrossEncoder 싱글턴 (retriever.py의 get_vectorstore()와 같은 이유로 락 필요).
+
+    LangGraph의 ToolNode는 한 턴에 여러 tool_call을 병렬 실행할 수 있는데(실제로
+    search_regulations가 한 턴에 2번 호출되는 경우가 있음 - agent.py SYSTEM_PROMPT의
+    "여러 관점에서 검색이 필요하면 도구를 반복 사용하세요" 지시가 그런 호출을
+    유도함), 락 없이 "None이면 생성"만 하면 두 스레드가 동시에 CrossEncoder(...)를
+    만들려다(=HuggingFace에서 같은 모델을 동시에 다운로드ᆞ초기화) 충돌한다
+    (2026-07-26 실측: 첫 로드 시점에 search_regulations 2회 병렬 호출로 프로세스가
+    응답 없이 멈추는 현상 재현).
+    """
     global _cross_encoder
     if _cross_encoder is None:
-        _cross_encoder = CrossEncoder(_MODEL_NAME)
+        with _cross_encoder_lock:
+            if _cross_encoder is None:  # 락 대기 중 다른 스레드가 이미 만들었을 수 있음
+                _cross_encoder = CrossEncoder(_MODEL_NAME)
     return _cross_encoder
 
 

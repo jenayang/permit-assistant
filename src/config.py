@@ -100,8 +100,13 @@ THINKING_BUDGET = 0
 
 
 # === LangSmith ===
+# LangSmith SDK는 os.environ을 직접 읽어서 이 파이썬 변수 자체는 참조하지 않는다 -
+# setdefault로 다시 os.environ에 써 넣어야 .env에 값이 없을 때도 여기 기본값
+# (project="permit-assistant")이 실제로 적용된다.
 LANGCHAIN_TRACING_V2 = os.getenv("LANGCHAIN_TRACING_V2", "false")
 LANGCHAIN_PROJECT = os.getenv("LANGCHAIN_PROJECT", "permit-assistant")
+os.environ.setdefault("LANGCHAIN_TRACING_V2", LANGCHAIN_TRACING_V2)
+os.environ.setdefault("LANGCHAIN_PROJECT", LANGCHAIN_PROJECT)
 
 
 # === LangGraph ===
