@@ -33,7 +33,8 @@ import logging
 import re
 import sqlite3
 import uuid
-from typing import Annotated
+from dataclasses import dataclass
+from typing import Annotated, Callable
 
 from langchain_cerebras import ChatCerebras
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -367,94 +368,140 @@ def _auto_search_messages(query: str) -> list:
     ]
 
 
-def classify_node(state: AgentState) -> dict:
-    """case_facts/food_facts/fire_facts가 각각 충분히 모이면 해당 도메인을
-    결정론적으로 분류하고, 그 결과를 (LLM이 부른 게 아니라 이 노드가 직접
-    구성한) tool_calls 모양 메시지로 기록한다. pipeline.py의 tool_calls
-    추출 로직과 프론트의 로드맵 렌더링 코드가 "tool: set_procedure_stage"
-    모양만 보고 반응하므로, 별도 API/프론트 수정 없이 그대로 재사용된다.
-    판정이 실제로 났으면(별도 절차가 있는 결과만 - 인허가불필요/해당없음/
-    빈 소방시설 목록은 검색할 게 없으므로 제외) 곧바로 _auto_search_messages로
-    근거 법령까지 같은 턴에 확보해둔다.
+@dataclass(frozen=True)
+class ClassificationOutput:
+    """도메인 classify_fn 하나가 반환하는 표준 산출물. classify_fn이 None을
+    반환하면 "아직 정보 부족"이고, 이 객체를 반환하면(raw_result가 빈 리스트
+    같은 falsy 값이어도) 그 자체로 "판정 완료"를 뜻한다 - 완료 여부를 별도
+    bool 필드로 안 두는 이유: raw_result 유무 하나로 이미 충분히 표현되는데
+    별도 필드를 추가하면 "완료인데 값이 없다"처럼 둘이 어긋나는 상태가
+    생길 수 있어(정보 소스가 두 개가 되는 순간 서로 안 맞을 위험이 생김 -
+    오늘 잡은 버그들이 전부 이 종류였다). 불변으로 둬서 그래프가 만든 뒤에
+    실수로 고쳐 쓰는 것도 막는다.
+    """
+    raw_result: object          # 상태에 그대로 저장할 값 (str | list[str] 등, 도메인마다 다름)
+    tool_name: str               # 합성 tool_call 이름(예: set_procedure_stage)
+    tool_args: dict               # 그 tool_call의 args
+    tool_message: str             # 대응 ToolMessage 내용(LLM이 답변에 반영할 안내문)
+    rag_query: str | None         # 판정 직후 자동 검색할 쿼리. None이면 검색 생략
+                                   # (인허가불필요ᆞ해당없음ᆞ빈 소방시설 목록처럼 찾을 근거가 없는 경우)
 
-    세 도메인(건축ᆞ식품위생ᆞ소방)은 서로 독립적이라 한 턴에 하나만, 여럿,
-    혹은 (route_after_tools가 이미 걸러줘서) 아무것도 새로 분류되지 않을 수
+
+@dataclass(frozen=True)
+class _DomainConfig:
+    """classify_node/route_after_tools가 도메인 하나를 다루는 데 필요한 배관
+    정보. facts_key/state_key는 그래프(상태 채널 이름)의 책임이라 classify_fn
+    자신은 몰라도 된다 - classify_fn은 순수하게 "facts 주면 판정 결과 냄"만
+    담당(Strategy 패턴, 다만 메서드가 하나뿐이라 클래스 대신 함수로 충분).
+    """
+    facts_key: str
+    state_key: str | None         # 즉시 저장할 상태 키. None이면 저장 안 함(permit - finalize_node가 나중에 따로 처리)
+    classify_fn: Callable[[dict], ClassificationOutput | None]
+
+
+def _classify_permit(facts: dict) -> ClassificationOutput | None:
+    """classify_case()(permit.py, 순수 판정 로직)를 감싸 ClassificationOutput
+    모양으로 변환하는 배관 전용 래퍼 - classify_case() 자체와 그걸 쓰는
+    기존 테스트는 안 건드린다."""
+    result_type = classify_case(facts)
+    if result_type is None:
+        return None
+    root_node_id = PROCEDURE_TREE[result_type]["root"]
+    return ClassificationOutput(
+        raw_result=result_type,
+        tool_name="set_procedure_stage",
+        tool_args={"case_type": result_type, "node_id": root_node_id},
+        tool_message=procedure_stage_message(result_type, root_node_id, facts=facts),
+        rag_query=None if result_type == "인허가불필요" else f"{result_type} 절차 및 필요 서류",
+    )
+
+
+def _classify_food(facts: dict) -> ClassificationOutput | None:
+    """classify_food_business()(food_safety.py)를 감싸는 배관 전용 래퍼."""
+    business_type = classify_food_business(facts)
+    if business_type is None:
+        return None
+    return ClassificationOutput(
+        raw_result=business_type,
+        tool_name="set_food_business_type",
+        tool_args={"business_type": business_type},
+        tool_message=food_business_message(business_type),
+        rag_query=None if business_type == "해당없음" else f"{business_type} 영업신고 절차 및 필요 서류",
+    )
+
+
+def _classify_fire(facts: dict) -> ClassificationOutput | None:
+    """classify_fire_safety()(fire_safety.py)를 감싸는 배관 전용 래퍼."""
+    required = classify_fire_safety(facts)
+    if required is None:
+        return None
+    return ClassificationOutput(
+        raw_result=required,
+        tool_name="set_fire_safety_result",
+        tool_args={"required": required},
+        tool_message=fire_safety_message(required),
+        rag_query=f"{', '.join(required)} 설치 기준 및 절차" if required else None,
+    )
+
+
+# 도메인을 추가할 땐 이 목록에 한 줄만 추가하면 된다 - classify_node/
+# route_after_tools 둘 다 이 목록만 보고 움직이므로 그래프 쪽은 더 안 고쳐도 됨.
+DOMAIN_CONFIGS: list[_DomainConfig] = [
+    _DomainConfig(facts_key="case_facts", state_key=None, classify_fn=_classify_permit),
+    _DomainConfig(facts_key="food_facts", state_key="food_result", classify_fn=_classify_food),
+    _DomainConfig(facts_key="fire_facts", state_key="fire_result", classify_fn=_classify_fire),
+]
+
+
+def run_classifier(state: AgentState, config: _DomainConfig) -> tuple[list, dict] | None:
+    """도메인 하나에 대해 "아직 미분류면 classify_fn 실행 → tool_call/
+    ToolMessage 구성 → 필요하면 자동 검색까지" 공통 처리를 한다. 이미
+    분류됐거나 아직 정보가 부족하면 None을 반환해 classify_node가 건너뛰게
+    한다. permit(도메인)처럼 나온 결과를 즉시 저장하지 않는 경우는
+    config.state_key가 None이라 자동으로 저장을 생략한다."""
+    facts = state.get(config.facts_key, {})
+    if facts.get("_classified"):
+        return None
+    output = config.classify_fn(facts)
+    if output is None:
+        return None
+
+    call_id = f"classify_{uuid.uuid4().hex[:8]}"
+    messages = [
+        AIMessage(content="", tool_calls=[{"name": output.tool_name, "args": output.tool_args, "id": call_id}]),
+        ToolMessage(content=output.tool_message, tool_call_id=call_id, name=output.tool_name),
+    ]
+    state_update: dict = {config.facts_key: {"_classified": True}}
+    if config.state_key:
+        state_update[config.state_key] = output.raw_result
+    logger.info("[classify:%s] facts=%r → %r", config.facts_key, facts, output.raw_result)
+
+    if output.rag_query:
+        messages.extend(_auto_search_messages(output.rag_query))
+
+    return messages, state_update
+
+
+def classify_node(state: AgentState) -> dict:
+    """DOMAIN_CONFIGS에 등록된 도메인마다 run_classifier를 돌려, 그 결과를
+    (LLM이 부른 게 아니라 이 노드가 직접 구성한) tool_calls 모양 메시지로
+    기록한다. pipeline.py의 tool_calls 추출 로직과 프론트의 로드맵 렌더링
+    코드가 "tool: set_procedure_stage" 모양만 보고 반응하므로, 별도
+    API/프론트 수정 없이 그대로 재사용된다.
+
+    도메인들은 서로 독립적이라 한 턴에 하나만, 여럿, 혹은
+    (route_after_tools가 이미 걸러줘서) 아무것도 새로 분류되지 않을 수
     있다 - 해당하는 도메인만 골라 처리하고 메시지를 이어붙인다.
     """
     messages: list = []
     update: dict = {}
-
-    facts = state.get("case_facts", {})
-    if not facts.get("_classified"):
-        result_type = classify_case(facts)
-        if result_type is not None:
-            root_node_id = PROCEDURE_TREE[result_type]["root"]
-            call_id = f"classify_{uuid.uuid4().hex[:8]}"
-            messages.append(AIMessage(
-                content="",
-                tool_calls=[{
-                    "name": "set_procedure_stage",
-                    "args": {"case_type": result_type, "node_id": root_node_id},
-                    "id": call_id,
-                }],
-            ))
-            messages.append(ToolMessage(
-                content=procedure_stage_message(result_type, root_node_id, facts=facts),
-                tool_call_id=call_id,
-                name="set_procedure_stage",
-            ))
-            update["case_facts"] = {"_classified": True}
-            logger.info("[classify] case_facts=%r → %s", facts, result_type)
-            if result_type != "인허가불필요":
-                messages.extend(_auto_search_messages(f"{result_type} 절차 및 필요 서류"))
-
-    food_facts = state.get("food_facts", {})
-    if not food_facts.get("_classified"):
-        business_type = classify_food_business(food_facts)
-        if business_type is not None:
-            call_id = f"classify_food_{uuid.uuid4().hex[:8]}"
-            messages.append(AIMessage(
-                content="",
-                tool_calls=[{
-                    "name": "set_food_business_type",
-                    "args": {"business_type": business_type},
-                    "id": call_id,
-                }],
-            ))
-            messages.append(ToolMessage(
-                content=food_business_message(business_type),
-                tool_call_id=call_id,
-                name="set_food_business_type",
-            ))
-            update["food_facts"] = {"_classified": True}
-            update["food_result"] = business_type
-            logger.info("[classify_food] food_facts=%r → %s", food_facts, business_type)
-            if business_type != "해당없음":
-                messages.extend(_auto_search_messages(f"{business_type} 영업신고 절차 및 필요 서류"))
-
-    fire_facts = state.get("fire_facts", {})
-    if not fire_facts.get("_classified"):
-        required = classify_fire_safety(fire_facts)
-        if required is not None:
-            call_id = f"classify_fire_{uuid.uuid4().hex[:8]}"
-            messages.append(AIMessage(
-                content="",
-                tool_calls=[{
-                    "name": "set_fire_safety_result",
-                    "args": {"required": required},
-                    "id": call_id,
-                }],
-            ))
-            messages.append(ToolMessage(
-                content=fire_safety_message(required),
-                tool_call_id=call_id,
-                name="set_fire_safety_result",
-            ))
-            update["fire_facts"] = {"_classified": True}
-            update["fire_result"] = required
-            logger.info("[classify_fire] fire_facts=%r → %s", fire_facts, required)
-            if required:
-                messages.extend(_auto_search_messages(f"{', '.join(required)} 설치 기준 및 절차"))
+    for config in DOMAIN_CONFIGS:
+        result = run_classifier(state, config)
+        if result is None:
+            continue
+        domain_messages, domain_update = result
+        messages.extend(domain_messages)
+        update.update(domain_update)
 
     if messages:
         update["messages"] = messages
@@ -665,40 +712,35 @@ def guard_node(state: AgentState) -> dict:
     return update
 
 
+def _any_domain_needs_classify(state: AgentState) -> bool:
+    """DOMAIN_CONFIGS에 등록된 도메인 중 하나라도 "아직 미분류 + 지금 분류
+    가능"이면 True. run_classifier와 판정 조건은 같지만 메시지를 실제로
+    만들지는 않는 가벼운 버전 - route_after_tools는 갈 곳만 결정하면 되고
+    실제 처리는 classify_node가 한다."""
+    for config in DOMAIN_CONFIGS:
+        facts = state.get(config.facts_key, {})
+        if not facts.get("_classified") and config.classify_fn(facts) is not None:
+            return True
+    return False
+
+
 def route_after_tools(state: AgentState) -> str:
-    """tools 실행 직후: case_facts/food_facts/fire_facts 중 하나라도 방금
-    완성됐으면(각각 record_case_facts/record_food_facts/record_fire_facts로
-    채워짐) agent로 돌아가기 전에 classify부터 강제한다.
+    """tools 실행 직후: 등록된 도메인 중 하나라도 방금 완성됐으면(각각
+    record_case_facts/record_food_facts/record_fire_facts로 채워짐) agent로
+    돌아가기 전에 classify부터 강제한다.
 
     예전엔 이 체크를 route_after_agent(agent 응답 이후)에서만 했는데, 그러면
     "case_facts는 이미 다 모였지만 LLM이 그 사실을 모른 채 도구 호출 없이
     먼저 답변을 시도 -> 그래프가 그 답변을 무시하고 classify로 강제 전환 ->
     다음 턴 LLM이 '이미 답했나?' 헷갈려하며 부실한 후속 답변을 내는" 문제가
     실제로 발생했다. tools 직후로 당기면 LLM이 답변을 시도하기 전에 분류가
-    먼저 끝나서 이 문제가 구조적으로 사라진다. food_facts/fire_facts도 동일한
-    이유로 같은 시점에 체크한다(도메인이 늘어도 이 타이밍 원칙은 그대로 적용).
+    먼저 끝나서 이 문제가 구조적으로 사라진다. 도메인이 늘어도 이 타이밍
+    원칙은 DOMAIN_CONFIGS를 통해 그대로 적용된다.
     """
-    facts = state.get("case_facts", {})
-    food_facts = state.get("food_facts", {})
-    fire_facts = state.get("fire_facts", {})
-    needs_classify = not facts.get("_classified") and classify_case(facts) is not None
-    needs_food_classify = (
-        not food_facts.get("_classified") and classify_food_business(food_facts) is not None
-    )
-    needs_fire_classify = (
-        not fire_facts.get("_classified") and classify_fire_safety(fire_facts) is not None
-    )
-    if needs_classify or needs_food_classify or needs_fire_classify:
-        logger.info(
-            "[route_after_tools] case_facts=%r food_facts=%r fire_facts=%r → classify",
-            facts, food_facts, fire_facts,
-        )
+    if _any_domain_needs_classify(state):
+        logger.info("[route_after_tools] → classify")
         return "classify"
-    logger.info(
-        "[route_after_tools] case_facts=%r food_facts=%r fire_facts=%r → agent "
-        "(분류 조건 미충족 또는 이미 분류됨)",
-        facts, food_facts, fire_facts,
-    )
+    logger.info("[route_after_tools] → agent (분류 조건 미충족 또는 이미 분류됨)")
     return "agent"
 
 
