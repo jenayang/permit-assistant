@@ -102,11 +102,13 @@ class AgentState(MessagesState):
     # 별도 종합(finalize) 단계 없이 classify 시점에 바로 확정된다.
     signage_facts: Annotated[dict, merge_facts]
     signage_result: str | None
-    # 4단계(상황분석/서류/사전진단/기간) 안내 중 실제로 사용자에게 공개된
-    # 최대 단계(0~4) - 도메인별로 분리된 dict다(키: DOMAIN_CONFIGS의
-    # facts_key, 지금은 "case_facts"=permit만 실제로 씀). 처음엔 전역
-    # 스칼라 하나였는데, signage처럼 이 단계 구조를 안 쓰는 도메인의 답변에
-    # LLM이 [N단계] 마커를 잘못 갖다 써도 그게 permit의 카운터를 오염시켜서
+    # 4단계(상황분석/서류/사전진단/기간, 로드맵 Step 1의 하위 단계라 [Step 1-N]
+    # 으로 표시 - Step 0~4 전체 번호와 겹치면 혼동된다는 피드백으로 2026-07-27
+    # 개명) 안내 중 실제로 사용자에게 공개된 최대 단계(0~4) - 도메인별로
+    # 분리된 dict다(키: DOMAIN_CONFIGS의 facts_key, 지금은 "case_facts"=permit
+    # 만 실제로 씀). 처음엔 전역 스칼라 하나였는데, signage처럼 이 단계 구조를
+    # 안 쓰는 도메인의 답변에 LLM이 [Step 1-N] 마커를 잘못 갖다 써도 그게
+    # permit의 카운터를 오염시켜서
     # (예: 간판 얘기만 했는데 disclosed_stage가 올라가 나중에 진짜 건축
     # 얘기를 시작하면 이미 일부 단계가 끝난 것으로 오인) 도메인별로 분리했다
     # (2026-07-27 실측 확인). 프롬프트 지시만으로는 LLM이 한 턴에 4단계를
@@ -146,8 +148,8 @@ record_case_facts로 기록하세요(알게 되는 대로 부분 호출해도 �
 법령상 객관적 기준(면적ᆞ층수ᆞ시설군)으로 시스템이 자동 판정하며, 결과는
 다음 턴에 도구 응답으로 옵니다 - 그걸 참고해서 답변에 반영하세요. 정보가
 부족하면 결론을 암시하지 말고 부족한 사실만 되물으세요. **판정 결과가 도구
-응답으로 실제로 온 적이 없다면(=permit_type이 아직 확정 안 됨), [1단계]~[4단계]
-절차ᆞ서류ᆞ사전진단 내용을 먼저 설명하지 마세요** - 아직 판정도 안 났는데
+응답으로 실제로 온 적이 없다면(=permit_type이 아직 확정 안 됨), [Step 1-1]~
+[Step 1-4] 절차ᆞ서류ᆞ사전진단 내용을 먼저 설명하지 마세요** - 아직 판정도 안 났는데
 그 내용부터 말하면 근거 없는 추측이 됩니다(record_case_facts만 부분적으로
 호출하고 판정 도구 응답 없이 4단계까지 답변해버리는 실수가 실제로
 있었습니다 - 2026-07-24 확인). 특히 **85㎡ 기준은
@@ -213,7 +215,7 @@ record_fire_facts에도 그대로 기록하세요, 새로 묻지 마세요)과 �
 **판정(record_case_facts 등)이나 안내 도구(get_business_registration_guide
 등)를 호출했다고, 또는 record_permit_synthesis로 서류ᆞ사전진단 항목을
 설명했다고 해서 자동으로 완료 처리하지 마세요** - "~하려고요"/"~해야
-하나요?" 같은 계획ᆞ질문 표현은 완료가 아니고, [2단계]/[3단계]에서 서류ᆞ
+하나요?" 같은 계획ᆞ질문 표현은 완료가 아니고, [Step 1-2]/[Step 1-3]에서 서류ᆞ
 사전진단 항목을 "안내"한 것도 완료가 아닙니다(documents_prepared/
 pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진단 확인
 했어요"처럼 직접 확인해줬을 때만). 이 항목들은 실물 세계에서 벌어지는
@@ -222,6 +224,15 @@ pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진�
 ## 2. 도구 선택
 - 법률 용어 정의("OO이 뭐야") → search_by_term (핵심 용어만 추출)
 - 절차ᆞ조건ᆞ서류 등 일반 질문 → search_regulations
+- 착공신고ᆞ건축사 설계ᆞ공사감리ᆞ사용승인(Step 2: 공사)을 물으면 →
+  get_construction_guide (절차가 법령상 고정돼 있어 검색 불필요, 바로 이
+  도구 호출). **[Step 1-4: 예상 소요 기간]까지 안내가 끝나면, 사용자가
+  안 물어봐도 "다음은 Step 2(공사) 단계입니다"처럼 존재를 짧게 짚어주고
+  계속 안내할지 물어보세요** - 인허가 설명이 끝났다고 곧장 식품위생ᆞ
+  사업자등록 등 창업 준비 트랙으로 건너뛰지 마세요(실제로 Step 2를 통째로
+  건너뛰고 사용자가 "공사는 왜 안 알려줘?"라고 지적한 사례가 있었습니다 -
+  2026-07-27). 단, 공통 원칙대로 사용자가 동의ᆞ요청할 때 실제 내용을
+  꺼내세요 - 짚어주는 것과 바로 전체 내용을 쏟아내는 건 다릅니다.
 - 사업자등록을 어떻게ᆞ언제까지 하는지, 무슨 서류가 필요한지 물으면 →
   get_business_registration_guide (절차가 법령상 고정돼 있어 검색 불필요,
   바로 이 도구 호출). food_result가 이미 나온 사용자라면 안내문의
@@ -274,17 +285,21 @@ get_business_registration_guide처럼 실제 호출하지 않은 도구의 내�
 직접 물었을 때만 해당 도구를 호출해 안내하세요. 사용자가 명시적으로
 "자세히"/"한 번에 다 알려줘"라고 요청한 경우에만 이 원칙의 예외입니다.
 
-**`[N단계]` 구조와 record_permit_synthesis는 건축 인허가(permit_type) 설명
-전용입니다.** 식품위생(food_result)ᆞ소방시설(fire_result)ᆞ간판(signage_result)
-판정 결과는 이 구조를 절대 쓰지 마세요 - 그 도메인들은 classify 시점에
-이미 완결된 짧은 판정 문구가 도구 응답으로 옵니다. 그 판정 문구만
-자연스러운 말투로 전달하고(위 공통 원칙대로 "다음에 할 일" 목록까지만),
-`[1단계]` 같은 헤더나 record_permit_synthesis 호출을 덧붙이지 마세요
+**`[Step 1-N]` 구조와 record_permit_synthesis는 건축 인허가(permit_type) 설명
+전용입니다.** (오른쪽 로드맵 패널의 "Step 0~4"와는 다른 번호 체계입니다 -
+이건 그 중 **Step 1(건축 인허가) 하나의 내부 하위 단계 4개**를 가리키는
+것이라 "Step 1-N"으로 표기합니다. 예전엔 그냥 "[N단계]"라고 써서 로드맵의
+"Step 2ᆞ3"과 번호가 겹쳐 사용자가 혼동했습니다 - 2026-07-27 확인, 반드시
+"Step 1-" 접두사를 붙이세요.) 식품위생(food_result)ᆞ소방시설(fire_result)ᆞ
+간판(signage_result) 판정 결과는 이 구조를 절대 쓰지 마세요 - 그 도메인들은
+classify 시점에 이미 완결된 짧은 판정 문구가 도구 응답으로 옵니다. 그 판정
+문구만 자연스러운 말투로 전달하고(위 공통 원칙대로 "다음에 할 일" 목록까지만),
+`[Step 1-1]` 같은 헤더나 record_permit_synthesis 호출을 덧붙이지 마세요
 (다른 도메인 얘기에 이 구조를 갖다 쓰면 permit의 단계 진행 상태가
 오염됩니다 - 실제로 겪은 문제, 2026-07-27).
 
 **(A) permit 판정 정보가 아직 부족함**: 부족한 사실을 되묻는 1~2문장으로
-끝내세요. `[1단계]` 같은 헤더나 절차ᆞ서류 설명은 이번 턴에 꺼내지 마세요.
+끝내세요. `[Step 1-1]` 같은 헤더나 절차ᆞ서류 설명은 이번 턴에 꺼내지 마세요.
 
 **(B) permit 판정 완료(도구 응답으로 옴) 또는 permit 관련 질문**(정의
 질문 등): 아래 4단계로 나눠 순서대로 안내하세요. 각 단계는 핵심만 간결하게 - 이전
@@ -292,26 +307,36 @@ get_business_registration_guide처럼 실제 호출하지 않은 도구의 내�
 계속 안내할지 짧게 묻고, 사용자가 동의하거나 관련 질문을 이어가면 다음
 단계로 넘어가세요. "한 번에 다 알려줘" 요청 시에만 4단계를 모두 한 번에.
 **판정이 확정되는 순간 시스템이 이미 관련 법령을 한 번 자동 검색해서
-도구 응답으로 넣어뒀습니다** - [2단계: 필수 서류]를 쓸 때 그 검색 결과가
+도구 응답으로 넣어뒀습니다** - [Step 1-2: 필수 서류]를 쓸 때 그 검색 결과가
 있는지 먼저 확인하고, 있으면 다시 검색하지 말고 그대로 근거로 쓰세요.
 그 결과가 답변에 부족하거나 추가 관점이 필요할 때만 search_regulations를
 새로 호출하세요. record_permit_synthesis로 기록하는 것도 잊지 마세요
-(required_documents, related_agencies). [3단계: 사전 진단]도 마찬가지로, 안내한 항목들을
+(required_documents, related_agencies). [Step 1-3: 사전 진단]도 마찬가지로, 안내한 항목들을
 같은 도구의 pre_diagnosis_items에 답변과 동일한 문구로 기록하세요 -
 프론트엔드 진행 표시가 이 두 목록의 존재 여부로 단계 완료를 판단하니,
 텍스트로만 안내하고 기록을 빠뜨리면 안 됩니다.
 
-- [1단계: 상황 분석+필요 절차] 한 줄 요약, 단계명+관할기관만 나열(설명 1줄 이내)
-- [2단계: 필수 서류] 리스트만(설명 없이) - record_permit_synthesis(required_documents=[...])
-- [3단계: 사전 진단] 주차대수ᆞ정화조 용량ᆞ소방시설ᆞ장애인 편의시설ᆞ위생
+- [Step 1-1: 상황 분석+필요 절차] 한 줄 요약, 단계명+관할기관만 나열(설명 1줄 이내)
+- [Step 1-2: 필수 서류] 리스트만(설명 없이) - record_permit_synthesis(required_documents=[...])
+- [Step 1-3: 사전 진단] 주차대수ᆞ정화조 용량ᆞ소방시설ᆞ장애인 편의시설ᆞ위생
   요구사항 중 실제 해당하는 것만 1~2줄+근거와 함께 - record_permit_synthesis(pre_diagnosis_items=[...])
-- [4단계: 예상 소요 기간] 한 줄로
+- [Step 1-4: 예상 소요 기간] 한 줄로
 
 ## 4. 정확성 원칙
 - 모든 답변에 [출처: 건축법 제OO조] / [출처: 서울시 건축조례 제OO조] 형식으로
   근거를 명시하세요. search_regulations/search_by_term으로 실제 검색하지
   않은 조항은 절대 지어내지 마세요.
 - 확인되지 않는 정보는 "관련 규정에서 확인할 수 없습니다"라고 답하세요.
+- **사용자가 놓치기 쉬운 위반ᆞ불이익(무허가/무신고 건축ᆞ용도변경, 착공신고
+  누락, 사용승인 전 사용, 건축물대장 기재사항 미신청 등)이 걸린 질문에는
+  해당 벌칙ᆞ과태료ᆞ이행강제금 조항도 함께 안내하세요** - 예: 무허가/무신고
+  건축ᆞ용도변경은 벌칙(건축법 제108ᆞ110조, 징역 또는 벌금), 시정명령
+  불이행은 이행강제금(제80조), 건축물대장 미신청 등은 과태료(제113조).
+  단, 정확한 조번호ᆞ금액은 반드시 search_regulations로 실제 확인한 것만
+  쓰고, 확인이 안 되면 금액을 지어내지 말고 "과태료ᆞ이행강제금 등 불이익이
+  있을 수 있으니 관할 구청에 확인하라"는 정도로만 언급하세요. 매번 억지로
+  끼워 넣지 말고, 실제로 그 위반 소지가 있는 맥락(예: 무단 용도변경 정황,
+  착공신고 없이 공사 시작했다는 언급)에서만 다루세요.
 
 주의사항: 최종 판단은 관할 구청ᆞ건축사 상담을 권장하고, 최신 개정 여부는
 국가법령정보센터(law.go.kr) 확인을 권장하세요. 개별 사안의 세부 판단은
@@ -424,12 +449,12 @@ def agent_node(state: AgentState) -> dict:
         disclosed = state.get("disclosed_stage", {}).get(_STAGE_DOMAIN, 0)
         if disclosed < 4:
             messages.append(SystemMessage(content=(
-                f"[진행 상태] 지금까지 {disclosed}단계까지 공개했습니다. 이번 턴에는 "
-                f"[{disclosed + 1}단계]까지만 안내하고, 그 이상 단계는 절대 먼저 꺼내지 "
-                f"마세요 - 사용자가 이어서 요청하면 다음 턴에 공개하세요."
+                f"[진행 상태] Step 1(건축 인허가)의 하위 단계 중 지금까지 [Step 1-{disclosed}]"
+                f"까지 공개했습니다. 이번 턴에는 [Step 1-{disclosed + 1}]까지만 안내하고, 그 "
+                f"이상은 절대 먼저 꺼내지 마세요 - 사용자가 이어서 요청하면 다음 턴에 공개하세요."
             )))
         else:
-            messages.append(SystemMessage(content="[진행 상태] 4단계 안내가 모두 끝났습니다."))
+            messages.append(SystemMessage(content="[진행 상태] Step 1의 하위 단계 [Step 1-1]~[Step 1-4] 안내가 모두 끝났습니다."))
     messages.extend(state["messages"])
 
     if not _gemini_quota_exhausted:
@@ -666,11 +691,16 @@ def classify_node(state: AgentState) -> dict:
 
 
 _CITATION_PATTERN = re.compile(r"\[출처:\s*([^\]]+)\]")
-# 줄 시작(마크다운 헤딩 기호 허용)에 오는 [N단계]만 "실제 공개"로 센다.
-# "다음 단계인 [2단계: 필수 서류] 안내를 계속할까요?"처럼 문장 중간에서 다음
+# 줄 시작(마크다운 헤딩ᆞ볼드 기호 허용)에 오는 [Step 1-N]만 "실제 공개"로 센다.
+# "다음 단계인 [Step 1-2: 필수 서류] 안내를 계속할까요?"처럼 문장 중간에서 다음
 # 단계를 이름만 언급하는 건 실제 공개가 아니므로 걸러야 한다(2026-07-26 guard
 # 첫 실사용 검증에서 이 구분이 없어 오탐이 난 걸 확인하고 라인 앵커 추가).
-_STAGE_MARKER_PATTERN = re.compile(r"^#{0,3}\s*\[([1-4])단계", re.MULTILINE)
+# "[N단계]"였다가 "[Step 1-N]"으로 개명(2026-07-27) - 로드맵 사이드바의
+# "Step 0~4" 전체 번호 체계와 겹쳐서 사용자가 혼동하는 문제가 있었음. 개명
+# 검증 중 별개 버그도 하나 발견: LLM이 마커를 "**[Step 1-2: ...]**"처럼
+# 볼드로 감싸면 `**`가 라인 앵커 바로 뒤 매칭을 막아서 guard가 아예 못
+# 잡았음(허용치 초과가 조용히 통과됨, 2026-07-27 실측) - \*{0,2} 허용 추가.
+_STAGE_MARKER_PATTERN = re.compile(r"^#{0,3}\s*\*{0,2}\s*\[Step\s*1-([1-4])", re.MULTILINE)
 
 
 def extract_text(content) -> str:
@@ -745,10 +775,10 @@ def finalize_node(state: AgentState) -> dict:
 
 
 def _max_allowed_stage(state: AgentState) -> int:
-    """이번 턴 답변에 등장해도 되는 최대 [N단계] 번호. [N단계] 구조 자체가
+    """이번 턴 답변에 등장해도 되는 최대 [Step 1-N] 번호. 이 구조 자체가
     _STAGE_DOMAIN(permit) 전용이라, permit 판정 전에는 0(전부 금지) -
     signage/food/fire 얘기만 하는 대화는 애초에 permit 판정이 안 났으니
-    항상 0으로 막혀서, 그 도메인들의 답변엔 [N단계] 마커가 아예 등장하면
+    항상 0으로 막혀서, 그 도메인들의 답변엔 [Step 1-N] 마커가 아예 등장하면
     안 된다(SYSTEM_PROMPT도 이렇게 지시). 판정 후에는 지금까지 공개된
     단계(disclosed_stage[_STAGE_DOMAIN]) + 1 - 한 턴에 최대 한 단계만 새로
     공개하도록 강제한다."""
@@ -766,7 +796,7 @@ def _max_allowed_stage(state: AgentState) -> int:
 _GROUNDING_TOOL_NAMES = (
     "search_regulations", "search_by_term",
     "get_business_registration_guide", "get_hygiene_education_guide",
-    "get_opening_checklist",
+    "get_opening_checklist", "get_construction_guide",
 )
 
 
@@ -794,8 +824,8 @@ def _guard_retry_count(messages) -> int:
 
 
 def _synthesis_gap_violations(state: AgentState, max_mentioned: int) -> list[str]:
-    """[2단계]/[3단계]를 언급했는데 record_permit_synthesis로 실제 기록은 안 한
-    경우를 잡는다. "도구를 호출했다"는 문장을 텍스트로 지어내고 실제로는
+    """[Step 1-2]/[Step 1-3]을 언급했는데 record_permit_synthesis로 실제 기록은
+    안 한 경우를 잡는다. "도구를 호출했다"는 문장을 텍스트로 지어내고 실제로는
     tool_calls가 비어있던 사례가 실측으로 확인됐다(2026-07-27) - 인용 위반과
     같은 종류의 문제(근거 없이 답만 그럴듯하게 마무리)라 같은 guard에서 같이
     잡는다. 이전 턴에 이미 기록됐으면(permit_synthesis가 누적 상태라) 재확인
@@ -806,13 +836,13 @@ def _synthesis_gap_violations(state: AgentState, max_mentioned: int) -> list[str
     violations = []
     if max_mentioned >= 2 and not synthesis.get("required_documents"):
         violations.append(
-            "[2단계: 필수 서류]를 언급했지만 record_permit_synthesis(required_documents=[...])를 "
+            "[Step 1-2: 필수 서류]를 언급했지만 record_permit_synthesis(required_documents=[...])를 "
             "실제로 호출하지 않았습니다. 서류를 텍스트로 나열하는 데서 끝내지 말고, 반드시 "
             "그 도구를 실제로 호출해서 기록한 뒤 답변을 마무리하세요."
         )
     if max_mentioned >= 3 and not synthesis.get("pre_diagnosis_items"):
         violations.append(
-            "[3단계: 사전 진단]을 언급했지만 record_permit_synthesis(pre_diagnosis_items=[...])를 "
+            "[Step 1-3: 사전 진단]을 언급했지만 record_permit_synthesis(pre_diagnosis_items=[...])를 "
             "실제로 호출하지 않았습니다. 항목을 텍스트로 나열하는 데서 끝내지 말고, 반드시 "
             "그 도구를 실제로 호출해서 기록한 뒤 답변을 마무리하세요."
         )
@@ -826,13 +856,13 @@ def guard_node(state: AgentState) -> dict:
     2026-07-26 실사용 세션에서 재현됨).
 
     막는 위반 세 가지:
-    1. 허용된 단계 수([_max_allowed_stage])를 넘겨 [N단계]를 안내 - 판정 전
+    1. 허용된 단계 수([_max_allowed_stage])를 넘겨 [Step 1-N]을 안내 - 판정 전
        절차 안내를 아예 시도한 경우(허용치 0)와, 판정 후 한 턴에 여러 단계를
        몰아서 공개한 경우(사용자가 "1단계만" 이라고 명시해도 무시하고 4단계를
        다 준 사례 포함) 둘 다 이 하나의 규칙으로 잡는다.
     2. search_regulations/search_by_term을 한 번도 호출하지 않았는데
        [출처: ...] 인용이 있는 경우 - 근거 없이 조항을 지어낸 것.
-    3. [2단계]/[3단계]를 언급했는데 record_permit_synthesis로 실제 기록은
+    3. [Step 1-2]/[Step 1-3]을 언급했는데 record_permit_synthesis로 실제 기록은
        안 한 경우 - "도구를 호출했다"는 문장까지 텍스트로 지어내고 실제로는
        안 부른 사례가 실측으로 확인됨(_synthesis_gap_violations 참고).
 
@@ -841,7 +871,7 @@ def guard_node(state: AgentState) -> dict:
     위반이 없거나 재시도가 소진되면, disclosed_stage[_STAGE_DOMAIN]을 갱신해서
     다음 턴의 허용치 계산에 반영한다 - 이때도 실제 언급값(max_mentioned)이
     아니라 허용치(allowed)로 캡을 씌운다. 안 씌우면 재시도가 소진돼 위반이
-    그냥 통과되는 경우(예: signage 얘기만 했는데 [1단계]를 잘못 언급) 허용치를
+    그냥 통과되는 경우(예: signage 얘기만 했는데 [Step 1-1]을 잘못 언급) 허용치를
     넘는 값이 그대로 disclosed_stage에 박혀서, 이후 진짜 permit 설명이
     시작될 때 이미 일부 단계가 끝난 것처럼 잘못 판단하게 된다(2026-07-27
     실측 확인 - signage만 다룬 대화에서 disclosed_stage가 1로 오염됨).
@@ -856,7 +886,7 @@ def guard_node(state: AgentState) -> dict:
     violations = []
     if max_mentioned > allowed:
         violations.append(
-            f"이번 턴엔 [{allowed}단계]까지만 안내할 수 있는데 [{max_mentioned}단계]까지 "
+            f"이번 턴엔 [Step 1-{allowed}]까지만 안내할 수 있는데 [Step 1-{max_mentioned}]까지 "
             f"안내했습니다. 허용된 단계까지만 남기고 나머지는 삭제한 뒤, 다음에 계속 "
             f"안내해도 될지 사용자에게 짧게 물어보며 마무리하세요."
         )

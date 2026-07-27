@@ -5,6 +5,7 @@
 - permit: 허가/신고/기재변경 판정(규칙 기반) + 절차 로드맵.
 - food_safety: 식품위생법상 영업 종류 판정(규칙 기반) - 카페ᆞ음식점 등 식품접객업 창업 시 영업신고 종류.
 - fire_safety: 소방시설 설치 대상 판정(규칙 기반) - 연면적 등 기준으로 필요한 소방시설 목록.
+- construction: 착공ᆞ설계ᆞ공사감리ᆞ사용승인 안내(정적 콘텐츠, Step 2) - 절차가 법령상 고정돼 있어 규칙 엔진 없이 바로 반환.
 - business_registration: 사업자등록 안내(정적 콘텐츠) - 절차가 법령상 고정돼 있어 규칙 엔진 없이 바로 반환.
 - hygiene_education: 위생교육 안내(정적 콘텐츠) - 교육시간ᆞ이수시기ᆞ방법이 법령상 고정돼 있어 규칙 엔진 없이 바로 반환.
 - opening_checklist: 오픈 준비(Step 4) 체크리스트(정적 콘텐츠) - 인테리어ᆞ장비설치ᆞ직원등록ᆞ영업시작.
@@ -18,6 +19,7 @@
 from __future__ import annotations
 
 from src.agents.business_registration import get_business_registration_guide
+from src.agents.construction import get_construction_guide
 from src.agents.fire_safety import classify_fire_safety, fire_safety_message, record_fire_facts
 from src.agents.hygiene_education import get_hygiene_education_guide
 from src.agents.opening_checklist import get_opening_checklist
@@ -48,6 +50,7 @@ TOOLS = [
     record_permit_synthesis,
     record_food_facts,
     record_fire_facts,
+    get_construction_guide,
     get_business_registration_guide,
     get_hygiene_education_guide,
     get_opening_checklist,
