@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src import config
-from src.pipeline import ingest, query
+from src.pipeline import ingest, query, update_task_progress
 from src.retriever import count_documents
 from src.agents.permit import PROCEDURE_TREE, PermitResult
 
@@ -63,6 +63,17 @@ class QueryResponse(BaseModel):
     food_result: Optional[str] = None
     fire_result: Optional[list[str]] = None
     signage_result: Optional[str] = None
+    task_progress: Optional[dict] = None
+
+
+class TaskProgressUpdateRequest(BaseModel):
+    user_id: str = Field(..., description="세션 ID")
+    field: str = Field(..., description="task_progress 필드명(예: business_registration)")
+    value: bool = Field(..., description="완료 여부(체크박스 상태)")
+
+
+class TaskProgressUpdateResponse(BaseModel):
+    task_progress: dict
 
 
 class IngestResponse(BaseModel):
@@ -125,6 +136,7 @@ def query_endpoint(req: QueryRequest) -> QueryResponse:
             food_result=result["food_result"],
             fire_result=result["fire_result"],
             signage_result=result["signage_result"],
+            task_progress=result["task_progress"],
         )
         
     except ValueError as e: # 400 클라이언트 잘못(빈 질문 등)
@@ -132,6 +144,24 @@ def query_endpoint(req: QueryRequest) -> QueryResponse:
     except Exception as e:  # 500 서버 잘못(LLM호출 실패 등)
         logger.error("질의 실패: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"답변 생성 실패: {e}")
+
+
+@app.post("/task-progress", response_model=TaskProgressUpdateResponse, tags=["로드맵"])
+def task_progress_endpoint(req: TaskProgressUpdateRequest) -> TaskProgressUpdateResponse:
+    """로드맵 체크박스를 사용자가 직접 클릭했을 때 진행상황을 갱신한다.
+
+    /query(대화)를 거치지 않고 그래프 상태를 바로 patch한다(LLM 호출 없음) -
+    체크박스 클릭도 record_task_progress와 신뢰 수준이 같은 사용자 자기보고라
+    자연어를 왕복시킬 필요가 없다.
+    """
+    try:
+        task_progress = update_task_progress(req.user_id, req.field, req.value)
+        return TaskProgressUpdateResponse(task_progress=task_progress)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("진행상황 갱신 실패: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"진행상황 갱신 실패: {e}")
 
 
 @app.post("/ingest", response_model=IngestResponse, tags=["인덱싱"])

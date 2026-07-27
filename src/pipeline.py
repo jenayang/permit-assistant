@@ -21,6 +21,7 @@ from langchain_core.messages import ToolMessage
 
 from src import config
 from src.agent import extract_text, graph
+from src.agents.roadmap_progress import TASK_PROGRESS_FIELDS
 from src.ingestion import ingest_all
 from src.retriever import index_documents, count_documents, reset_collection
 from src import parent_store
@@ -131,7 +132,26 @@ def query(question: str, user_id: Optional[str] = None) -> dict:
         "food_result": result.get("food_result"),
         "fire_result": result.get("fire_result"),
         "signage_result": result.get("signage_result"),
+        "task_progress": result.get("task_progress"),
     }
+
+
+# === 로드맵 체크박스 직접 갱신 (LLM 호출 없음) ===
+def update_task_progress(user_id: str, field: str, value: bool) -> dict:
+    """사용자가 프론트 로드맵 체크박스를 직접 클릭했을 때 task_progress를
+    그래프 상태에 바로 반영한다. record_task_progress(LLM 도구)가 대화 중
+    자연어로 자기보고를 받는 것과 신뢰 수준이 동일한 자기보고라 - 체크박스
+    클릭도 "사용자가 방금 완료라고 밝힌 것"이므로 - 굳이 LLM을 거쳐 자연어를
+    왕복시키지 않고 graph.update_state로 직접 패치한다(대화 이력에는 안
+    남지만 다음 질의ᆞ답변에는 그대로 반영됨).
+    """
+    if field not in TASK_PROGRESS_FIELDS:
+        raise ValueError(f"알 수 없는 진행상황 항목: {field}")
+
+    config_dict = {"configurable": {"thread_id": user_id}}
+    graph.update_state(config_dict, {"task_progress": {field: value}})
+    state = graph.get_state(config_dict)
+    return state.values.get("task_progress") or {}
 
 
 

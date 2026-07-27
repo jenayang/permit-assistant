@@ -114,6 +114,13 @@ class AgentState(MessagesState):
     # 참고) 이 값으로 "이번 턴엔 몇 단계까지만" 상한을 그래프가 강제한다.
     # 리듀서 없이 기본 덮어쓰기(guard_node가 한 번에 하나씩만 갱신).
     disclosed_stage: dict[str, int]
+    # 사용자가 실제로 "완료했다"고 말한 항목들(착공신고ᆞ사업자등록ᆞ영업개시 등).
+    # permit_result/food_result 등(규칙 엔진이 계산한 "뭘 해야 하는지" 판정)과는
+    # 성격이 다르다 - 이건 실물 세계에서 벌어지는 일이라 AI가 스스로 판단하거나
+    # 다른 도구로 확인할 방법이 없고, 오직 사용자가 명시적으로 완료를 밝힌
+    # 것만 기록한다("안내를 보여줬다"≠"완료했다" - 2026-07-27 논의). merge_facts
+    # 재사용 - None 아닌 값만 누적, 한 번 True가 되면 계속 유지.
+    task_progress: Annotated[dict, merge_facts]
 
 
 # === 시스템 프롬프트 ===
@@ -200,6 +207,18 @@ record_fire_facts에도 그대로 기록하세요, 새로 묻지 마세요)과 �
 판정합니다. is_third_party_ad(타사광고) 같은 용어는 "본인 업소 광고인가요,
 다른 업체 광고를 걸어주는 건가요?"처럼 풀어서 물어보세요.
 
+사용자가 필요 서류 준비ᆞ사전 진단 항목 확인ᆞ착공신고ᆞ시공ᆞ사용승인ᆞ
+사업자등록ᆞ위생교육ᆞ인테리어ᆞ장비설치ᆞ직원등록ᆞ영업개시 중 **실제로
+완료했다고 명확히 밝힌 항목**이 있으면 record_task_progress로 기록하세요.
+**판정(record_case_facts 등)이나 안내 도구(get_business_registration_guide
+등)를 호출했다고, 또는 record_permit_synthesis로 서류ᆞ사전진단 항목을
+설명했다고 해서 자동으로 완료 처리하지 마세요** - "~하려고요"/"~해야
+하나요?" 같은 계획ᆞ질문 표현은 완료가 아니고, [2단계]/[3단계]에서 서류ᆞ
+사전진단 항목을 "안내"한 것도 완료가 아닙니다(documents_prepared/
+pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진단 확인
+했어요"처럼 직접 확인해줬을 때만). 이 항목들은 실물 세계에서 벌어지는
+일이라 오직 사용자가 직접 완료를 말해준 경우에만 기록하세요.
+
 ## 2. 도구 선택
 - 법률 용어 정의("OO이 뭐야") → search_by_term (핵심 용어만 추출)
 - 절차ᆞ조건ᆞ서류 등 일반 질문 → search_regulations
@@ -241,13 +260,28 @@ record_fire_facts에도 그대로 기록하세요, 새로 묻지 마세요)과 �
   우선 원칙을 따르고, 조례는 상충이 아니라 지역 추가 규정으로 안내하세요.
 
 ## 3. 답변 작성
+**모든 도메인 공통 원칙: 한 턴에 정보를 몰아주지 마세요.** 판정ᆞ분류
+결과가 막 나온 시점이든, 절차를 물어본 시점이든, 그 도메인의 전체 내용
+(서류ᆞ신청 방법ᆞ소요 기간 등)을 한 번에 다 설명하지 마세요. 먼저 "이
+단계에서 해야 할 일"을 1)2)3) 같은 짧은 목록(항목당 한 줄, 세부 설명
+없이)으로만 제시하고, 각 항목의 자세한 내용은 사용자가 그 항목을 짚어
+되물을 때 그제서야 이어서 설명하세요. **서로 다른 도메인(예: 식품위생
+영업신고 + 위생교육 + 건축물대장 확인)을 한 턴에 섞어서 답하지 마세요**
+- 지금 로드맵에서 사용자가 있는 단계 하나에 집중하고, 나머지는 사용자가
+물어볼 때까지 다음 턴으로 미루세요. get_hygiene_education_guide/
+get_business_registration_guide처럼 실제 호출하지 않은 도구의 내용을
+관련 있다는 이유로 미리 요약해서 끼워 넣지 마세요 - 사용자가 그 주제를
+직접 물었을 때만 해당 도구를 호출해 안내하세요. 사용자가 명시적으로
+"자세히"/"한 번에 다 알려줘"라고 요청한 경우에만 이 원칙의 예외입니다.
+
 **`[N단계]` 구조와 record_permit_synthesis는 건축 인허가(permit_type) 설명
 전용입니다.** 식품위생(food_result)ᆞ소방시설(fire_result)ᆞ간판(signage_result)
 판정 결과는 이 구조를 절대 쓰지 마세요 - 그 도메인들은 classify 시점에
-이미 완결된 안내 문구가 도구 응답으로 옵니다. 그 문구를 자연스러운
-말투로 그대로 전달하면 끝이고, `[1단계]` 같은 헤더나 record_permit_synthesis
-호출을 덧붙이지 마세요(다른 도메인 얘기에 이 구조를 갖다 쓰면 permit의
-단계 진행 상태가 오염됩니다 - 실제로 겪은 문제, 2026-07-27).
+이미 완결된 짧은 판정 문구가 도구 응답으로 옵니다. 그 판정 문구만
+자연스러운 말투로 전달하고(위 공통 원칙대로 "다음에 할 일" 목록까지만),
+`[1단계]` 같은 헤더나 record_permit_synthesis 호출을 덧붙이지 마세요
+(다른 도메인 얘기에 이 구조를 갖다 쓰면 permit의 단계 진행 상태가
+오염됩니다 - 실제로 겪은 문제, 2026-07-27).
 
 **(A) permit 판정 정보가 아직 부족함**: 부족한 사실을 되묻는 1~2문장으로
 끝내세요. `[1단계]` 같은 헤더나 절차ᆞ서류 설명은 이번 턴에 꺼내지 마세요.
@@ -321,6 +355,56 @@ def _get_cerebras_llm_with_tools():
     return _cerebras_llm_with_tools
 
 
+# 건축 인허가 트랙(Step 0→1→2)은 실제로 순서가 있는 절차(행위유형 확정 →
+# 인허가 판정 → 착공ᆞ준공)라 앞 단계가 안 끝났는데 다음 단계 내용부터
+# 안내하면 근거 없는 진행이 된다. 반면 식품위생ᆞ소방ᆞ간판ᆞ사업자등록ᆞ
+# 위생교육ᆞ오픈준비(Step 3~4)는 인허가와 무관하게 병렬로 준비 가능한
+# 실제 절차라 순서를 강제하면 오히려 부정확하다 - 이 구분을 매 턴 LLM에게
+# 알려줘서 "지금 로드맵 순서를 왜 안 지키냐"는 혼란을 줄인다(2026-07-27
+# 피드백: 순서를 확인하고 완료가 확인되면 다음 단계로, 병렬 가능한 건
+# 병렬로 안내해달라는 요청).
+def _roadmap_status_summary(state: AgentState) -> str:
+    """건축 인허가 트랙(순차)ᆞ창업 준비 트랙(병렬)의 진행 상태를 요약한다.
+
+    완료 판정은 이미 있는 신뢰 가능한 신호만 쓴다 - 판정 도메인은
+    case_facts/permit_result(규칙 엔진 결과), 공사 단계는 task_progress
+    (사용자가 직접 완료를 밝힌 것)뿐, AI가 새로 추측하지 않는다.
+    """
+    case_facts = state.get("case_facts") or {}
+    permit_result = state.get("permit_result")
+    task_progress = state.get("task_progress") or {}
+
+    step0_done = bool(case_facts.get("act_type"))
+    step1_done = bool(permit_result)
+    step2_fields = ("construction_notice", "construction", "use_approval")
+    step2_started = any(task_progress.get(f) for f in step2_fields)
+    step2_done = all(task_progress.get(f) for f in step2_fields)
+
+    def _status(done: bool, started: bool) -> str:
+        if done:
+            return "완료"
+        if started:
+            return "진행중"
+        return "미착수"
+
+    return (
+        "[로드맵 상태]\n"
+        "건축 인허가 트랙(순차 진행 - 앞 단계가 '완료'가 아니면 다음 단계 내용을 "
+        "먼저 꺼내지 마세요. 이번 턴 사용자 말이 다음 단계 얘기여도, 앞 단계가 "
+        "덜 끝났으면 먼저 그 단계부터 짧게 확인/안내하세요):\n"
+        f"- Step 0(행위 유형 확인): {_status(step0_done, step0_done)}\n"
+        f"- Step 1(인허가 판정): {_status(step1_done, step0_done)}\n"
+        f"- Step 2(공사: 착공신고ᆞ시공ᆞ사용승인, 사용자가 직접 완료를 "
+        f"말해야 확인됨): {_status(step2_done, step2_started)}\n"
+        "창업 준비 트랙(Step 3: 식품위생ᆞ소방ᆞ간판ᆞ사업자등록ᆞ위생교육, "
+        "Step 4: 오픈 준비) - 인허가 트랙 진행 상태와 무관하게 언제든 자유롭게 "
+        "다루세요. 순서 제약 없음. 사용자가 인허가 트랙이 안 끝난 채로 이 "
+        "항목들을 물어보면, 순서를 기다리라고 하지 말고 \"이 부분은 인허가 "
+        "절차와 별개로 지금 같이 준비하셔도 돼요\"처럼 병렬 진행 가능함을 "
+        "알려주며 바로 안내하세요."
+    )
+
+
 # === 노드 정의 ===
 def agent_node(state: AgentState) -> dict:
     """LLM을 호출해서 다음 액션 결정.
@@ -331,9 +415,11 @@ def agent_node(state: AgentState) -> dict:
     - 응답에 record_case_facts 호출이 있으면 그 인자를 case_facts에 병합
     - 판정이 끝났으면 disclosed_stage(permit 전용) 기준으로 "이번 턴엔 N단계까지만"
       동적 지시를 덧붙인다(연성 유도 - 실제 차단은 guard_node가 담당).
+    - 매 턴 _roadmap_status_summary로 건축 인허가 트랙(순차)ᆞ창업 준비 트랙
+      (병렬 가능)의 진행 상태를 함께 전달한다.
     """
     global _gemini_quota_exhausted
-    messages = [SystemMessage(content=SYSTEM_PROMPT)]
+    messages = [SystemMessage(content=SYSTEM_PROMPT), SystemMessage(content=_roadmap_status_summary(state))]
     if state.get("case_facts", {}).get("_classified"):
         disclosed = state.get("disclosed_stage", {}).get(_STAGE_DOMAIN, 0)
         if disclosed < 4:
@@ -374,6 +460,7 @@ _FACT_TOOL_TO_STATE_KEY = {
     "record_food_facts": "food_facts",
     "record_fire_facts": "fire_facts",
     "record_signage_facts": "signage_facts",
+    "record_task_progress": "task_progress",
 }
 
 

@@ -9,6 +9,7 @@
 - hygiene_education: 위생교육 안내(정적 콘텐츠) - 교육시간ᆞ이수시기ᆞ방법이 법령상 고정돼 있어 규칙 엔진 없이 바로 반환.
 - opening_checklist: 오픈 준비(Step 4) 체크리스트(정적 콘텐츠) - 인테리어ᆞ장비설치ᆞ직원등록ᆞ영업시작.
 - signage: 간판ᆞ옥외광고물 허가/신고 판정(규칙 기반) - 벽면이용간판ᆞ돌출간판ᆞ지주이용간판ᆞ입간판ᆞ현수막.
+- roadmap_progress: 사용자가 실제로 완료했다고 밝힌 창업 절차 항목 추적(착공ᆞ사업자등록ᆞ영업개시 등) - 판정이 아니라 자기보고 기반.
 
 아직 별도 서브그래프/오케스트레이터는 아니고, agent.py의 단일 ReAct 루프가
 이 모듈들을 도구로 바인딩해서 쓰는 구조. 향후 Planner 도입 시 이 경계를
@@ -33,6 +34,7 @@ from src.agents.permit import (
     record_permit_synthesis,
 )
 from src.agents.regulation import search_by_term, search_regulations
+from src.agents.roadmap_progress import record_task_progress
 from src.agents.signage import classify_signage, record_signage_facts, signage_message
 from src.agents.site import lookup_building_ledger, lookup_building_ratio_limits, lookup_land_zone
 
@@ -50,4 +52,5 @@ TOOLS = [
     get_hygiene_education_guide,
     get_opening_checklist,
     record_signage_facts,
+    record_task_progress,
 ]

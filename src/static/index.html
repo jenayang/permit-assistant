@@ -121,152 +121,122 @@
     background: #7c3aed;
     color: #ffffff;
   }
-  .climb-hint {
-    margin: auto 0;
-    text-align: center;
+  /* 전체 창업 로드맵(Step 0~4) - "AI가 확인된 사실만 진행률에 반영한다"는
+     원칙에 따라, 판정(permit_result/food_result/fire_result/signage_result)이
+     난 항목과 사용자가 완료를 직접 말한 항목(task_progress)만 체크된다 -
+     안내 도구를 보여줬다는 이유로 체크되지 않는다(2026-07-27 논의). */
+  .roadmap {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 16px;
+  }
+  .roadmap-title {
     font-size: 12px;
-    color: var(--text-muted);
-    line-height: 1.6;
-  }
-  .climb-hint .peak {
-    font-size: 28px;
-    display: block;
-    margin-bottom: 8px;
-  }
-
-  /* 등반 고도계(게이지): 0~4단계 진행 상황. 체크리스트가 실제로 다 채워져야
-     (record_case_facts/record_permit_synthesis 구조화 데이터 기준) 다음
-     단계로 넘어간다 - 봇 답변이 한 번에 여러 단계를 다 설명해버려도 실제
-     데이터가 안 채워졌으면 넘어가지 않는다(2026-07-24: 텍스트 헤더 감지
-     방식은 LLM이 한 턴에 4단계를 몰아 써버리면 곧장 "등반완료"로 오판하는
-     문제가 있어서 폐기). 패널의 남는 세로 공간을 거의 다 채우도록 flex:1. */
-  .gauge {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    align-self: stretch;
-    gap: 12px;
-    width: 100%;
-    flex: 1;
-    min-height: 0;
-  }
-  .gauge-readout {
-    font: 700 12.5px/1 ui-monospace, "SF Mono", "Roboto Mono", monospace;
-    color: var(--accent);
-    letter-spacing: 0.01em;
+    font-weight: 700;
     text-align: center;
-    flex-shrink: 0;
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
+    margin-bottom: 10px;
   }
-  .gauge-readout.complete { color: #1f9d55; }
-  .gauge-wrap {
+  /* 각 Step을 "타임라인 레일(점+이어지는 선) + 본문" 가로 배치로 구성해서
+     Step을 따라 내려가는 진행 흐름이 눈에 보이게 한다 - 이전엔 Step끼리
+     독립된 박스라 "지금 어디까지 왔는지"를 잇는 느낌이 없었다(2026-07-27
+     피드백으로 추가). */
+  .roadmap-step {
     display: flex;
-    gap: 14px;
-    align-items: stretch;
-    width: 100%;
-    flex: 1;
-    min-height: 0;
-  }
-  .gauge-track {
-    width: 10px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    position: relative;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-  .gauge-fill {
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    background: linear-gradient(180deg, var(--accent), #1f9d55);
-    border-radius: 6px;
-    transition: height 0.5s ease;
-  }
-  .gauge-fill.complete { background: #1f9d55; }
-  .gauge-ticks {
-    display: flex;
-    flex-direction: column-reverse;
-    justify-content: space-between;
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-  }
-  .gauge-tick {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    padding: 6px 0;
-  }
-  .gauge-tick-head {
-    display: flex;
-    align-items: center;
     gap: 8px;
   }
-  .gauge-tick-mark {
-    width: 10px;
-    height: 1.5px;
-    background: var(--border);
-    flex-shrink: 0;
-  }
-  .gauge-tick.done .gauge-tick-mark,
-  .gauge-tick.current .gauge-tick-mark {
-    background: var(--text-muted);
-  }
-  .gauge-tick-label {
-    font-size: 11.5px;
-    color: var(--text-muted);
-    line-height: 1.3;
-  }
-  .gauge-tick.done .gauge-tick-label { color: var(--text); }
-  .gauge-tick.current .gauge-tick-label {
-    color: var(--accent);
-    font-weight: 700;
-  }
-  .gauge-tick.current .gauge-tick-mark {
-    position: relative;
-  }
-  .gauge-tick.current .gauge-tick-mark::after {
-    content: "";
-    position: absolute;
-    left: 50%; top: 50%;
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--accent);
-    transform: translate(-50%, -50%);
-    animation: gaugePulse 1.8s ease-in-out infinite;
-  }
-  @keyframes gaugePulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.35); }
-    50% { box-shadow: 0 0 0 4px rgba(37, 99, 235, 0); }
-  }
-  .gauge-tick.upcoming .gauge-tick-label { opacity: 0.5; }
-
-  /* 각 단계의 체크리스트(요구 사실ᆞ필수서류ᆞ사전진단 항목) */
-  .gauge-checklist {
-    list-style: none;
-    margin: 0;
-    padding: 0 0 0 18px;
+  .roadmap-rail {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    align-items: center;
+    width: 14px;
+    flex-shrink: 0;
   }
-  .gauge-check-item {
+  .roadmap-rail-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border);
+    box-shadow: 0 0 0 3px var(--panel);
+    flex-shrink: 0;
+    margin-top: 3px;
+  }
+  .roadmap-rail-dot.done { background: #1f9d55; }
+  .roadmap-rail-dot.current {
+    background: var(--accent);
+    animation: railPulse 1.8s ease-in-out infinite;
+  }
+  /* 순서를 벗어나 먼저 일부만 확인된 단계(예: 인허가보다 식품위생이 먼저
+     판정난 경우) - "지금 여기"는 아니지만 진행이 있었다는 것만 조용히 표시,
+     반짝이지 않는다(단계가 동시에 여러 곳에서 반짝이면 순서가 끊겨 보임). */
+  .roadmap-rail-dot.partial {
+    background: color-mix(in srgb, #1f9d55 50%, var(--border));
+  }
+  @keyframes railPulse {
+    0%, 100% { box-shadow: 0 0 0 3px var(--panel), 0 0 0 3px var(--panel); }
+    50% { box-shadow: 0 0 0 3px var(--panel), 0 0 0 6px color-mix(in srgb, var(--accent) 35%, transparent); }
+  }
+  .roadmap-rail-line {
+    flex: 1;
+    width: 2px;
+    min-height: 14px;
+    background: var(--border);
+    margin: 2px 0;
+  }
+  .roadmap-rail-line.done { background: #1f9d55; }
+  .roadmap-step-body {
+    flex: 1;
+    min-width: 0;
+    padding-bottom: 12px;
+  }
+  .roadmap-step-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .roadmap-step.done .roadmap-step-head { color: var(--text-muted); }
+  .roadmap-step.current .roadmap-step-head { color: var(--accent); }
+  .roadmap-step-icon { font-size: 11px; flex-shrink: 0; }
+  .roadmap-substeps {
+    list-style: none;
+    margin: 5px 0 0;
+    padding-left: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .roadmap-substep {
+    font-size: 11px;
+    color: var(--text-muted);
     display: flex;
     align-items: baseline;
-    gap: 6px;
+    gap: 5px;
+  }
+  .roadmap-substep.done { color: var(--text); }
+  .roadmap-substep-icon { flex-shrink: 0; }
+  .roadmap-substep.info { padding-left: 17px; opacity: 0.8; }
+  /* 사용자가 직접 완료를 표시할 수 있는 항목(task_progress 기반)만 실제
+     체크박스 - 판정 축(permit/food/fire/signage)이 있는 항목은 시스템이
+     확인한 사실이라 사용자가 임의로 못 바꾸게 readonly 아이콘 그대로 둔다. */
+  .roadmap-substep.checkable { align-items: center; cursor: pointer; }
+  .roadmap-substep.checkable input[type="checkbox"] {
+    width: 12px;
+    height: 12px;
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .roadmap-step-note {
+    margin: 4px 0 0;
     font-size: 10.5px;
     color: var(--text-muted);
-    line-height: 1.4;
   }
-  .gauge-check-icon { flex-shrink: 0; }
-  .gauge-check-item.checked { color: var(--text); }
-  .gauge-check-item.checked .gauge-check-icon { color: #1f9d55; }
-  .gauge-check-item:not(.checked) .gauge-check-icon { color: var(--border); }
 
-  @media (prefers-reduced-motion: reduce) {
-    .gauge-tick.current .gauge-tick-mark::after { animation: none; }
-    .gauge-fill { transition: none; }
-  }
   .stage-caption {
     margin-top: 16px;
     font-size: 10px;
@@ -441,21 +411,13 @@
   </div>
 
   <aside class="side-panel">
-    <div class="side-panel-title">🏔️ 인허가 등반 로드맵</div>
+    <div class="roadmap-title">📍 창업 로드맵</div>
+    <div class="roadmap" id="roadmap"></div>
     <div class="fact-tags" id="factTags" style="display:none;"></div>
-    <div class="climb-hint" id="climbHint">
-      <span class="peak">🏔️</span>
-      대화를 시작하면<br>여기에 진행 상황이 표시돼요
-    </div>
-    <div class="gauge" id="gauge" style="display:none;">
-      <div class="gauge-readout" id="gaugeReadout"></div>
-      <div class="gauge-wrap">
-        <div class="gauge-track"><div class="gauge-fill" id="gaugeFill"></div></div>
-        <div class="gauge-ticks" id="gaugeTicks"></div>
-      </div>
-    </div>
     <div class="branch-prompt" id="branchPrompt" style="display:none;"></div>
-    <div class="stage-caption">실제 절차는 사안에 따라<br>다를 수 있어 참고용입니다.</div>
+    <div class="stage-caption">✅ᆞ🟢는 시스템이 확인한 사실, 체크박스는 직접
+      눌러서 진행상황을 표시할 수 있어요.<br>실제 절차는 사안에 따라 다를 수
+      있어 참고용입니다.</div>
   </aside>
 </div>
 
@@ -468,13 +430,9 @@
   const sendBtn = document.getElementById("sendBtn");
   const userIdLabel = document.getElementById("userIdLabel");
   const newChatBtn = document.getElementById("newChatBtn");
-  const climbHintEl = document.getElementById("climbHint");
-  const gaugeEl = document.getElementById("gauge");
-  const gaugeReadoutEl = document.getElementById("gaugeReadout");
-  const gaugeFillEl = document.getElementById("gaugeFill");
-  const gaugeTicksEl = document.getElementById("gaugeTicks");
   const branchPromptEl = document.getElementById("branchPrompt");
   const factTagsEl = document.getElementById("factTags");
+  const roadmapEl = document.getElementById("roadmap");
 
   function getUserId() {
     let id = localStorage.getItem("permit_assistant_user_id");
@@ -498,6 +456,7 @@
   let latestFoodResult = null; // /query 응답의 food_result(식품위생법상 영업 종류)를 그대로 보관
   let latestFireResult = null; // /query 응답의 fire_result(필요 소방시설 목록, 배열)를 그대로 보관
   let latestSignageResult = null; // /query 응답의 signage_result(간판ᆞ옥외광고물 허가/신고 판정)를 그대로 보관
+  let taskProgress = {}; // /query 응답의 task_progress(사용자가 실제로 완료했다고 밝힌 항목)를 그대로 보관
 
   // case_facts 필드 → 태그 텍스트 변환. 여기 없는 필드는 태그로 안 보임(값
   // 하나만으로는 뜻이 안 통하는 필드는 아래에서 조합해서 별도 처리).
@@ -565,6 +524,7 @@
       factTagsEl.appendChild(span);
     }
     factTagsEl.style.display = chips.length || caseTypeResult || showFoodTag || showFireTag || showSignageTag ? "flex" : "none";
+    renderRoadmap();
   }
 
   async function loadProcedureStages() {
@@ -580,21 +540,16 @@
     return procedureTree[caseType]?.nodes?.[nodeId] || null;
   }
 
-  // 케이스 유형과 무관하게 공통인 0~4단계 고도계. 이전엔 봇 답변 텍스트에서
+  // 케이스 유형과 무관하게 공통인 0~4단계 진행 판단. 이전엔 봇 답변 텍스트에서
   // "[1단계]"~"[4단계]" 헤더를 감지해서 단계를 올렸는데, LLM이 정보가 충분하면
-  // 한 턴에 1~4단계를 몰아서 다 써버리는 경우가 실제로 많아 곧장 "등반완료"로
+  // 한 턴에 1~4단계를 몰아서 다 써버리는 경우가 실제로 많아 곧장 완료로
   // 잘못 판정되는 문제가 있었다(2026-07-24 실측). 대신 각 단계마다 실제로
   // 채워져야 하는 구조화 데이터(case_facts, permit_result의 required_documents/
   // pre_diagnosis_items)를 체크리스트로 만들고, 그 리스트가 전부(또는 최소
   // 1개 이상) 채워져야만 다음 단계로 넘어가게 한다 - 텍스트 분량과 무관하게
-  // 실제로 그 단계에 필요한 정보가 기록됐는지만 본다.
-  const STAGE_LABELS = [
-    "사용자 현황 진단",
-    "상황 분석 · 필요 절차",
-    "필수 서류",
-    "사전 진단",
-    "등반완료",
-  ];
+  // 실제로 그 단계에 필요한 정보가 기록됐는지만 본다. (예전엔 이 값을 별도
+  // 고도계 UI로 보여줬는데, 로드맵의 Step 1과 내용이 그대로 겹쳐서
+  // 2026-07-27에 로드맵 Step 1 안으로 통합했다.)
 
   // src/agents/permit.py의 REQUIRED_FIELDS를 그대로 미러링(행위 유형별로
   // 판정에 필요한 사실 목록) - 0단계 체크리스트를 만드는 데 사용.
@@ -658,44 +613,196 @@
     return stage;
   }
 
-  function renderGauge() {
+  // 사용자가 로드맵 체크박스를 직접 클릭했을 때 - 낙관적으로 먼저 반영하고
+  // (즉시 반응), /task-progress로 그래프 상태에도 저장한다. 실패하면 되돌려서
+  // 화면과 실제 저장 상태가 어긋나지 않게 한다.
+  async function toggleTaskProgress(field, value) {
+    const previous = taskProgress[field];
+    taskProgress = { ...taskProgress, [field]: value };
+    localStorage.setItem("permit_assistant_task_progress", JSON.stringify(taskProgress));
+    renderRoadmap();
+    try {
+      const res = await fetch(`${API_BASE}/task-progress`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, field, value }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      taskProgress = data.task_progress;
+    } catch (err) {
+      console.error("진행상황 저장 실패:", err);
+      taskProgress = { ...taskProgress, [field]: previous };
+    }
+    localStorage.setItem("permit_assistant_task_progress", JSON.stringify(taskProgress));
+    renderRoadmap();
+  }
+
+  // 전체 창업 로드맵(Step 0~4) 요약 - 판정(permit_result/food_result/
+  // fire_result/signage_result)이 난 항목과 사용자가 완료를 직접 말한 항목
+  // (task_progress)만 체크한다. 판정 축 항목은 시스템이 근거를 갖고 확인한
+  // 사실이라 체크박스 없이 아이콘만(사용자가 임의로 못 뒤집게), task_progress
+  // 축 항목만 실제 체크박스(field 지정)로 사용자가 직접 토글 가능하다.
+  function renderRoadmap() {
+    const actType = caseFacts.act_type;
     const checklists = buildChecklists();
-    const currentStage = computeCurrentStage(checklists);
+    const permitStage = computeCurrentStage(checklists);
+    const docs = latestPermitResult?.required_documents || [];
+    const diag = latestPermitResult?.pre_diagnosis_items || [];
 
-    climbHintEl.style.display = "none";
-    gaugeEl.style.display = "flex";
+    // Step 1의 서류ᆞ사전진단은 판정이 나오면 실제 항목명을 그대로 보여준다
+    // (예전 고도계가 보여주던 상세 정보 - 요약 라벨로 뭉개면 정보 손실).
+    // 단, 항목이 "나열됐다"는 것과 "완료됐다"는 것은 다르다 - AI가 서류ᆞ
+    // 사전진단 항목을 설명만 했는데 전부 done:true로 표시돼 Step1이 실제로는
+    // 아무것도 확인 안 된 채로 통째로 체크되는 회귀 버그가 있었다(2026-07-27).
+    // 그래서 실제 항목 목록은 info(참고용, 체크 여부 없음)로만 보여주고,
+    // 완료 여부는 사용자가 직접 확인한 task_progress 체크박스 하나로만 반영한다.
+    const step1Substeps = [{ text: "허가ᆞ신고 대상 확인", done: permitStage >= 2 }];
+    if (docs.length) {
+      docs.forEach((d) => step1Substeps.push({ text: `📄 ${d}`, info: true }));
+      step1Substeps.push({ text: "서류 준비 완료", done: !!taskProgress.documents_prepared, field: "documents_prepared" });
+    } else {
+      step1Substeps.push({ text: "필요 서류", done: false });
+    }
+    if (diag.length) {
+      diag.forEach((d) => step1Substeps.push({ text: `🔍 ${d}`, info: true }));
+      step1Substeps.push({ text: "사전 진단 확인 완료", done: !!taskProgress.pre_diagnosis_checked, field: "pre_diagnosis_checked" });
+    } else {
+      step1Substeps.push({ text: "사전 진단", done: false });
+    }
 
-    const complete = currentStage >= 4;
-    gaugeReadoutEl.textContent = complete ? "🏁 등반완료!" : `${currentStage} / 4단계 진행 중`;
-    gaugeReadoutEl.className = "gauge-readout" + (complete ? " complete" : "");
-    gaugeFillEl.style.height = `${(currentStage / 4) * 100}%`;
-    gaugeFillEl.className = "gauge-fill" + (complete ? " complete" : "");
+    const steps = [
+      {
+        title: "Step 0 · 건축 유형 확인",
+        substeps: [{ text: actType || "행위 유형 파악", done: !!actType }],
+      },
+      {
+        title: "Step 1 · 건축 인허가",
+        substeps: step1Substeps,
+        note: latestPermitResult ? `판정: ${latestPermitResult.permit_type}` : null,
+      },
+      {
+        title: "Step 2 · 공사",
+        substeps: [
+          { text: "착공신고", done: !!taskProgress.construction_notice, field: "construction_notice" },
+          { text: "시공", done: !!taskProgress.construction, field: "construction" },
+          { text: "사용승인", done: !!taskProgress.use_approval, field: "use_approval" },
+        ],
+      },
+      {
+        title: "Step 3 · 창업 행정",
+        substeps: [
+          { text: "식품위생 영업신고", done: latestFoodResult != null },
+          { text: "소방시설", done: latestFireResult != null },
+          { text: "간판ᆞ옥외광고물", done: latestSignageResult != null },
+          { text: "사업자등록", done: !!taskProgress.business_registration, field: "business_registration" },
+          { text: "위생교육", done: !!taskProgress.hygiene_education, field: "hygiene_education" },
+        ],
+      },
+      {
+        title: "Step 4 · 오픈 준비",
+        substeps: [
+          { text: "인테리어ᆞ장비 설치", done: !!taskProgress.interior_equipment, field: "interior_equipment" },
+          { text: "직원 등록", done: !!taskProgress.staff_registration, field: "staff_registration" },
+          { text: "영업 시작", done: !!taskProgress.opened, field: "opened" },
+        ],
+      },
+    ];
 
-    gaugeTicksEl.innerHTML = "";
-    STAGE_LABELS.forEach((label, i) => {
-      const state = i < currentStage ? "done" : i === currentStage ? "current" : "upcoming";
-      const row = document.createElement("div");
-      row.className = `gauge-tick ${state}`;
+    // 도메인(식품위생ᆞ소방ᆞ간판 등)은 실제로 서로 독립적이라 대화 순서에
+    // 따라 Step 0~2가 텅 빈 채로 Step 3의 일부 항목만 먼저 판정날 수 있다
+    // (예: 인허가 얘기 전에 빵집 얘기부터 하면 food_result가 먼저 참). 이걸
+    // Step마다 따로 "진행중(파란 점멸)"으로 표시하면 여러 곳이 동시에
+    // 반짝여서 로드맵을 따라 순서대로 내려가는 느낌이 끊긴다는 피드백
+    // (2026-07-27)이 있어 - "지금 여기" 하이라이트는 앞에서부터 순서대로
+    // 처음 안 끝난 단계 딱 하나에만 주고, 순서를 벗어나 먼저 확인된 항목은
+    // 서브스텝 체크는 그대로 살리되(정보 손실 없이) 단계 전체를 반짝이게
+    // 하진 않는다.
+    // info 항목(서류ᆞ사전진단 실제 목록처럼 참고용으로만 보여주는 줄)은
+    // 완료 여부 개념이 없으니 done/total 집계에서 제외한다 - 안 그러면
+    // "나열됨"이 "완료됨"으로 잘못 집계되는 문제가 재발한다.
+    const countable = (step) => step.substeps.filter((s) => !s.info);
+    let currentIdx = steps.findIndex((step) => {
+      const items = countable(step);
+      const doneCount = items.filter((s) => s.done).length;
+      return doneCount < items.length;
+    });
+    if (currentIdx === -1) currentIdx = steps.length;
+
+    roadmapEl.innerHTML = "";
+    steps.forEach((step, idx) => {
+      const items = countable(step);
+      const doneCount = items.filter((s) => s.done).length;
+      const total = items.length;
+      const allDone = doneCount === total;
+      const hasProgress = doneCount > 0 && !allDone;
+      const isCurrent = idx === currentIdx && !allDone;
+      const icon = allDone ? "✅" : hasProgress ? "🟢" : "○";
+
+      const stepEl = document.createElement("div");
+      stepEl.className = "roadmap-step" + (allDone ? " done" : "") + (isCurrent ? " current" : "");
+
+      const rail = document.createElement("div");
+      rail.className = "roadmap-rail";
+      const dot = document.createElement("span");
+      dot.className = "roadmap-rail-dot" + (allDone ? " done" : isCurrent ? " current" : hasProgress ? " partial" : "");
+      rail.appendChild(dot);
+      if (idx < steps.length - 1) {
+        const line = document.createElement("span");
+        line.className = "roadmap-rail-line" + (allDone ? " done" : "");
+        rail.appendChild(line);
+      }
+      stepEl.appendChild(rail);
+
+      const body = document.createElement("div");
+      body.className = "roadmap-step-body";
 
       const head = document.createElement("div");
-      head.className = "gauge-tick-head";
-      head.innerHTML = `<span class="gauge-tick-mark"></span><span class="gauge-tick-label">${i} · ${label}</span>`;
-      row.appendChild(head);
+      head.className = "roadmap-step-head";
+      head.innerHTML = `<span class="roadmap-step-icon">${icon}</span><span>${step.title}</span>`;
+      body.appendChild(head);
 
-      // 마지막(등반완료)엔 체크리스트가 없고, 현재ᆞ완료 단계만 체크리스트를 보여줌
-      const stageChecklist = checklists[i];
-      if (stageChecklist && (state === "current" || state === "done")) {
-        const list = document.createElement("ul");
-        list.className = "gauge-checklist";
-        stageChecklist.items.forEach(item => {
-          const li = document.createElement("li");
-          li.className = "gauge-check-item" + (item.done ? " checked" : "");
-          li.innerHTML = `<span class="gauge-check-icon">${item.done ? "✓" : "○"}</span><span>${item.text}</span>`;
-          list.appendChild(li);
-        });
-        row.appendChild(list);
+      const list = document.createElement("ul");
+      list.className = "roadmap-substeps";
+      step.substeps.forEach((sub) => {
+        const li = document.createElement("li");
+        if (sub.info) {
+          // 참고용 목록(실제 서류ᆞ사전진단 항목명) - 완료 개념이 없으니
+          // 체크/미체크 아이콘 없이 그대로 표시만 한다.
+          li.className = "roadmap-substep info";
+          li.textContent = sub.text;
+        } else if (sub.field) {
+          // task_progress 축 - 사용자가 직접 완료 여부를 토글할 수 있다.
+          li.className = "roadmap-substep checkable" + (sub.done ? " done" : "");
+          const checkboxId = `roadmap-check-${sub.field}`;
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.id = checkboxId;
+          checkbox.checked = sub.done;
+          checkbox.addEventListener("change", () => toggleTaskProgress(sub.field, checkbox.checked));
+          const label = document.createElement("label");
+          label.htmlFor = checkboxId;
+          label.textContent = sub.text;
+          li.appendChild(checkbox);
+          li.appendChild(label);
+        } else {
+          // 판정 축 - 시스템이 확인한 사실만 표시, 사용자가 임의로 못 바꾼다.
+          li.className = "roadmap-substep" + (sub.done ? " done" : "");
+          li.innerHTML = `<span class="roadmap-substep-icon">${sub.done ? "✅" : "○"}</span><span>${sub.text}</span>`;
+        }
+        list.appendChild(li);
+      });
+      body.appendChild(list);
+
+      if (step.note) {
+        const note = document.createElement("div");
+        note.className = "roadmap-step-note";
+        note.textContent = step.note;
+        body.appendChild(note);
       }
-      gaugeTicksEl.appendChild(row);
+
+      stepEl.appendChild(body);
+      roadmapEl.appendChild(stepEl);
     });
   }
 
@@ -740,11 +847,9 @@
       try { latestFireResult = JSON.parse(savedFireResult); } catch (err) { latestFireResult = null; }
     }
     latestSignageResult = localStorage.getItem("permit_assistant_signage_result");
-
-    // 이번 대화에서 뭔가 진행된 게 하나라도 있어야 게이지를 보여준다(빈
-    // 대화에서까지 0단계 게이지를 먼저 보여줄 필요는 없음 - climbHint 유지).
-    if (Object.keys(caseFacts).length > 0 || latestPermitResult) {
-      renderGauge();
+    const savedTaskProgress = localStorage.getItem("permit_assistant_task_progress");
+    if (savedTaskProgress) {
+      try { taskProgress = JSON.parse(savedTaskProgress); } catch (err) { taskProgress = {}; }
     }
 
     const savedBranch = localStorage.getItem("permit_assistant_branch");
@@ -758,8 +863,6 @@
   }
 
   function resetStageIndicator() {
-    gaugeEl.style.display = "none";
-    climbHintEl.style.display = "block";
     branchPromptEl.style.display = "none";
     branchPromptEl.innerHTML = "";
     lastBranch = null;
@@ -769,6 +872,7 @@
     latestFoodResult = null;
     latestFireResult = null;
     latestSignageResult = null;
+    taskProgress = {};
     renderFactTags();
   }
 
@@ -934,7 +1038,15 @@
         localStorage.setItem("permit_assistant_signage_result", latestSignageResult);
         renderFactTags();
       }
-      if (Object.keys(caseFacts).length > 0 || latestPermitResult) renderGauge();
+      // task_progress는 서버(merge_facts)가 이미 누적해서 전체 dict로 돌려주므로
+      // 그대로 덮어쓴다 - 단, 아직 아무 것도 기록 안 된 턴엔 null/{}로 오니
+      // 기존 값을 지우지 않도록 존재할 때만 반영한다.
+      if (data.task_progress && Object.keys(data.task_progress).length > 0) {
+        taskProgress = data.task_progress;
+        localStorage.setItem("permit_assistant_task_progress", JSON.stringify(taskProgress));
+        renderFactTags();
+      }
+      renderRoadmap();
     } catch (err) {
       removeTypingIndicator();
       addMessage("bot", `서버에 연결할 수 없습니다: ${err.message}`, { isError: true });
@@ -976,6 +1088,7 @@
     localStorage.removeItem("permit_assistant_food_result");
     localStorage.removeItem("permit_assistant_fire_result");
     localStorage.removeItem("permit_assistant_signage_result");
+    localStorage.removeItem("permit_assistant_task_progress");
     userId = getUserId();
     userIdLabel.textContent = `세션: ${userId.slice(0, 8)}`;
     chatEl.innerHTML = "";
