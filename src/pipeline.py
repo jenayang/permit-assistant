@@ -129,6 +129,7 @@ def query(question: str, user_id: Optional[str] = None) -> dict:
         "contexts": contexts,
         "permit_result": result.get("permit_result"),
         "food_result": result.get("food_result"),
+        "fire_result": result.get("fire_result"),
     }
 
 

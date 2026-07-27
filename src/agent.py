@@ -46,6 +46,7 @@ from langgraph.prebuilt import ToolNode
 
 from src import config
 from src.agents import TOOLS
+from src.agents.fire_safety import classify_fire_safety, fire_safety_message
 from src.agents.food_safety import classify_food_business, food_business_message
 from src.agents.regulation import search_regulations
 from src.agents.permit import (
@@ -81,6 +82,12 @@ class AgentState(MessagesState):
     # 이번 스코프 밖(Step 3b는 분류까지만).
     food_facts: Annotated[dict, merge_facts]
     food_result: str | None
+    # 소방시설 판정용 - 위 두 도메인과 마찬가지로 독립 채널. fire_result는
+    # food_result(단일 문자열)와 달리 "필요한 소방시설 목록"이라 list다 - 규모가
+    # 커지면 여러 시설이 동시에 필요할 수 있고, 빈 리스트([])도 "설치 대상 없음"
+    # 이라는 유효한 판정이라 None(미분류)과 구분해야 한다.
+    fire_facts: Annotated[dict, merge_facts]
+    fire_result: list[str] | None
     # 4단계(상황분석/서류/사전진단/기간) 안내 중 실제로 사용자에게 공개된
     # 최대 단계(0~4). 프롬프트 지시만으로는 LLM이 한 턴에 4단계를 전부
     # 쏟아내는 걸 못 막아서(2026-07-26 실사용 세션에서 재현, guard_node 참고)
@@ -93,7 +100,7 @@ class AgentState(MessagesState):
 SYSTEM_PROMPT = """당신은 서울시 건축 인허가 전문 어시스턴트입니다.
 건축ᆞ용도변경 등 인허가 절차를 건축법ᆞ시행령ᆞ시행규칙ᆞ서울시 조례
 기준으로 정확히 안내하고, 카페ᆞ음식점 등 식품접객업 창업 시 필요한
-식품위생법상 영업신고 종류도 함께 판정해 안내합니다.
+식품위생법상 영업신고 종류ᆞ소방시설 설치 대상도 함께 판정해 안내합니다.
 
 ## 1. 정보 수집
 질문에서 지역ᆞ시설 유형ᆞ행위 유형(신축ᆞ증축ᆞ개축ᆞ재축ᆞ이전ᆞ대수선ᆞ
@@ -153,6 +160,16 @@ lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts�
 판정합니다. 대신 사용자가 실제로 답할 수 있는 사실만 물어보되, **그 질문이
 어떤 결과를 가르는 기준인지 짧게 함께 알려주세요** (예: "주류도 함께
 판매하시나요? 음주 허용 여부에 따라 휴게음식점/일반음식점 신고가 달라져서요").
+
+카페ᆞ음식점처럼 식품접객업이면 소방시설 설치 대상도 함께 판정하세요.
+필요한 사실은 연면적(size_sqm - case_facts에 이미 물어봤다면 같은 값을
+record_fire_facts에도 그대로 기록하세요, 새로 묻지 마세요)과 대규모점포
+(백화점ᆞ쇼핑센터 등) 입점 여부(is_large_store_tenant - 독립 점포로
+창업하는 게 명백하면 False로 기록)뿐입니다. **어떤 소방시설이 필요한지는
+절대 당신이 계산하지 마세요** - 시행령 별표4 기준으로 시스템이 자동
+판정하며, 결과가 여러 개(예: 소화기구+비상경보설비)이거나 하나도 없을
+수 있습니다(연면적이 작으면 정상적으로 "해당 없음"이 나옵니다 - 이것도
+유효한 판정이니 정보 부족과 헷갈리지 마세요).
 
 ## 2. 도구 선택
 - 법률 용어 정의("OO이 뭐야") → search_by_term (핵심 용어만 추출)
@@ -295,35 +312,33 @@ def agent_node(state: AgentState) -> dict:
     return _agent_result(response)
 
 
-def _agent_result(response: AIMessage) -> dict:
-    """LLM 응답에서 record_case_facts/record_permit_synthesis/record_food_facts
-    호출을 찾아 각각 case_facts/permit_synthesis/food_facts 갱신분으로 뽑아낸다.
+# record_* 도구 이름 → 그 인자가 쌓일 AgentState 채널. 새 도메인의 record_*
+# 도구를 추가할 땐 이 매핑에 한 줄만 추가하면 된다 - 예전엔 _agent_result
+# 안에 if/elif 분기를 손으로 늘려야 했는데, 한 번 빠뜨려서(record_food_facts
+# 추가 때) 도구는 호출되는데 상태엔 하나도 안 남아 classify가 영영 안 걸리는
+# 버그를 실제로 겪었다. 매핑 하나로 통일해서 이 버그 종류 자체를 없앤다.
+_FACT_TOOL_TO_STATE_KEY = {
+    "record_case_facts": "case_facts",
+    "record_permit_synthesis": "permit_synthesis",
+    "record_food_facts": "food_facts",
+    "record_fire_facts": "fire_facts",
+}
 
-    두 도구 자체는 여전히 ToolNode가 정상 실행해서(확인 문자열만 반환) 도구
+
+def _agent_result(response: AIMessage) -> dict:
+    """LLM 응답에서 _FACT_TOOL_TO_STATE_KEY에 등록된 record_* 호출을 찾아
+    각각 대응하는 상태 채널 갱신분으로 뽑아낸다.
+
+    도구 자체는 여전히 ToolNode가 정상 실행해서(확인 문자열만 반환) 도구
     호출-응답 짝은 그대로 맞춰지고, 여기서는 그 인자를 그래프 상태에도
-    반영하는 부수 작업만 한다. 새 record_* 도구를 추가할 때 여기 분기를
-    같이 안 늘리면, 도구는 호출됐는데 상태엔 하나도 안 남는 채로 조용히
-    무시된다(실제로 record_food_facts 추가 때 한 번 빠뜨렸다가 겪음 -
-    food_facts가 항상 {}로 남아 classify가 영영 안 걸리는 버그였음).
+    반영하는 부수 작업만 한다.
     """
-    facts_update: dict = {}
-    synthesis_update: dict = {}
-    food_facts_update: dict = {}
+    updates: dict[str, dict] = {}
     for tc in getattr(response, "tool_calls", None) or []:
-        if tc["name"] == "record_case_facts":
-            facts_update.update(tc["args"])
-        elif tc["name"] == "record_permit_synthesis":
-            synthesis_update.update(tc["args"])
-        elif tc["name"] == "record_food_facts":
-            food_facts_update.update(tc["args"])
-    result: dict = {"messages": [response]}
-    if facts_update:
-        result["case_facts"] = facts_update
-    if synthesis_update:
-        result["permit_synthesis"] = synthesis_update
-    if food_facts_update:
-        result["food_facts"] = food_facts_update
-    return result
+        state_key = _FACT_TOOL_TO_STATE_KEY.get(tc["name"])
+        if state_key is not None:
+            updates.setdefault(state_key, {}).update(tc["args"])
+    return {"messages": [response], **updates}
 
 
 def _auto_search_messages(query: str) -> list:
@@ -353,17 +368,18 @@ def _auto_search_messages(query: str) -> list:
 
 
 def classify_node(state: AgentState) -> dict:
-    """case_facts/food_facts가 각각 충분히 모이면 해당 도메인을 결정론적으로
-    분류하고, 그 결과를 (LLM이 부른 게 아니라 이 노드가 직접 구성한) tool_calls
-    모양 메시지로 기록한다. pipeline.py의 tool_calls 추출 로직과 프론트의
-    로드맵 렌더링 코드가 "tool: set_procedure_stage" 모양만 보고 반응하므로,
-    별도 API/프론트 수정 없이 그대로 재사용된다. 판정이 실제로 났으면(별도
-    절차가 있는 결과만 - 인허가불필요/해당없음은 검색할 게 없으므로 제외)
-    곧바로 _auto_search_messages로 근거 법령까지 같은 턴에 확보해둔다.
+    """case_facts/food_facts/fire_facts가 각각 충분히 모이면 해당 도메인을
+    결정론적으로 분류하고, 그 결과를 (LLM이 부른 게 아니라 이 노드가 직접
+    구성한) tool_calls 모양 메시지로 기록한다. pipeline.py의 tool_calls
+    추출 로직과 프론트의 로드맵 렌더링 코드가 "tool: set_procedure_stage"
+    모양만 보고 반응하므로, 별도 API/프론트 수정 없이 그대로 재사용된다.
+    판정이 실제로 났으면(별도 절차가 있는 결과만 - 인허가불필요/해당없음/
+    빈 소방시설 목록은 검색할 게 없으므로 제외) 곧바로 _auto_search_messages로
+    근거 법령까지 같은 턴에 확보해둔다.
 
-    두 도메인(건축ᆞ식품위생)은 서로 독립적이라 한 턴에 한쪽만, 둘 다, 혹은
-    (route_after_tools가 이미 걸러줘서) 아무것도 새로 분류되지 않을 수 있다 -
-    해당하는 도메인만 골라 처리하고 메시지를 이어붙인다.
+    세 도메인(건축ᆞ식품위생ᆞ소방)은 서로 독립적이라 한 턴에 하나만, 여럿,
+    혹은 (route_after_tools가 이미 걸러줘서) 아무것도 새로 분류되지 않을 수
+    있다 - 해당하는 도메인만 골라 처리하고 메시지를 이어붙인다.
     """
     messages: list = []
     update: dict = {}
@@ -415,6 +431,30 @@ def classify_node(state: AgentState) -> dict:
             logger.info("[classify_food] food_facts=%r → %s", food_facts, business_type)
             if business_type != "해당없음":
                 messages.extend(_auto_search_messages(f"{business_type} 영업신고 절차 및 필요 서류"))
+
+    fire_facts = state.get("fire_facts", {})
+    if not fire_facts.get("_classified"):
+        required = classify_fire_safety(fire_facts)
+        if required is not None:
+            call_id = f"classify_fire_{uuid.uuid4().hex[:8]}"
+            messages.append(AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "set_fire_safety_result",
+                    "args": {"required": required},
+                    "id": call_id,
+                }],
+            ))
+            messages.append(ToolMessage(
+                content=fire_safety_message(required),
+                tool_call_id=call_id,
+                name="set_fire_safety_result",
+            ))
+            update["fire_facts"] = {"_classified": True}
+            update["fire_result"] = required
+            logger.info("[classify_fire] fire_facts=%r → %s", fire_facts, required)
+            if required:
+                messages.extend(_auto_search_messages(f"{', '.join(required)} 설치 기준 및 절차"))
 
     if messages:
         update["messages"] = messages
@@ -626,32 +666,38 @@ def guard_node(state: AgentState) -> dict:
 
 
 def route_after_tools(state: AgentState) -> str:
-    """tools 실행 직후: case_facts 또는 food_facts가 방금 완성됐으면(각각
-    record_case_facts/record_food_facts로 채워짐) agent로 돌아가기 전에
-    classify부터 강제한다.
+    """tools 실행 직후: case_facts/food_facts/fire_facts 중 하나라도 방금
+    완성됐으면(각각 record_case_facts/record_food_facts/record_fire_facts로
+    채워짐) agent로 돌아가기 전에 classify부터 강제한다.
 
     예전엔 이 체크를 route_after_agent(agent 응답 이후)에서만 했는데, 그러면
     "case_facts는 이미 다 모였지만 LLM이 그 사실을 모른 채 도구 호출 없이
     먼저 답변을 시도 -> 그래프가 그 답변을 무시하고 classify로 강제 전환 ->
     다음 턴 LLM이 '이미 답했나?' 헷갈려하며 부실한 후속 답변을 내는" 문제가
     실제로 발생했다. tools 직후로 당기면 LLM이 답변을 시도하기 전에 분류가
-    먼저 끝나서 이 문제가 구조적으로 사라진다. food_facts도 동일한 이유로
-    같은 시점에 체크한다(도메인이 늘어도 이 타이밍 원칙은 그대로 적용).
+    먼저 끝나서 이 문제가 구조적으로 사라진다. food_facts/fire_facts도 동일한
+    이유로 같은 시점에 체크한다(도메인이 늘어도 이 타이밍 원칙은 그대로 적용).
     """
     facts = state.get("case_facts", {})
     food_facts = state.get("food_facts", {})
+    fire_facts = state.get("fire_facts", {})
     needs_classify = not facts.get("_classified") and classify_case(facts) is not None
     needs_food_classify = (
         not food_facts.get("_classified") and classify_food_business(food_facts) is not None
     )
-    if needs_classify or needs_food_classify:
+    needs_fire_classify = (
+        not fire_facts.get("_classified") and classify_fire_safety(fire_facts) is not None
+    )
+    if needs_classify or needs_food_classify or needs_fire_classify:
         logger.info(
-            "[route_after_tools] case_facts=%r food_facts=%r → classify", facts, food_facts
+            "[route_after_tools] case_facts=%r food_facts=%r fire_facts=%r → classify",
+            facts, food_facts, fire_facts,
         )
         return "classify"
     logger.info(
-        "[route_after_tools] case_facts=%r food_facts=%r → agent (분류 조건 미충족 또는 이미 분류됨)",
-        facts, food_facts,
+        "[route_after_tools] case_facts=%r food_facts=%r fire_facts=%r → agent "
+        "(분류 조건 미충족 또는 이미 분류됨)",
+        facts, food_facts, fire_facts,
     )
     return "agent"
 

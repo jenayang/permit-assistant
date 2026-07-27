@@ -111,6 +111,11 @@
     background: #b45309;
     color: #ffffff;
   }
+  .fact-tag.result.fire {
+    border-color: #b91c1c;
+    background: #b91c1c;
+    color: #ffffff;
+  }
   .climb-hint {
     margin: auto 0;
     text-align: center;
@@ -486,6 +491,7 @@
   let caseFacts = {};
   let caseTypeResult = null; // set_procedure_stage로 확정된 허가/신고/기재변경 등
   let latestFoodResult = null; // /query 응답의 food_result(식품위생법상 영업 종류)를 그대로 보관
+  let latestFireResult = null; // /query 응답의 fire_result(필요 소방시설 목록, 배열)를 그대로 보관
 
   // case_facts 필드 → 태그 텍스트 변환. 여기 없는 필드는 태그로 안 보임(값
   // 하나만으로는 뜻이 안 통하는 필드는 아래에서 조합해서 별도 처리).
@@ -536,7 +542,15 @@
       span.textContent = `🍽 ${latestFoodResult}`;
       factTagsEl.appendChild(span);
     }
-    factTagsEl.style.display = chips.length || caseTypeResult || showFoodTag ? "flex" : "none";
+    // 빈 배열([], 설치 대상 없음)은 food의 "해당없음"과 같은 이유로 칩 생략.
+    const showFireTag = latestFireResult && latestFireResult.length > 0;
+    if (showFireTag) {
+      const span = document.createElement("span");
+      span.className = "fact-tag result fire";
+      span.textContent = `🧯 ${latestFireResult.join(", ")}`;
+      factTagsEl.appendChild(span);
+    }
+    factTagsEl.style.display = chips.length || caseTypeResult || showFoodTag || showFireTag ? "flex" : "none";
   }
 
   async function loadProcedureStages() {
@@ -707,6 +721,10 @@
     }
     caseTypeResult = localStorage.getItem("permit_assistant_case_type");
     latestFoodResult = localStorage.getItem("permit_assistant_food_result");
+    const savedFireResult = localStorage.getItem("permit_assistant_fire_result");
+    if (savedFireResult) {
+      try { latestFireResult = JSON.parse(savedFireResult); } catch (err) { latestFireResult = null; }
+    }
 
     // 이번 대화에서 뭔가 진행된 게 하나라도 있어야 게이지를 보여준다(빈
     // 대화에서까지 0단계 게이지를 먼저 보여줄 필요는 없음 - climbHint 유지).
@@ -734,6 +752,7 @@
     caseTypeResult = null;
     latestPermitResult = null;
     latestFoodResult = null;
+    latestFireResult = null;
     renderFactTags();
   }
 
@@ -887,6 +906,13 @@
         localStorage.setItem("permit_assistant_food_result", latestFoodResult);
         renderFactTags();
       }
+      // fire_result는 배열이라 null이 아니면(빈 배열 []도 포함) 판정 완료로 본다 -
+      // JS에서 빈 배열도 truthy이므로 이 조건이 그대로 맞게 동작한다.
+      if (data.fire_result) {
+        latestFireResult = data.fire_result;
+        localStorage.setItem("permit_assistant_fire_result", JSON.stringify(latestFireResult));
+        renderFactTags();
+      }
       if (Object.keys(caseFacts).length > 0 || latestPermitResult) renderGauge();
     } catch (err) {
       removeTypingIndicator();
@@ -927,6 +953,7 @@
     localStorage.removeItem("permit_assistant_case_type");
     localStorage.removeItem("permit_assistant_permit_result");
     localStorage.removeItem("permit_assistant_food_result");
+    localStorage.removeItem("permit_assistant_fire_result");
     userId = getUserId();
     userIdLabel.textContent = `세션: ${userId.slice(0, 8)}`;
     chatEl.innerHTML = "";
