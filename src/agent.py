@@ -38,6 +38,7 @@ from typing import Annotated
 from langchain_cerebras import ChatCerebras
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.store.memory import InMemoryStore
 from langgraph.graph import END, START, MessagesState, StateGraph
@@ -46,6 +47,7 @@ from langgraph.prebuilt import ToolNode
 from src import config
 from src.agents import TOOLS
 from src.agents.food_safety import classify_food_business, food_business_message
+from src.agents.regulation import search_regulations
 from src.agents.permit import (
     PROCEDURE_TREE,
     PermitResult,
@@ -187,9 +189,12 @@ lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts�
 단계/턴에서 말한 내용을 다시 설명하지 마세요. 각 단계 끝에 다음 단계를
 계속 안내할지 짧게 묻고, 사용자가 동의하거나 관련 질문을 이어가면 다음
 단계로 넘어가세요. "한 번에 다 알려줘" 요청 시에만 4단계를 모두 한 번에.
-[2단계: 필수 서류]를 아직 검색 안 했다면 search_regulations로 근거를
-확보하고 record_permit_synthesis로 기록하세요(required_documents,
-related_agencies). [3단계: 사전 진단]도 마찬가지로, 안내한 항목들을
+**판정이 확정되는 순간 시스템이 이미 관련 법령을 한 번 자동 검색해서
+도구 응답으로 넣어뒀습니다** - [2단계: 필수 서류]를 쓸 때 그 검색 결과가
+있는지 먼저 확인하고, 있으면 다시 검색하지 말고 그대로 근거로 쓰세요.
+그 결과가 답변에 부족하거나 추가 관점이 필요할 때만 search_regulations를
+새로 호출하세요. record_permit_synthesis로 기록하는 것도 잊지 마세요
+(required_documents, related_agencies). [3단계: 사전 진단]도 마찬가지로, 안내한 항목들을
 같은 도구의 pre_diagnosis_items에 답변과 동일한 문구로 기록하세요 -
 프론트엔드 진행 표시가 이 두 목록의 존재 여부로 단계 완료를 판단하니,
 텍스트로만 안내하고 기록을 빠뜨리면 안 됩니다.
@@ -321,12 +326,40 @@ def _agent_result(response: AIMessage) -> dict:
     return result
 
 
+def _auto_search_messages(query: str) -> list:
+    """판정 결과를 쿼리로 search_regulations를 그래프가 직접 호출해, LLM이
+    검색할지 말지 재량으로 정하는 지점 자체를 없앤다(2026-07-27 도입).
+
+    LLM이 부른 게 아니라 이 함수가 직접 구성한 tool_calls 모양 메시지로
+    기록하는 건 위 set_procedure_stage/set_food_business_type과 같은 패턴 -
+    guard_node의 _has_grounding_search가 이름(search_regulations)만 보고
+    "실제 검색 이력"으로 인정하므로 그쪽 로직도 그대로 재사용된다. 이전엔
+    "[2단계: 필수 서류]를 검색해서 기록하라"는 프롬프트 지시에 LLM이 따를지
+    말지 맡겼는데, 검색 자체를 생략하고 근거 없이 서류를 지어내는 사례가
+    반복 확인돼([[project_tool_call_reliability]]) 판정 시점에 그래프가
+    선제적으로 검색해두는 쪽으로 옮겼다 - guard_node는 이 문제를 사후에
+    잡아내는 역할이었지, 애초에 검색이 일어나게 만들지는 못했다.
+    """
+    call_id = f"autosearch_{uuid.uuid4().hex[:8]}"
+    result = search_regulations.invoke({"query": query})
+    logger.info("[classify] 판정 직후 자동 검색: query=%r", query)
+    return [
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "search_regulations", "args": {"query": query}, "id": call_id}],
+        ),
+        ToolMessage(content=result, tool_call_id=call_id, name="search_regulations"),
+    ]
+
+
 def classify_node(state: AgentState) -> dict:
     """case_facts/food_facts가 각각 충분히 모이면 해당 도메인을 결정론적으로
     분류하고, 그 결과를 (LLM이 부른 게 아니라 이 노드가 직접 구성한) tool_calls
     모양 메시지로 기록한다. pipeline.py의 tool_calls 추출 로직과 프론트의
     로드맵 렌더링 코드가 "tool: set_procedure_stage" 모양만 보고 반응하므로,
-    별도 API/프론트 수정 없이 그대로 재사용된다.
+    별도 API/프론트 수정 없이 그대로 재사용된다. 판정이 실제로 났으면(별도
+    절차가 있는 결과만 - 인허가불필요/해당없음은 검색할 게 없으므로 제외)
+    곧바로 _auto_search_messages로 근거 법령까지 같은 턴에 확보해둔다.
 
     두 도메인(건축ᆞ식품위생)은 서로 독립적이라 한 턴에 한쪽만, 둘 다, 혹은
     (route_after_tools가 이미 걸러줘서) 아무것도 새로 분류되지 않을 수 있다 -
@@ -356,6 +389,8 @@ def classify_node(state: AgentState) -> dict:
             ))
             update["case_facts"] = {"_classified": True}
             logger.info("[classify] case_facts=%r → %s", facts, result_type)
+            if result_type != "인허가불필요":
+                messages.extend(_auto_search_messages(f"{result_type} 절차 및 필요 서류"))
 
     food_facts = state.get("food_facts", {})
     if not food_facts.get("_classified"):
@@ -378,6 +413,8 @@ def classify_node(state: AgentState) -> dict:
             update["food_facts"] = {"_classified": True}
             update["food_result"] = business_type
             logger.info("[classify_food] food_facts=%r → %s", food_facts, business_type)
+            if business_type != "해당없음":
+                messages.extend(_auto_search_messages(f"{business_type} 영업신고 절차 및 필요 서류"))
 
     if messages:
         update["messages"] = messages
@@ -495,19 +532,48 @@ def _guard_retry_count(messages) -> int:
     return count
 
 
+def _synthesis_gap_violations(state: AgentState, max_mentioned: int) -> list[str]:
+    """[2단계]/[3단계]를 언급했는데 record_permit_synthesis로 실제 기록은 안 한
+    경우를 잡는다. "도구를 호출했다"는 문장을 텍스트로 지어내고 실제로는
+    tool_calls가 비어있던 사례가 실측으로 확인됐다(2026-07-27) - 인용 위반과
+    같은 종류의 문제(근거 없이 답만 그럴듯하게 마무리)라 같은 guard에서 같이
+    잡는다. 이전 턴에 이미 기록됐으면(permit_synthesis가 누적 상태라) 재확인
+    답변에서 또 걸릴 일은 없다 - 그때그때 "이번 턴에 호출했는지"가 아니라
+    "지금 상태에 실제로 있는지"만 본다.
+    """
+    synthesis = state.get("permit_synthesis", {})
+    violations = []
+    if max_mentioned >= 2 and not synthesis.get("required_documents"):
+        violations.append(
+            "[2단계: 필수 서류]를 언급했지만 record_permit_synthesis(required_documents=[...])를 "
+            "실제로 호출하지 않았습니다. 서류를 텍스트로 나열하는 데서 끝내지 말고, 반드시 "
+            "그 도구를 실제로 호출해서 기록한 뒤 답변을 마무리하세요."
+        )
+    if max_mentioned >= 3 and not synthesis.get("pre_diagnosis_items"):
+        violations.append(
+            "[3단계: 사전 진단]을 언급했지만 record_permit_synthesis(pre_diagnosis_items=[...])를 "
+            "실제로 호출하지 않았습니다. 항목을 텍스트로 나열하는 데서 끝내지 말고, 반드시 "
+            "그 도구를 실제로 호출해서 기록한 뒤 답변을 마무리하세요."
+        )
+    return violations
+
+
 def guard_node(state: AgentState) -> dict:
-    """agent가 자유 텍스트로 답을 끝내려 할 때, 근거ᆞ판정 없이 앞서나간 답변을
-    한 번 걸러낸다. LLM 판단이 아니라 정규식+상태로 결정론적으로 감지한다
-    (classify_case와 같은 원칙 - 프롬프트 지시만으로는 못 막는다는 게
+    """agent가 자유 텍스트로 답을 끝내려 할 때, 근거ᆞ판정ᆞ기록 없이 앞서나간
+    답변을 한 번 걸러낸다. LLM 판단이 아니라 정규식+상태로 결정론적으로
+    감지한다(classify_case와 같은 원칙 - 프롬프트 지시만으로는 못 막는다는 게
     2026-07-26 실사용 세션에서 재현됨).
 
-    막는 위반 두 가지:
+    막는 위반 세 가지:
     1. 허용된 단계 수([_max_allowed_stage])를 넘겨 [N단계]를 안내 - 판정 전
        절차 안내를 아예 시도한 경우(허용치 0)와, 판정 후 한 턴에 여러 단계를
        몰아서 공개한 경우(사용자가 "1단계만" 이라고 명시해도 무시하고 4단계를
        다 준 사례 포함) 둘 다 이 하나의 규칙으로 잡는다.
     2. search_regulations/search_by_term을 한 번도 호출하지 않았는데
        [출처: ...] 인용이 있는 경우 - 근거 없이 조항을 지어낸 것.
+    3. [2단계]/[3단계]를 언급했는데 record_permit_synthesis로 실제 기록은
+       안 한 경우 - "도구를 호출했다"는 문장까지 텍스트로 지어내고 실제로는
+       안 부른 사례가 실측으로 확인됨(_synthesis_gap_violations 참고).
 
     같은 사용자 턴 안에서 최대 1회만 재시도를 유도한다(무한 루프 방지) - 그
     이상 반복되면 프롬프트만으로는 못 막는 한계로 보고 그냥 통과시킨다.
@@ -534,6 +600,7 @@ def guard_node(state: AgentState) -> dict:
             "인용이 포함되어 있습니다. 검색 없이 조항을 지어내지 말고, 먼저 검색 도구를 "
             "호출해 실제 근거를 확보한 뒤 답변하세요."
         )
+    violations.extend(_synthesis_gap_violations(state, max_mentioned))
 
     if violations and _guard_retry_count(messages) < 1:
         logger.info("[guard] 위반 감지, 재시도 유도: %s", violations)
@@ -680,7 +747,14 @@ def build_graph():
     # 파일 위치 관례를 따름.
     config.CHROMA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(config.CHROMA_DIR / "checkpoints.sqlite"), check_same_thread=False)
-    checkpointer = SqliteSaver(conn)  # short-term memory (영구 저장)
+    # 체크포인터는 상태(AgentState)를 msgpack으로 직렬화하는데, permit_result가
+    # 커스텀 Pydantic 모델(PermitResult)이라 기본 직렬화기가 "등록 안 된 타입"
+    # 경고를 냄 - 지금은 허용하되 경고만 남기는 완화 모드지만, 미래 LangGraph
+    # 버전에서 기본이 차단으로 바뀔 예정이라 명시적으로 허용 목록에 등록해둔다
+    # (전체 허용(allowed_msgpack_modules=True) 대신 이 타입 하나만 등록 - 불필요한
+    # 타입까지 역직렬화 허용하지 않도록).
+    serde = JsonPlusSerializer(allowed_msgpack_modules=[PermitResult])
+    checkpointer = SqliteSaver(conn, serde=serde)  # short-term memory (영구 저장)
     checkpointer.setup()
     store = InMemoryStore()         # long-term memory (미사용 - 그대로 둠)
     return builder.compile(checkpointer=checkpointer, store=store)
