@@ -62,6 +62,7 @@ class QueryResponse(BaseModel):
     permit_result: Optional[PermitResult] = None
     food_result: Optional[str] = None
     fire_result: Optional[list[str]] = None
+    signage_result: Optional[str] = None
 
 
 class IngestResponse(BaseModel):
@@ -123,6 +124,7 @@ def query_endpoint(req: QueryRequest) -> QueryResponse:
             permit_result=result["permit_result"],
             food_result=result["food_result"],
             fire_result=result["fire_result"],
+            signage_result=result["signage_result"],
         )
         
     except ValueError as e: # 400 클라이언트 잘못(빈 질문 등)

@@ -50,6 +50,7 @@ from src.agents import TOOLS
 from src.agents.fire_safety import classify_fire_safety, fire_safety_message
 from src.agents.food_safety import classify_food_business, food_business_message
 from src.agents.regulation import search_regulations
+from src.agents.signage import classify_signage, signage_message
 from src.agents.permit import (
     PROCEDURE_TREE,
     PermitResult,
@@ -59,6 +60,13 @@ from src.agents.permit import (
 )
 
 logger = logging.getLogger(__name__)
+
+# disclosed_stage(dict[domain, stage])에서 지금 유일하게 4단계(상황분석/서류/
+# 사전진단/기간) 구조를 쓰는 도메인의 키. permit만 이 패턴을 쓴다 - food/fire/
+# signage 등 나머지는 classify 결과 자체가 완결된 답이라 단계 구조가 없다
+# (2026-07-27 논의: 두 번째로 이 패턴이 필요한 도메인이 실제로 생기면 그때
+# DOMAIN_CONFIGS에 supports_stage 같은 필드로 일반화 - 지금은 이르다).
+_STAGE_DOMAIN = "case_facts"
 
 
 # === 그래프 상태 ===(MessagesState + 대화 중 파악된 사용자 상황 사실들)
@@ -89,19 +97,31 @@ class AgentState(MessagesState):
     # 이라는 유효한 판정이라 None(미분류)과 구분해야 한다.
     fire_facts: Annotated[dict, merge_facts]
     fire_result: list[str] | None
+    # 간판ᆞ옥외광고물 허가/신고 판정용 - 위 도메인들과 마찬가지로 독립 채널.
+    # food_result처럼 단일 문자열(허가/신고/허가ᆞ신고 불필요) - permit처럼
+    # 별도 종합(finalize) 단계 없이 classify 시점에 바로 확정된다.
+    signage_facts: Annotated[dict, merge_facts]
+    signage_result: str | None
     # 4단계(상황분석/서류/사전진단/기간) 안내 중 실제로 사용자에게 공개된
-    # 최대 단계(0~4). 프롬프트 지시만으로는 LLM이 한 턴에 4단계를 전부
-    # 쏟아내는 걸 못 막아서(2026-07-26 실사용 세션에서 재현, guard_node 참고)
-    # 이 값으로 "이번 턴엔 몇 단계까지만" 상한을 그래프가 강제한다. 리듀서
-    # 없이 기본 덮어쓰기(guard_node가 한 번에 하나씩만 갱신).
-    disclosed_stage: int
+    # 최대 단계(0~4) - 도메인별로 분리된 dict다(키: DOMAIN_CONFIGS의
+    # facts_key, 지금은 "case_facts"=permit만 실제로 씀). 처음엔 전역
+    # 스칼라 하나였는데, signage처럼 이 단계 구조를 안 쓰는 도메인의 답변에
+    # LLM이 [N단계] 마커를 잘못 갖다 써도 그게 permit의 카운터를 오염시켜서
+    # (예: 간판 얘기만 했는데 disclosed_stage가 올라가 나중에 진짜 건축
+    # 얘기를 시작하면 이미 일부 단계가 끝난 것으로 오인) 도메인별로 분리했다
+    # (2026-07-27 실측 확인). 프롬프트 지시만으로는 LLM이 한 턴에 4단계를
+    # 전부 쏟아내는 걸 못 막아서(2026-07-26 실사용 세션에서 재현, guard_node
+    # 참고) 이 값으로 "이번 턴엔 몇 단계까지만" 상한을 그래프가 강제한다.
+    # 리듀서 없이 기본 덮어쓰기(guard_node가 한 번에 하나씩만 갱신).
+    disclosed_stage: dict[str, int]
 
 
 # === 시스템 프롬프트 ===
 SYSTEM_PROMPT = """당신은 서울시 건축 인허가 전문 어시스턴트입니다.
 건축ᆞ용도변경 등 인허가 절차를 건축법ᆞ시행령ᆞ시행규칙ᆞ서울시 조례
 기준으로 정확히 안내하고, 카페ᆞ음식점 등 식품접객업 창업 시 필요한
-식품위생법상 영업신고 종류ᆞ소방시설 설치 대상도 함께 판정해 안내합니다.
+식품위생법상 영업신고 종류ᆞ소방시설 설치 대상ᆞ간판 등 옥외광고물 허가/
+신고 대상도 함께 판정해 안내합니다.
 
 ## 1. 정보 수집
 질문에서 지역ᆞ시설 유형ᆞ행위 유형(신축ᆞ증축ᆞ개축ᆞ재축ᆞ이전ᆞ대수선ᆞ
@@ -172,6 +192,14 @@ record_fire_facts에도 그대로 기록하세요, 새로 묻지 마세요)과 �
 수 있습니다(연면적이 작으면 정상적으로 "해당 없음"이 나옵니다 - 이것도
 유효한 판정이니 정보 부족과 헷갈리지 마세요).
 
+사용자가 간판ᆞ현수막ᆞ외부 광고물 설치를 언급하면 record_signage_facts로
+기록하세요. **먼저 sign_type(벽면이용간판/돌출간판/지주이용간판/입간판/
+현수막)부터 파악**하세요 - 종류에 따라 필요한 나머지 필드가 다릅니다
+(입간판은 sign_type만 알면 바로 판정됨). **허가/신고/불필요 여부는 절대
+당신이 계산하지 마세요** - 시행령 제4조ᆞ제5조 기준으로 시스템이 자동
+판정합니다. is_third_party_ad(타사광고) 같은 용어는 "본인 업소 광고인가요,
+다른 업체 광고를 걸어주는 건가요?"처럼 풀어서 물어보세요.
+
 ## 2. 도구 선택
 - 법률 용어 정의("OO이 뭐야") → search_by_term (핵심 용어만 추출)
 - 절차ᆞ조건ᆞ서류 등 일반 질문 → search_regulations
@@ -213,11 +241,19 @@ record_fire_facts에도 그대로 기록하세요, 새로 묻지 마세요)과 �
   우선 원칙을 따르고, 조례는 상충이 아니라 지역 추가 규정으로 안내하세요.
 
 ## 3. 답변 작성
-**(A) 판정 정보가 아직 부족함**: 부족한 사실을 되묻는 1~2문장으로 끝내세요.
-`[1단계]` 같은 헤더나 절차ᆞ서류 설명은 이번 턴에 꺼내지 마세요.
+**`[N단계]` 구조와 record_permit_synthesis는 건축 인허가(permit_type) 설명
+전용입니다.** 식품위생(food_result)ᆞ소방시설(fire_result)ᆞ간판(signage_result)
+판정 결과는 이 구조를 절대 쓰지 마세요 - 그 도메인들은 classify 시점에
+이미 완결된 안내 문구가 도구 응답으로 옵니다. 그 문구를 자연스러운
+말투로 그대로 전달하면 끝이고, `[1단계]` 같은 헤더나 record_permit_synthesis
+호출을 덧붙이지 마세요(다른 도메인 얘기에 이 구조를 갖다 쓰면 permit의
+단계 진행 상태가 오염됩니다 - 실제로 겪은 문제, 2026-07-27).
 
-**(B) 판정 완료(도구 응답으로 옴) 또는 판정이 필요 없는 질문**(정의 질문 등):
-아래 4단계로 나눠 순서대로 안내하세요. 각 단계는 핵심만 간결하게 - 이전
+**(A) permit 판정 정보가 아직 부족함**: 부족한 사실을 되묻는 1~2문장으로
+끝내세요. `[1단계]` 같은 헤더나 절차ᆞ서류 설명은 이번 턴에 꺼내지 마세요.
+
+**(B) permit 판정 완료(도구 응답으로 옴) 또는 permit 관련 질문**(정의
+질문 등): 아래 4단계로 나눠 순서대로 안내하세요. 각 단계는 핵심만 간결하게 - 이전
 단계/턴에서 말한 내용을 다시 설명하지 마세요. 각 단계 끝에 다음 단계를
 계속 안내할지 짧게 묻고, 사용자가 동의하거나 관련 질문을 이어가면 다음
 단계로 넘어가세요. "한 번에 다 알려줘" 요청 시에만 4단계를 모두 한 번에.
@@ -293,13 +329,13 @@ def agent_node(state: AgentState) -> dict:
     - 답변 가능하면 최종 답변 반환
     - Gemini 무료 티어 할당량(하루 20회) 소진 시 Cerebras(config.CEREBRAS_MODEL)로 자동 전환
     - 응답에 record_case_facts 호출이 있으면 그 인자를 case_facts에 병합
-    - 판정이 끝났으면 disclosed_stage 기준으로 "이번 턴엔 N단계까지만" 동적 지시를
-      덧붙인다(연성 유도 - 실제 차단은 guard_node가 담당).
+    - 판정이 끝났으면 disclosed_stage(permit 전용) 기준으로 "이번 턴엔 N단계까지만"
+      동적 지시를 덧붙인다(연성 유도 - 실제 차단은 guard_node가 담당).
     """
     global _gemini_quota_exhausted
     messages = [SystemMessage(content=SYSTEM_PROMPT)]
     if state.get("case_facts", {}).get("_classified"):
-        disclosed = state.get("disclosed_stage", 0)
+        disclosed = state.get("disclosed_stage", {}).get(_STAGE_DOMAIN, 0)
         if disclosed < 4:
             messages.append(SystemMessage(content=(
                 f"[진행 상태] 지금까지 {disclosed}단계까지 공개했습니다. 이번 턴에는 "
@@ -337,6 +373,7 @@ _FACT_TOOL_TO_STATE_KEY = {
     "record_permit_synthesis": "permit_synthesis",
     "record_food_facts": "food_facts",
     "record_fire_facts": "fire_facts",
+    "record_signage_facts": "signage_facts",
 }
 
 
@@ -458,12 +495,31 @@ def _classify_fire(facts: dict) -> ClassificationOutput | None:
     )
 
 
+def _classify_signage(facts: dict) -> ClassificationOutput | None:
+    """classify_signage()(signage.py)를 감싸는 배관 전용 래퍼. permit/food/fire와
+    달리 message 생성에 raw_result(허가/신고/불필요)뿐 아니라 sign_type(facts
+    에서 옴)도 같이 필요해서, 이 래퍼가 둘을 합쳐 tool_args/tool_message를
+    구성한다."""
+    result = classify_signage(facts)
+    if result is None:
+        return None
+    sign_type = facts["sign_type"]
+    return ClassificationOutput(
+        raw_result=result,
+        tool_name="set_signage_result",
+        tool_args={"sign_type": sign_type, "result": result},
+        tool_message=signage_message(sign_type, result),
+        rag_query=None if result == "허가ᆞ신고 불필요" else f"{sign_type} {result} 절차 및 필요 서류",
+    )
+
+
 # 도메인을 추가할 땐 이 목록에 한 줄만 추가하면 된다 - classify_node/
 # route_after_tools 둘 다 이 목록만 보고 움직이므로 그래프 쪽은 더 안 고쳐도 됨.
 DOMAIN_CONFIGS: list[_DomainConfig] = [
     _DomainConfig(facts_key="case_facts", state_key=None, classify_fn=_classify_permit),
     _DomainConfig(facts_key="food_facts", state_key="food_result", classify_fn=_classify_food),
     _DomainConfig(facts_key="fire_facts", state_key="fire_result", classify_fn=_classify_fire),
+    _DomainConfig(facts_key="signage_facts", state_key="signage_result", classify_fn=_classify_signage),
 ]
 
 
@@ -602,12 +658,16 @@ def finalize_node(state: AgentState) -> dict:
 
 
 def _max_allowed_stage(state: AgentState) -> int:
-    """이번 턴 답변에 등장해도 되는 최대 [N단계] 번호. 판정 전에는 0(전부 금지),
-    판정 후에는 지금까지 공개된 단계(disclosed_stage) + 1 - 한 턴에 최대 한
-    단계만 새로 공개하도록 강제한다."""
+    """이번 턴 답변에 등장해도 되는 최대 [N단계] 번호. [N단계] 구조 자체가
+    _STAGE_DOMAIN(permit) 전용이라, permit 판정 전에는 0(전부 금지) -
+    signage/food/fire 얘기만 하는 대화는 애초에 permit 판정이 안 났으니
+    항상 0으로 막혀서, 그 도메인들의 답변엔 [N단계] 마커가 아예 등장하면
+    안 된다(SYSTEM_PROMPT도 이렇게 지시). 판정 후에는 지금까지 공개된
+    단계(disclosed_stage[_STAGE_DOMAIN]) + 1 - 한 턴에 최대 한 단계만 새로
+    공개하도록 강제한다."""
     if not state.get("case_facts", {}).get("_classified"):
         return 0
-    return state.get("disclosed_stage", 0) + 1
+    return state.get("disclosed_stage", {}).get(_STAGE_DOMAIN, 0) + 1
 
 
 # [출처: ...] 인용의 근거로 인정하는 도구 이름들. search_regulations/
@@ -691,8 +751,13 @@ def guard_node(state: AgentState) -> dict:
 
     같은 사용자 턴 안에서 최대 1회만 재시도를 유도한다(무한 루프 방지) - 그
     이상 반복되면 프롬프트만으로는 못 막는 한계로 보고 그냥 통과시킨다.
-    위반이 없거나 재시도가 소진되면, 실제로 공개된 최대 단계로 disclosed_stage를
-    갱신해서 다음 턴의 허용치 계산에 반영한다.
+    위반이 없거나 재시도가 소진되면, disclosed_stage[_STAGE_DOMAIN]을 갱신해서
+    다음 턴의 허용치 계산에 반영한다 - 이때도 실제 언급값(max_mentioned)이
+    아니라 허용치(allowed)로 캡을 씌운다. 안 씌우면 재시도가 소진돼 위반이
+    그냥 통과되는 경우(예: signage 얘기만 했는데 [1단계]를 잘못 언급) 허용치를
+    넘는 값이 그대로 disclosed_stage에 박혀서, 이후 진짜 permit 설명이
+    시작될 때 이미 일부 단계가 끝난 것처럼 잘못 판단하게 된다(2026-07-27
+    실측 확인 - signage만 다룬 대화에서 disclosed_stage가 1로 오염됨).
     """
     messages = state["messages"]
     last_text = extract_text(messages[-1].content)
@@ -734,8 +799,10 @@ def guard_node(state: AgentState) -> dict:
         logger.warning("[guard] 위반이 재시도 후에도 지속됨 - 통과: %s", violations)
 
     update: dict = {}
-    if max_mentioned > state.get("disclosed_stage", 0):
-        update["disclosed_stage"] = max_mentioned
+    capped = min(max_mentioned, allowed)
+    current = state.get("disclosed_stage", {}).get(_STAGE_DOMAIN, 0)
+    if capped > current:
+        update["disclosed_stage"] = {**state.get("disclosed_stage", {}), _STAGE_DOMAIN: capped}
     return update
 
 
