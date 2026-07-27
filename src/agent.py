@@ -175,6 +175,12 @@ record_fire_facts에도 그대로 기록하세요, 새로 묻지 마세요)과 �
 ## 2. 도구 선택
 - 법률 용어 정의("OO이 뭐야") → search_by_term (핵심 용어만 추출)
 - 절차ᆞ조건ᆞ서류 등 일반 질문 → search_regulations
+- 사업자등록을 어떻게ᆞ언제까지 하는지, 무슨 서류가 필요한지 물으면 →
+  get_business_registration_guide (절차가 법령상 고정돼 있어 검색 불필요,
+  바로 이 도구 호출). food_result가 이미 나온 사용자라면 안내문의
+  "허가ᆞ등록ᆞ신고증 사본"이 그 영업신고증이라는 걸 답변에서 연결해
+  설명하세요 - 간이/일반과세자 중 어느 쪽인지는 사용자 매출을 추정해서
+  단정하지 말고 기준만 안내하세요.
 - 용도지역을 모르는데 주소는 아는 경우 → lookup_land_zone
 - 건폐율ㆍ용적률 질문 → lookup_building_ratio_limits (세부 용도지역을
   모르면 계산하지 말고 직접 질문)
@@ -596,13 +602,22 @@ def _max_allowed_stage(state: AgentState) -> int:
     return state.get("disclosed_stage", 0) + 1
 
 
+# [출처: ...] 인용의 근거로 인정하는 도구 이름들. search_regulations/
+# search_by_term(RAG 검색)뿐 아니라 get_business_registration_guide처럼
+# "검색은 안 하지만 코드 안에 원문 대조된 정적 근거를 담고 있는" 도구도
+# 포함한다 - 안 넣으면 guard가 실제로 근거 있는 인용을 "지어낸 것"으로
+# 오판해 불필요한 재시도를 유도한다(2026-07-27 실측 확인). 위생교육ᆞ
+# 간판신고처럼 향후 추가될 정적 콘텐츠 도구도 여기 이름만 추가하면 된다.
+_GROUNDING_TOOL_NAMES = ("search_regulations", "search_by_term", "get_business_registration_guide")
+
+
 def _has_grounding_search(messages) -> bool:
-    """대화 전체에 실제 법령 검색(search_regulations/search_by_term) 호출이
-    있었는지. 대화 전체를 스캔하므로 훨씬 이전 턴의 검색으로 나중 턴의 무관한
-    인용까지 통과될 수 있다는 한계는 있지만, "검색을 아예 한 번도 안 하고
-    조항을 지어내는" 가장 심각한 사례는 확실히 잡는다(1차 구현, 2026-07-26)."""
+    """대화 전체에 실제 근거(RAG 검색 또는 원문 대조된 정적 도구) 호출이
+    있었는지. 대화 전체를 스캔하므로 훨씬 이전 턴의 근거로 나중 턴의 무관한
+    인용까지 통과될 수 있다는 한계는 있지만, "아무 근거 없이 조항을
+    지어내는" 가장 심각한 사례는 확실히 잡는다(1차 구현, 2026-07-26)."""
     return any(
-        isinstance(m, ToolMessage) and m.name in ("search_regulations", "search_by_term")
+        isinstance(m, ToolMessage) and m.name in _GROUNDING_TOOL_NAMES
         for m in messages
     )
 
@@ -683,9 +698,9 @@ def guard_node(state: AgentState) -> dict:
         )
     if _CITATION_PATTERN.search(last_text) and not _has_grounding_search(messages):
         violations.append(
-            "search_regulations/search_by_term을 한 번도 호출하지 않았는데 [출처: ...] "
-            "인용이 포함되어 있습니다. 검색 없이 조항을 지어내지 말고, 먼저 검색 도구를 "
-            "호출해 실제 근거를 확보한 뒤 답변하세요."
+            "근거 도구(search_regulations/search_by_term/get_business_registration_guide 등)를 "
+            "한 번도 호출하지 않았는데 [출처: ...] 인용이 포함되어 있습니다. 근거 없이 조항을 "
+            "지어내지 말고, 먼저 해당 도구를 호출해 실제 근거를 확보한 뒤 답변하세요."
         )
     violations.extend(_synthesis_gap_violations(state, max_mentioned))
 
