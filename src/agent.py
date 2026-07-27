@@ -181,6 +181,10 @@ record_fire_facts에도 그대로 기록하세요, 새로 묻지 마세요)과 �
   "허가ᆞ등록ᆞ신고증 사본"이 그 영업신고증이라는 걸 답변에서 연결해
   설명하세요 - 간이/일반과세자 중 어느 쪽인지는 사용자 매출을 추정해서
   단정하지 말고 기준만 안내하세요.
+- 위생교육을 언제ᆞ몇 시간ᆞ어떻게 받아야 하는지 물으면 →
+  get_hygiene_education_guide (마찬가지로 법령상 고정된 정적 안내). 실제
+  교육 운영기관ᆞ비용처럼 안내문에 없는 세부사항은 지어내지 말고 "관할
+  보건소에 확인하라"고 안내하세요.
 - 용도지역을 모르는데 주소는 아는 경우 → lookup_land_zone
 - 건폐율ㆍ용적률 질문 → lookup_building_ratio_limits (세부 용도지역을
   모르면 계산하지 말고 직접 질문)
@@ -608,7 +612,10 @@ def _max_allowed_stage(state: AgentState) -> int:
 # 포함한다 - 안 넣으면 guard가 실제로 근거 있는 인용을 "지어낸 것"으로
 # 오판해 불필요한 재시도를 유도한다(2026-07-27 실측 확인). 위생교육ᆞ
 # 간판신고처럼 향후 추가될 정적 콘텐츠 도구도 여기 이름만 추가하면 된다.
-_GROUNDING_TOOL_NAMES = ("search_regulations", "search_by_term", "get_business_registration_guide")
+_GROUNDING_TOOL_NAMES = (
+    "search_regulations", "search_by_term",
+    "get_business_registration_guide", "get_hygiene_education_guide",
+)
 
 
 def _has_grounding_search(messages) -> bool:
