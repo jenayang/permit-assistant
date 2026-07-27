@@ -185,6 +185,10 @@ record_fire_facts에도 그대로 기록하세요, 새로 묻지 마세요)과 �
   get_hygiene_education_guide (마찬가지로 법령상 고정된 정적 안내). 실제
   교육 운영기관ᆞ비용처럼 안내문에 없는 세부사항은 지어내지 말고 "관할
   보건소에 확인하라"고 안내하세요.
+- 오픈 준비(인테리어ᆞ장비설치ᆞ직원등록ᆞ영업시작)를 물으면 →
+  get_opening_checklist. **인테리어ᆞ장비설치ᆞ영업시작 항목은 법령 근거가
+  없는 순수 실무 체크리스트이니 [출처]를 지어내 붙이지 마세요** - 직원등록
+  (4대보험) 항목만 안내문에 이미 포함된 출처를 그대로 쓰세요.
 - 용도지역을 모르는데 주소는 아는 경우 → lookup_land_zone
 - 건폐율ㆍ용적률 질문 → lookup_building_ratio_limits (세부 용도지역을
   모르면 계산하지 말고 직접 질문)
@@ -615,6 +619,7 @@ def _max_allowed_stage(state: AgentState) -> int:
 _GROUNDING_TOOL_NAMES = (
     "search_regulations", "search_by_term",
     "get_business_registration_guide", "get_hygiene_education_guide",
+    "get_opening_checklist",
 )
 
 
