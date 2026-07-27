@@ -24,6 +24,8 @@ import logging
 
 from langchain_core.tools import tool
 
+from src.agents.legal_data import get_thresholds
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +35,10 @@ def classify_fire_safety(facts: dict) -> list[str] | None:
     facts에서 쓰는 키:
       size_sqm: 연면적(㎡) - 소화기구ᆞ비상경보설비ᆞ자동화재탐지설비ᆞ
         간이스프링클러설비 여부를 가르는 기준(전부 시행령 별표4의 순수
-        면적 임계값).
+        면적 임계값 - 실제 숫자는 permit_thresholds.yaml의
+        소방시설_연면적기준_sqm에서 로드. permit.py와 같은 이유로 임계값만
+        분리 - 법령 개정으로 숫자만 바뀌면 이 파일은 안 건드리고 YAML만
+        고치면 됨).
       is_large_store_tenant: 유통산업발전법상 대규모점포(백화점ᆞ쇼핑센터
         등)에 입점한 일반음식점인지 여부 - 상업용 주방자동소화장치 대상
         기준(별표4 1.나.2.가). 독립 점포로 창업하는 대부분의 카페ᆞ음식점은
@@ -46,17 +51,18 @@ def classify_fire_safety(facts: dict) -> list[str] | None:
         return None
 
     size = facts["size_sqm"]
+    thresholds = get_thresholds()["소방시설_연면적기준_sqm"]
     required: list[str] = []
-    if size >= 33:
-        required.append("소화기구")  # 별표4 1.가.1) 연면적 33㎡ 이상
-    if size >= 400:
-        required.append("비상경보설비")  # 별표4 2.나.1) 연면적 400㎡ 이상
-    if size >= 600:
-        required.append("자동화재탐지설비")  # 별표4 2.다.3) 근린생활시설 연면적 600㎡ 이상
-    if size >= 1000:
-        required.append("간이스프링클러설비")  # 별표4 1.마.2)가) 근린생활시설 바닥면적 합계 1,000㎡ 이상
+    if size >= thresholds["소화기구"]:
+        required.append("소화기구")  # 별표4 1.가.1)
+    if size >= thresholds["비상경보설비"]:
+        required.append("비상경보설비")  # 별표4 2.나.1)
+    if size >= thresholds["자동화재탐지설비"]:
+        required.append("자동화재탐지설비")  # 별표4 2.다.3) 근린생활시설(목욕장 제외) 기준
+    if size >= thresholds["간이스프링클러설비"]:
+        required.append("간이스프링클러설비")  # 별표4 1.마.2)가) 근린생활시설 바닥면적 합계 기준
     if facts["is_large_store_tenant"]:
-        required.append("상업용 주방자동소화장치")  # 별표4 1.나.2)가) 대규모점포 입점 일반음식점
+        required.append("상업용 주방자동소화장치")  # 별표4 1.나.2)가) 대규모점포 입점 일반음식점(임계값 없음 - 여부만 판단)
 
     return required
 
