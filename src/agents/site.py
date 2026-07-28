@@ -261,13 +261,15 @@ def _load_bdong_table() -> pd.DataFrame:
 def _find_region_codes(address: str) -> tuple[str, str] | None:
     """주소 텍스트에서 번지 토큰을 제외한 지역명 부분으로 법정동코드 표를 AND 매칭.
 
-    TODO(도로명주소 미지원, 2026-07-23 확인): 이 표는 읍면동명ᆞ동리명(법정동
-    체계)만 있고 도로명 컬럼이 없어서, "능동로 87"처럼 도로명 주소를 주면
-    매칭이 안 된다. 건축HUB API 자체도 지번(bun/ji) 기준이라 도로명 번호를
-    그대로 넣으면 안 됨(같은 건물이 도로명ᆞ지번 번호가 서로 다름 - VWorld
-    지오코딩 테스트로 실측 확인). 나중에 지번 대신 도로명 주소로도 찾을 수
-    있게 할 예정 - lookup_land_zone의 VWorld 지오코더(도로명 입력에도 법정동
-    이름을 같이 돌려줌)를 재사용하는 방향이 유력한 후보.
+    2026-07-28: 이제 기본 경로가 아니라 **폴백 전용**이다 - 기본 경로는
+    _vworld_resolve_region_and_bunji()가 담당한다(VWorld 지오코딩+역지오코딩
+    으로 도로명ᆞ지번 주소 둘 다 처리, 아래 함수 참고). 이 텍스트 매칭 방식은
+    읍면동명ᆞ동리명(법정동 체계)만 있고 도로명 컬럼이 없어서 "능동로 87"
+    같은 도로명 주소는 원래 못 찾았다(2026-07-23 확인) - VWorld가 장애거나
+    키가 없을 때만 이 경로로 떨어지며, 그 경우는 지번 주소만 지원되는 예전
+    한계가 그대로 남는다. 코드를 지우지 않고 남겨둔 이유: VWorld 의존도를
+    100%로 올리는 대신, 외부 API 장애 시에도 최소한 지번 주소는 계속
+    조회되도록 이중 경로를 유지하기 위함(2026-07-28 논의).
     """
     df = _load_bdong_table()
     hay = df["시도명"] + " " + df["시군구명"] + " " + df["읍면동명"] + " " + df["동리명"]
@@ -290,6 +292,10 @@ def _extract_bunji(address: str) -> tuple[str, str]:
     숫자(2)를 번지로 잘못 집어낸다(2026-07-23 실측 버그: '성수동2가 275-5'가
     번지 '2'로 잘못 추출됨) - _find_region_codes의 fullmatch 방식과 동일하게
     토큰 단위로 정확히 매칭해야 한다.
+
+    2026-07-28: _find_region_codes와 마찬가지로 이제 폴백 전용 - 기본 경로는
+    _vworld_resolve_region_and_bunji()가 VWorld 응답의 지번(level5)을 바로
+    쓴다.
     """
     for token in re.split(r"[\s,]+", address):
         match = _BUNJI_PATTERN.fullmatch(token)
@@ -314,6 +320,70 @@ def _get_ledger_client() -> BuildingLedger:
     if _ledger_client is None:
         _ledger_client = BuildingLedger(config.ARCHHUB_SERVICE_KEY or "")
     return _ledger_client
+
+
+# --- 지역코드ᆞ지번 해석: VWorld 지오코딩 기반(기본 경로, 2026-07-28) ---------
+# 위 _find_region_codes/_extract_bunji(전국 법정동표 텍스트 매칭)는 도로명
+# 주소를 못 찾는다는 한계가 있었다(2026-07-23 TODO). 대신 VWorld의 좌표→
+# 주소 역지오코딩(getAddress&type=parcel)을 쓰면, 입력이 도로명이든 지번이든
+# 상관없이 법정동코드(level4LC, 10자리)와 지번(level5)을 API가 직접
+# 구조화해서 돌려준다는 걸 실제 호출로 확인했다(2026-07-28: "능동로 87"과
+# "자양동 2-2" 둘 다 동일하게 level4LC="1121510500"ᆞlevel5="2-2"를 반환).
+# 이 경로가 실패하면(키 없음ᆞ네트워크 오류ᆞ응답 없음) lookup_building_ledger가
+# 자동으로 위 텍스트 매칭 폴백으로 넘어간다 - VWorld 장애 시에도 지번 주소는
+# 계속 조회되게 하기 위함(지번 전용이라는 옛 한계는 폴백에서만 남음).
+def _vworld_query_parcel_address(x: float, y: float) -> dict | None:
+    """좌표 → 지번 주소 구조화 정보(getAddress&type=parcel). 응답의 structure
+    딕셔너리를 그대로 돌려준다(level4LC=법정동코드, level5=지번). 실패ᆞ결과
+    없으면 None."""
+    try:
+        resp = requests.get(
+            f"{_VWORLD_BASE}/address",
+            params={
+                "service": "address",
+                "request": "getAddress",
+                "version": "2.0",
+                "crs": "epsg:4326",
+                "point": f"{x},{y}",
+                "format": "json",
+                "type": "parcel",
+                "key": config.VWORLD_API_KEY,
+                "domain": config.VWORLD_DOMAIN,
+            },
+            timeout=5,
+        )
+        response = resp.json().get("response", {})
+        if response.get("status") != "OK":
+            return None
+        result = response.get("result")
+        if not result:
+            return None
+        return result[0].get("structure") if isinstance(result, list) else result.get("structure")
+    except (requests.RequestException, ValueError, KeyError, IndexError) as exc:
+        logger.warning("[lookup_building_ledger] VWorld 역지오코딩 실패: %s", exc)
+        return None
+
+
+def _vworld_resolve_region_and_bunji(address: str) -> tuple[str, str, str, str] | None:
+    """주소(도로명ᆞ지번 무관) → (시군구코드, 법정동코드, 번, 지). 지오코딩 →
+    역지오코딩(지번) 두 단계 중 하나라도 실패하면 None - 호출부가 폴백으로
+    넘어가도록."""
+    if not config.VWORLD_API_KEY:
+        return None
+    coord = _vworld_geocode(address)
+    if coord is None:
+        return None
+    structure = _vworld_query_parcel_address(*coord)
+    if structure is None:
+        return None
+    bdong_full_code = structure.get("level4LC", "")
+    if len(bdong_full_code) != 10:
+        return None
+    bunji = structure.get("level5", "")
+    bun, _, ji = bunji.partition("-")
+    if not bun:
+        return None
+    return bdong_full_code[:5], bdong_full_code[5:], bun, ji
 
 
 def _query_building_ledger(sigungu_code: str, bdong_code: str, bun: str, ji: str) -> pd.DataFrame | None:
@@ -368,14 +438,25 @@ def lookup_building_ledger(address: str) -> str:
         return "건축물대장 자동 조회가 설정되어 있지 않습니다(API 키 없음). 사용자에게 직접 물어보세요."
 
     logger.info("[도구] lookup_building_ledger(address=%r)", address)
-    codes = _find_region_codes(address)
-    if codes is None:
-        return f"'{address}' 주소의 법정동 코드를 찾지 못했습니다. 사용자에게 더 정확한 주소(구/동 이름)를 요청하세요."
-    sigungu_code, bdong_code = codes
 
-    bun, ji = _extract_bunji(address)
-    if not bun:
-        return f"'{address}'에서 번지를 찾지 못했습니다. 사용자에게 번지까지 포함한 주소를 요청하세요."
+    # 기본 경로: VWorld 지오코딩+역지오코딩(도로명ᆞ지번 둘 다 지원). 이 경로가
+    # 뭔가로 실패하면(키 없음ᆞ네트워크 오류ᆞ응답 형식 이상 등) 전국 법정동표
+    # 텍스트 매칭 폴백으로 넘어간다 - VWorld 장애 중에도 지번 주소는 계속
+    # 조회되게 하기 위함(2026-07-28, 폴백은 도로명 주소는 여전히 못 찾는
+    # 옛 한계가 남아있음).
+    resolved = _vworld_resolve_region_and_bunji(address)
+    if resolved is not None:
+        sigungu_code, bdong_code, bun, ji = resolved
+    else:
+        logger.info("[lookup_building_ledger] VWorld 경로 실패, 법정동표 폴백으로 전환")
+        codes = _find_region_codes(address)
+        if codes is None:
+            return f"'{address}' 주소의 법정동 코드를 찾지 못했습니다. 사용자에게 더 정확한 주소(구/동 이름)를 요청하세요."
+        sigungu_code, bdong_code = codes
+
+        bun, ji = _extract_bunji(address)
+        if not bun:
+            return f"'{address}'에서 번지를 찾지 못했습니다. 사용자에게 번지까지 포함한 주소를 요청하세요."
 
     try:
         df = _query_building_ledger(sigungu_code, bdong_code, bun, ji)
