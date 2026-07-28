@@ -425,29 +425,6 @@
     .main-grid { grid-template-columns: 1fr; }
   }
 
-  /* 선택지 질문(ask_choice) 버튼 - 원래 소유자/임차인 질문 하나만 대화와
-     분리된 사이드바 박스에 떴는데, 대화 흐름과 따로 논다는 피드백으로
-     봇 말풍선 바로 아래(채팅 안)로 옮기고 어떤 선택형 질문에도 쓸 수 있게
-     일반화했다(2026-07-28, src/agents/interaction.py의 ask_choice 참고). */
-  .choice-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 6px;
-  }
-  .choice-btn {
-    border: 1px solid var(--accent);
-    background: var(--panel);
-    color: var(--accent);
-    padding: 6px 12px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .choice-btn:hover { background: var(--accent); color: var(--accent-text); }
-  .choice-btn:disabled { opacity: 0.5; cursor: default; }
-
   #chat {
     flex: 1;
     overflow-y: auto;
@@ -687,6 +664,7 @@
   let lastAddress = null;
   let expandedSteps = null; // 로드맵 Step 아코디언 펼침 상태(Set<index>) - null이면 renderRoadmap()이 첫 렌더링 때 "지금 여기" 단계로 초기화
   let lastCurrentIdx = null; // 직전 렌더링의 "지금 여기" 단계 - 이 값이 바뀌면(단계 전환) 이전 단계는 자동으로 접고 새 단계는 자동으로 편다
+  let autoOpenedParallelSteps = null; // Set<index> - 병렬 Step(창업 행정 등)이 시작되는 순간(0건→1건 이상) 한 번 자동으로 펼친 적 있는지 추적, currentIdx와 무관하게 별도 관리(2026-07-28)
 
   // case_facts 필드 → 태그 텍스트 변환. 여기 없는 필드는 태그로 안 보임(값
   // 하나만으로는 뜻이 안 통하는 필드는 아래에서 조합해서 별도 처리).
@@ -911,6 +889,18 @@
       step1Substeps.push({ text: "사전 진단", done: false });
     }
 
+    // Step 4 "영업 시작" 잠금 기준 - Step3(창업 행정) 5개 항목이 전부
+    // done이어야 실제 영업 개시가 가능하다(2026-07-28). 각 항목의 done
+    // 정의를 그대로 재사용한다 - 식품위생ᆞ소방ᆞ간판은 "판정 났음"까지만
+    // 뜻하고 "신고ᆞ설치 접수 완료"를 뜻하진 않지만(별도 자기보고 필드가
+    // 아직 없음), 로드맵 전체가 이미 이 기준으로 진행률을 계산하고 있어
+    // 그 기준과 다르게 만들면 오히려 숫자가 서로 안 맞게 된다.
+    const step3AllDone = latestFoodResult != null
+      && latestFireResult != null
+      && latestSignageResult != null
+      && !!taskProgress.business_registration
+      && !!taskProgress.hygiene_education;
+
     const steps = [
       {
         title: "Step 0 · 건축 유형 확인",
@@ -950,9 +940,32 @@
         // 항목 라벨 자체에 바로 넣는다 - 판정 전엔 일반 라벨, 판정 후엔
         // 실제 값으로 텍스트가 바뀐다(2026-07-28).
         substeps: [
-          { text: latestFoodResult ? `식품위생: ${latestFoodResult}` : "식품위생 영업신고", done: latestFoodResult != null },
-          { text: latestFireResult && latestFireResult.length ? `소방시설: ${latestFireResult.join("ᆞ")}` : "소방시설", done: latestFireResult != null },
-          { text: latestSignageResult ? `간판: ${latestSignageResult}` : "간판ᆞ옥외광고물", done: latestSignageResult != null },
+          // 식품위생 영업신고는 "어떤 종류인지 판정"은 사용승인 전에도 할 수
+          // 있지만, 실제 신고 접수는 건물이 적법하게 사용 가능한 상태(사용승인
+          // 완료)여야 가능하다(2026-07-28 피드백). 그래서 판정 자체는 그대로
+          // 라벨에 보여주되(done 여부와 무관하게 잠금), 사용승인 전까지는
+          // 🔒로 표시해 "신고까지는 아직" 임을 나타낸다.
+          {
+            text: latestFoodResult ? `식품위생: ${latestFoodResult}` : "식품위생 영업신고",
+            done: latestFoodResult != null,
+            locked: !taskProgress.use_approval,
+            lockReason: "사용승인 완료 후 신고 가능",
+          },
+          // 소방시설ᆞ간판 실제 설치ᆞ확인은 물리적 시공이 끝나야 가능하다
+          // (2026-07-28 확인) - 식품위생과 같은 이유로 판정 자체는 공사 전에도
+          // 보여주되, 공사(시공) 완료 전까지는 잠근다.
+          {
+            text: latestFireResult && latestFireResult.length ? `소방시설: ${latestFireResult.join("ᆞ")}` : "소방시설",
+            done: latestFireResult != null,
+            locked: !taskProgress.construction,
+            lockReason: "공사(시공) 완료 후 설치ᆞ확인 가능",
+          },
+          {
+            text: latestSignageResult ? `간판: ${latestSignageResult}` : "간판ᆞ옥외광고물",
+            done: latestSignageResult != null,
+            locked: !taskProgress.construction,
+            lockReason: "공사(시공) 완료 후 설치 가능",
+          },
           // 사업자등록은 다른 Step3 항목과 달리 "아무 때나 시작 가능"이
           // 아니다 - 실제로는 임대차계약서(임차인 서류, Step1
           // documents_prepared에 포함) + 영업신고 종류 판정(식품위생법상
@@ -978,12 +991,26 @@
           // 가입 신고 자체가 대상이 아니다 - 계속 미완료로 남아 진행률이
           // 100%를 못 채우는 문제가 있었다(2026-07-28, project_status.py와
           // 동일 기준).
+          // 직원 등록(4대보험 가입)은 실제 채용ᆞ근무 시작 시점에 하는
+          // 절차라, 최소한 사업자등록이 끝난 뒤에나 진행 가능하다(2026-07-28
+          // 확인). hires_staff=false(직원 없음)로 이미 done인 경우는 기존
+          // 잠금 분기(sub.locked && !sub.done)가 자동으로 잠그지 않는다.
           {
             text: taskProgress.hires_staff === false ? "직원 등록: 해당없음(직원 없음)" : "직원 등록",
             done: !!taskProgress.staff_registration || taskProgress.hires_staff === false,
             field: "staff_registration",
+            locked: !taskProgress.business_registration,
+            lockReason: "사업자등록 완료 후 진행 가능",
           },
-          { text: "영업 시작", done: !!taskProgress.opened, field: "opened" },
+          // 영업 시작은 로드맵의 마지막 관문 - Step3(식품위생ᆞ소방ᆞ간판ᆞ
+          // 사업자등록ᆞ위생교육)가 전부 끝나야 실제로 열 수 있다(2026-07-28).
+          {
+            text: "영업 시작",
+            done: !!taskProgress.opened,
+            field: "opened",
+            locked: !step3AllDone,
+            lockReason: "식품위생ᆞ소방ᆞ간판ᆞ사업자등록ᆞ위생교육 완료 후 가능",
+          },
         ],
       },
     ];
@@ -1021,6 +1048,26 @@
       if (currentIdx < steps.length) expandedSteps.add(currentIdx);
       lastCurrentIdx = currentIdx;
     }
+
+    // 병렬 Step(창업 행정 등)은 currentIdx 하나로 안 잡힌다 - 순차 트랙
+    // (Step 0~2)이 안 끝난 채로도 병렬 항목이 먼저 진행될 수 있는데, 위
+    // currentIdx 로직은 항상 순차 트랙을 먼저 가리키므로 그동안 병렬 Step은
+    // 계속 접힌 채로 있었다. 그래서 병렬 Step은 "시작되는 순간"(0건→1건
+    // 이상으로 바뀌는 첫 렌더링)에 한 번 자동으로 펼치되, 이후 사용자가
+    // 손으로 접으면 다시 강제로 펼치지 않는다 - currentIdx 전환 때와 같은
+    // "진입 시 1회만 자동, 이후엔 사용자 조작 존중" 원칙(2026-07-28,
+    // "병렬 시행되면 자동으로 열어달라" 요청).
+    if (autoOpenedParallelSteps === null) {
+      autoOpenedParallelSteps = new Set();
+    }
+    steps.forEach((step, idx) => {
+      if (!step.parallel || autoOpenedParallelSteps.has(idx)) return;
+      const items = countable(step);
+      if (items.some((s) => s.done)) {
+        expandedSteps.add(idx);
+        autoOpenedParallelSteps.add(idx);
+      }
+    });
 
     roadmapEl.innerHTML = "";
     steps.forEach((step, idx) => {
@@ -1108,6 +1155,16 @@
           label.textContent = sub.text;
           li.appendChild(checkbox);
           li.appendChild(label);
+        } else if (sub.locked) {
+          // 판정 축인데 잠긴 경우(예: 식품위생 - 판정은 났어도 사용승인
+          // 전엔 실제 신고 접수가 안 됨). task_progress 축의 잠금과 달리
+          // **done 여부로 잠금을 풀지 않는다** - 여기서 done은 "판정이
+          // 났다"는 뜻일 뿐 "신고를 접수했다"는 뜻이 아니라서, 판정이
+          // 먼저 나도 선행조건(사용승인)이 안 채워지면 계속 잠긴 채로
+          // 둬야 한다(2026-07-28).
+          li.className = `${chipOrSubstep} locked`;
+          li.title = sub.lockReason || "";
+          li.innerHTML = `<span class="roadmap-substep-icon">🔒</span><span>${sub.text}</span>`;
         } else {
           // 판정 축 - 시스템이 확인한 사실만 표시, 사용자가 임의로 못 바꾼다.
           // case_facts 근거(sub.tags)가 있으면 이 항목이 왜 체크됐는지
@@ -1175,28 +1232,6 @@
     `;
   }
 
-  // ask_choice(선택지 질문) 버튼을 봇 말풍선(wrap) 바로 아래에 붙인다 -
-  // 클릭하면 그 선택지 텍스트를 일반 사용자 메시지로 그대로 전송하고,
-  // 다시 답하지 못하게 버튼들을 비활성화한다(2026-07-28, 사이드바 고정
-  // 박스였던 소유자/임차인 버튼을 대화 흐름 안으로 옮기며 일반화).
-  function renderChoiceButtons(wrap, question, options) {
-    if (!options || !options.length) return;
-    const box = document.createElement("div");
-    box.className = "choice-buttons";
-    options.forEach((choice) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "choice-btn";
-      btn.textContent = choice;
-      btn.addEventListener("click", () => {
-        box.querySelectorAll("button").forEach((b) => (b.disabled = true));
-        sendQuestion(choice);
-      });
-      box.appendChild(btn);
-    });
-    wrap.appendChild(box);
-  }
-
   function restoreStageIndicator() {
     const savedFacts = localStorage.getItem("permit_assistant_case_facts");
     if (savedFacts) {
@@ -1234,6 +1269,7 @@
     localStorage.removeItem("permit_assistant_address");
     expandedSteps = null;
     lastCurrentIdx = null;
+    autoOpenedParallelSteps = null;
     renderRoadmap();
     renderNextAction(null);
   }
@@ -1388,7 +1424,7 @@
       localStorage.setItem("permit_assistant_user_id", userId);
       userIdLabel.textContent = `세션: ${userId.slice(0, 8)}`;
 
-      const botWrap = addMessage("bot", data.answer, { toolCalls: data.tool_calls, lawContexts: data.law_contexts });
+      addMessage("bot", data.answer, { toolCalls: data.tool_calls, lawContexts: data.law_contexts });
 
       // 한 턴에 여러 번 호출될 수 있어(record_case_facts + set_procedure_stage가
       // 같이 온 경우 등) 순서대로 전부 반영. 게이지에 필요한 required_documents/
@@ -1401,8 +1437,6 @@
           caseTypeResult = tc.args.case_type;
           localStorage.setItem("permit_assistant_case_type", caseTypeResult);
           factsChanged = true;
-        } else if (tc.tool === "ask_choice") {
-          renderChoiceButtons(botWrap, tc.args.question, tc.args.options);
         } else if (tc.tool === "record_case_facts") {
           for (const [k, v] of Object.entries(tc.args)) {
             if (v !== null && v !== undefined) caseFacts[k] = v;

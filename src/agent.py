@@ -114,6 +114,12 @@ class AgentState(MessagesState):
     # (2026-07-27 실측 확인). 프롬프트 지시만으로는 LLM이 한 턴에 4단계를
     # 전부 쏟아내는 걸 못 막아서(2026-07-26 실사용 세션에서 재현, guard_node
     # 참고) 이 값으로 "이번 턴엔 몇 단계까지만" 상한을 그래프가 강제한다.
+    # 2026-07-28: "construction_guide" 키를 추가해 같은 dict를 Step1→2 전환
+    # 신호로도 재사용한다(0/1 플래그 - get_construction_guide가 대화 중 한
+    # 번이라도 호출됐는지, guard_node가 갱신). task_progress의
+    # "construction"(사용자가 실제로 착공했다는 자기보고)과는 의미가 다르니
+    # 혼동하지 말 것 - 여긴 "안내를 이미 보여줬는지"만 본다. 자세한 이유는
+    # permit_phase_directive 참고.
     # 리듀서 없이 기본 덮어쓰기(guard_node가 한 번에 하나씩만 갱신).
     disclosed_stage: dict[str, int]
     # 사용자가 실제로 "완료했다"고 말한 항목들(착공신고ᆞ사업자등록ᆞ영업개시 등).
@@ -149,9 +155,9 @@ record_case_facts로 기록하세요(알게 되는 대로 부분 호출해도 �
 다음 턴에 도구 응답으로 옵니다 - 그걸 참고해서 답변에 반영하세요. 정보가
 부족하면 결론을 암시하지 말고 부족한 사실만 되물으세요. **판정 결과가 도구
 응답으로 실제로 온 적이 없다면(=permit_type이 아직 확정 안 됨), [Step 1-1]~
-[Step 1-4] 절차ᆞ서류ᆞ사전진단 내용을 먼저 설명하지 마세요** - 아직 판정도 안 났는데
+[Step 1-3] 절차ᆞ서류ᆞ사전진단 내용을 먼저 설명하지 마세요** - 아직 판정도 안 났는데
 그 내용부터 말하면 근거 없는 추측이 됩니다(record_case_facts만 부분적으로
-호출하고 판정 도구 응답 없이 4단계까지 답변해버리는 실수가 실제로
+호출하고 판정 도구 응답 없이 마지막 단계까지 답변해버리는 실수가 실제로
 있었습니다 - 2026-07-24 확인). 특히 **85㎡ 기준은
 증축ᆞ개축ᆞ재축 전용이며 신축에는 적용되지 않습니다** - 신축의 신고 대상
 여부는 용도지역(관리ᆞ농림ᆞ자연환경보전지역)ᆞ연면적 200㎡ 미만ᆞ층수 3층
@@ -180,15 +186,6 @@ desired_facility_group도 같은 턴에 바로 기록하세요** - 이건 시설
 예외 - 용도지역: 일반인은 대부분 모르니 직접 묻지 말고, 주소를 알면 먼저
 lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts로
 기록하세요. 자동 조회가 실패했을 때만 사용자에게 직접 물어보세요.
-
-**도구 응답에 "(선택지: A, B)"처럼 정해진 선택지가 이미 명시된 질문을
-사용자에게 그대로 전달할 때는(대표적으로 소유자/임차인 질문) 답변 텍스트와
-같은 턴에 ask_choice(question, options)도 함께 호출하세요** - 사용자가
-직접 타이핑하지 않고 버튼으로 바로 답할 수 있게 됩니다(2026-07-28: 이전엔
-소유자/임차인 질문만 화면 한 구석에 별도 버튼으로 떴는데, 대화 흐름과
-분리돼 있었습니다 - 이제는 어떤 선택형 질문이든 답변 말풍선 바로 아래에
-버튼으로 뜹니다). 선택지가 정해지지 않은 자유 응답형 질문(면적이 몇 ㎡인지
-등)에는 호출하지 마세요.
 
 카페ᆞ식당처럼 음식류를 조리ᆞ판매하는 업종이면, 식품위생법상 어떤 영업신고
 대상인지 판단하는 데 필요한 사실(조리ᆞ판매 여부ᆞ완제품만 파는지ᆞ베이커리
@@ -243,8 +240,8 @@ pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진�
 - 착공신고ᆞ건축사 설계ᆞ공사감리ᆞ사용승인ᆞ인테리어ᆞ장비설치(Step 2: 공사)를
   물으면 → get_construction_guide 하나만 호출하세요(내부적으로 이미 여러
   관점으로 search_regulations를 호출 + 실무 체크리스트까지 합쳐서
-  돌려주니, 따로 search_regulations를 또 부르지 마세요). **[Step 1-4:
-  예상 소요 기간]까지 안내가 끝나면, 사용자가 안 물어봐도 "다음은 Step 2
+  돌려주니, 따로 search_regulations를 또 부르지 마세요). **[Step 1-3:
+  사전 진단]까지 안내가 끝나면, 사용자가 안 물어봐도 "다음은 Step 2
   (공사) 단계입니다"처럼 존재를 짧게 짚어주고 계속 안내할지 물어보세요**
   - 인허가 설명이 끝났다고 곧장 식품위생ᆞ사업자등록 등 창업 준비 트랙으로
   건너뛰지 마세요(실제로 Step 2를 통째로 건너뛰고 사용자가 "공사는 왜
@@ -296,8 +293,6 @@ pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진�
 - 여러 관점에서 검색이 필요하면 도구를 반복 사용하세요. 검색 결과에 법령
   계층(법/시행령/시행규칙/조례)이 섞여 다르게 말하면 법 > 시행령 > 시행규칙
   우선 원칙을 따르고, 조례는 상충이 아니라 지역 추가 규정으로 안내하세요.
-- 선택지가 정해진 질문(소유자/임차인 등, 1. 정보 수집의 ask_choice 규칙
-  참고)을 할 때는 답변 텍스트와 같은 턴에 ask_choice도 함께 호출하세요.
 
 ## 3. 답변 작성
 **모든 도메인 공통 원칙: 한 턴에 정보를 몰아주지 마세요.** 판정ᆞ분류
@@ -316,7 +311,7 @@ get_business_registration_guide처럼 실제 호출하지 않은 도구의 내�
 
 **`[Step 1-N]` 구조와 record_permit_synthesis는 건축 인허가(permit_type) 설명
 전용입니다.** (오른쪽 로드맵 패널의 "Step 0~4"와는 다른 번호 체계입니다 -
-이건 그 중 **Step 1(건축 인허가) 하나의 내부 하위 단계 4개**를 가리키는
+이건 그 중 **Step 1(건축 인허가) 하나의 내부 하위 단계 3개**를 가리키는
 것이라 "Step 1-N"으로 표기합니다. 예전엔 그냥 "[N단계]"라고 써서 로드맵의
 "Step 2ᆞ3"과 번호가 겹쳐 사용자가 혼동했습니다 - 2026-07-27 확인, 반드시
 "Step 1-" 접두사를 붙이세요.) 식품위생(food_result)ᆞ소방시설(fire_result)ᆞ
@@ -331,10 +326,10 @@ classify 시점에 이미 완결된 짧은 판정 문구가 도구 응답으로 
 끝내세요. `[Step 1-1]` 같은 헤더나 절차ᆞ서류 설명은 이번 턴에 꺼내지 마세요.
 
 **(B) permit 판정 완료(도구 응답으로 옴) 또는 permit 관련 질문**(정의
-질문 등): 아래 4단계로 나눠 순서대로 안내하세요. 각 단계는 핵심만 간결하게 - 이전
+질문 등): 아래 3단계로 나눠 순서대로 안내하세요. 각 단계는 핵심만 간결하게 - 이전
 단계/턴에서 말한 내용을 다시 설명하지 마세요. 각 단계 끝에 다음 단계를
 계속 안내할지 짧게 묻고, 사용자가 동의하거나 관련 질문을 이어가면 다음
-단계로 넘어가세요. "한 번에 다 알려줘" 요청 시에만 4단계를 모두 한 번에.
+단계로 넘어가세요. "한 번에 다 알려줘" 요청 시에만 3단계를 모두 한 번에.
 **"다음 단계로 넘어갈까요?"처럼 그냥 제안만 하는 문장에는 `[Step 1-N]`
 헤더를 붙이지 마세요** - `[Step 1-N: ...]`은 그 단계의 실제 내용(서류
 목록ᆞ사전진단 항목 등)을 진짜로 설명할 때만 쓰는 헤더입니다. 헤더만
@@ -343,7 +338,7 @@ classify 시점에 이미 완결된 짧은 판정 문구가 도구 응답으로 
 "서류 받았어") AI가 그 다음다음 단계까지 한 번에 건너뛰는 사고로 이어집니다
 (실제로 겪은 문제 - 세션 2cda4d67, 2026-07-28: "[Step 1-3: 사전 진단]으로
 넘어갈까요?"라고 제목만 붙이고 실제 사전진단 내용은 없었는데, 그 헤더
-때문에 다음 턴에 [Step 1-4]와 Step 2까지 한꺼번에 쏟아짐). 제안 문장은
+때문에 다음 턴에 Step 2까지 한꺼번에 쏟아짐). 제안 문장은
 "다음으로 사전 진단 내용을 안내해 드릴까요?"처럼 괄호 헤더 없이 평문으로
 쓰세요.
 **판정이 확정되는 순간 시스템이 이미 관련 법령을 한 번 자동 검색해서
@@ -360,7 +355,14 @@ classify 시점에 이미 완결된 짧은 판정 문구가 도구 응답으로 
 - [Step 1-2: 필수 서류] 리스트만(설명 없이) - record_permit_synthesis(required_documents=[...])
 - [Step 1-3: 사전 진단] 주차대수ᆞ정화조 용량ᆞ소방시설ᆞ장애인 편의시설ᆞ위생
   요구사항 중 실제 해당하는 것만 1~2줄+근거와 함께 - record_permit_synthesis(pre_diagnosis_items=[...])
-- [Step 1-4: 예상 소요 기간] 한 줄로
+  안내를 마치면서, 예상 소요 기간(허가 15~20일ᆞ신고 3~5일ᆞ기재변경 3~7일
+  등 통상적으로 알려진 수준)을 별도 헤더 없이 자연스러운 한 문장으로
+  덧붙이세요 - 로드맵에 대응하는 체크 항목이 없는 순수 참고 정보라 별도
+  [Step 1-N] 게이트로 두지 않습니다(2026-07-28: 로드맵 체크리스트엔 상황
+  분석ᆞ서류ᆞ사전진단 3개만 있고 소요 기간 항목이 없어서, 대화의 4단계
+  게이트와 로드맵 상태가 서로 안 맞았습니다 - 3단계로 통일). search_regulations
+  로 실제 처리기한을 확인했으면 그 값을 우선 쓰고, 못 찾았으면 위 통상치를
+  참고로만 안내하며 "정확한 기간은 관할 구청에 확인하라"고 덧붙이세요.
 
 ## 4. 정확성 원칙
 - 모든 답변에 [출처: 건축법 제OO조] / [출처: 서울시 건축조례 제OO조] 형식으로
@@ -470,6 +472,46 @@ def _roadmap_status_summary(state: AgentState) -> str:
     )
 
 
+def permit_phase_directive(state: AgentState) -> str | None:
+    """건축 인허가 트랙의 순차 구간(Step 1의 하위 1~3단계 → Step 2 전환) 전용
+    동적 지시 하나를 계산한다. **이름이 가리키듯 이 순차 구간만 담당한다** -
+    Step 3(창업 행정)ᆞStep 4(오픈 준비)는 의도적으로 병렬이라(2026-07-27
+    결정, _roadmap_status_summary 참고) 이 함수의 대상이 아니고, 그쪽 안내는
+    지금처럼 _roadmap_status_summary가 계속 전담한다. 병렬 도메인이 늘어도
+    이 함수를 건드릴 필요는 없다.
+
+    Step 1-N 상한과 Step 1→2 전환을 한 함수로 합친 이유: 원래 Step 1-N 상한은
+    매 턴 동적 메시지 + guard_node 하드 차단으로 강하게 강제됐지만, Step 1→2
+    전환은 SYSTEM_PROMPT 안의 정적 텍스트 한 겹뿐이었다. 그 결과 Step 1 안내가
+    다 끝난 뒤에도 Step 2(공사)를 안 짚어주고 곧장 창업 준비 트랙으로 건너뛰는
+    사례가 실사용에서 나왔다(2026-07-28) - 대화가 길어질수록 매 턴 주입되는
+    동적 메시지보다 한 번뿐인 정적 프롬프트 지시의 영향력이 옅어지기 때문.
+    두 문제 모두 "이 순차 구간에서 이번 턴에 뭘 해야 하는가"라는 같은 질문이라
+    같은 함수ᆞ같은 강도(매 턴 동적 SystemMessage)로 다룬다.
+    """
+    if not state.get("case_facts", {}).get("_classified"):
+        return None
+
+    disclosed_stage = state.get("disclosed_stage", {})
+    disclosed = disclosed_stage.get(_STAGE_DOMAIN, 0)
+    if disclosed < 3:
+        return (
+            f"[진행 상태] Step 1(건축 인허가)의 하위 단계 중 지금까지 [Step 1-{disclosed}]"
+            f"까지 공개했습니다. 이번 턴에는 [Step 1-{disclosed + 1}]까지만 안내하고, 그 "
+            f"이상은 절대 먼저 꺼내지 마세요 - 사용자가 이어서 요청하면 다음 턴에 공개하세요."
+        )
+
+    if not disclosed_stage.get("construction_guide"):
+        return (
+            "[진행 상태] Step 1의 하위 단계 [Step 1-1]~[Step 1-3] 안내가 모두 끝났지만, "
+            "아직 Step 2(공사) 안내를 시작하지 않았습니다. 이번 턴에는 사용자가 안 물어봐도 "
+            "\"다음은 Step 2(공사) 단계입니다\"처럼 존재를 먼저 짚어주고 get_construction_guide를 "
+            "호출해 안내하세요 - 식품위생ᆞ사업자등록 등 창업 준비 트랙으로 곧장 건너뛰지 마세요."
+        )
+
+    return "[진행 상태] Step 1~2(건축 인허가ᆞ공사) 안내가 모두 끝났습니다."
+
+
 # === 노드 정의 ===
 def agent_node(state: AgentState) -> dict:
     """LLM을 호출해서 다음 액션 결정.
@@ -478,23 +520,17 @@ def agent_node(state: AgentState) -> dict:
     - 답변 가능하면 최종 답변 반환
     - Gemini 무료 티어 할당량(하루 20회) 소진 시 Cerebras(config.CEREBRAS_MODEL)로 자동 전환
     - 응답에 record_case_facts 호출이 있으면 그 인자를 case_facts에 병합
-    - 판정이 끝났으면 disclosed_stage(permit 전용) 기준으로 "이번 턴엔 N단계까지만"
-      동적 지시를 덧붙인다(연성 유도 - 실제 차단은 guard_node가 담당).
+    - permit_phase_directive로 건축 인허가 트랙 순차 구간(Step 1-N 상한ᆞ
+      Step 1→2 전환)의 동적 지시를 덧붙인다(연성 유도 - 실제 차단은
+      guard_node가 담당).
     - 매 턴 _roadmap_status_summary로 건축 인허가 트랙(순차)ᆞ창업 준비 트랙
       (병렬 가능)의 진행 상태를 함께 전달한다.
     """
     global _gemini_quota_exhausted
     messages = [SystemMessage(content=SYSTEM_PROMPT), SystemMessage(content=_roadmap_status_summary(state))]
-    if state.get("case_facts", {}).get("_classified"):
-        disclosed = state.get("disclosed_stage", {}).get(_STAGE_DOMAIN, 0)
-        if disclosed < 4:
-            messages.append(SystemMessage(content=(
-                f"[진행 상태] Step 1(건축 인허가)의 하위 단계 중 지금까지 [Step 1-{disclosed}]"
-                f"까지 공개했습니다. 이번 턴에는 [Step 1-{disclosed + 1}]까지만 안내하고, 그 "
-                f"이상은 절대 먼저 꺼내지 마세요 - 사용자가 이어서 요청하면 다음 턴에 공개하세요."
-            )))
-        else:
-            messages.append(SystemMessage(content="[진행 상태] Step 1의 하위 단계 [Step 1-1]~[Step 1-4] 안내가 모두 끝났습니다."))
+    directive = permit_phase_directive(state)
+    if directive:
+        messages.append(SystemMessage(content=directive))
     messages.extend(state["messages"])
 
     if not _gemini_quota_exhausted:
@@ -740,7 +776,12 @@ _CITATION_PATTERN = re.compile(r"\[출처:\s*([^\]]+)\]")
 # 검증 중 별개 버그도 하나 발견: LLM이 마커를 "**[Step 1-2: ...]**"처럼
 # 볼드로 감싸면 `**`가 라인 앵커 바로 뒤 매칭을 막아서 guard가 아예 못
 # 잡았음(허용치 초과가 조용히 통과됨, 2026-07-27 실측) - \*{0,2} 허용 추가.
-_STAGE_MARKER_LINE_PATTERN = re.compile(r"^#{0,3}\s*\*{0,2}\s*\[Step\s*1-([1-4])")
+# 2026-07-28: 4단계였던 걸 3단계로 축소 - 옛 [Step 1-4: 예상 소요 기간]은
+# 로드맵 체크리스트에 대응하는 항목이 없는 순수 정보성 문구라 별도 게이트로
+# 둘 필요가 없었고(SYSTEM_PROMPT 참고, 이제 [Step 1-3] 안내 끝에 자연스럽게
+# 붙임), 로드맵의 실제 체크 항목 3개(상황분석ᆞ서류ᆞ사전진단)와 대화의
+# 게이트 수를 1:1로 맞춰 혼동 여지를 줄였다.
+_STAGE_MARKER_LINE_PATTERN = re.compile(r"^#{0,3}\s*\*{0,2}\s*\[Step\s*1-([1-3])")
 
 
 def _mentioned_stages(text: str) -> list[int]:
@@ -869,6 +910,19 @@ def _has_grounding_search(messages) -> bool:
     지어내는" 가장 심각한 사례는 확실히 잡는다(1차 구현, 2026-07-26)."""
     return any(
         isinstance(m, ToolMessage) and m.name in GROUNDING_TOOL_NAMES
+        for m in messages
+    )
+
+
+def _construction_guide_shown(messages) -> bool:
+    """get_construction_guide가 대화 전체에서 한 번이라도 호출됐는지 -
+    disclosed_stage["construction_guide"] 갱신에 쓴다(permit_phase_directive의
+    Step 1→2 전환 넛지를 한 번 보여준 뒤엔 매 턴 반복하지 않기 위함). 도구
+    이름을 직접 문자열로 비교하지만, 이 호출 이력 → 상태 플래그 변환 지점을
+    guard_node 한 곳으로 모아뒀기 때문에 도구가 나중에 개명되거나 대체돼도
+    고칠 곳은 여기 한 줄뿐이다."""
+    return any(
+        isinstance(m, ToolMessage) and m.name == "get_construction_guide"
         for m in messages
     )
 
@@ -1008,8 +1062,8 @@ def guard_node(state: AgentState) -> dict:
     막는 위반 다섯 가지:
     1. 허용된 단계 수([_max_allowed_stage])를 넘겨 [Step 1-N]을 안내 - 판정 전
        절차 안내를 아예 시도한 경우(허용치 0)와, 판정 후 한 턴에 여러 단계를
-       몰아서 공개한 경우(사용자가 "1단계만" 이라고 명시해도 무시하고 4단계를
-       다 준 사례 포함) 둘 다 이 하나의 규칙으로 잡는다.
+       몰아서 공개한 경우(사용자가 "1단계만" 이라고 명시해도 무시하고 전체
+       단계를 다 준 사례 포함) 둘 다 이 하나의 규칙으로 잡는다.
     2. search_regulations/search_by_term을 한 번도 호출하지 않았는데
        [출처: ...] 인용이 있는 경우 - 근거 없이 조항을 지어낸 것.
     3. [Step 1-2]/[Step 1-3]을 언급했는데 record_permit_synthesis로 실제 기록은
@@ -1032,6 +1086,19 @@ def guard_node(state: AgentState) -> dict:
     넘는 값이 그대로 disclosed_stage에 박혀서, 이후 진짜 permit 설명이
     시작될 때 이미 일부 단계가 끝난 것처럼 잘못 판단하게 된다(2026-07-27
     실측 확인 - signage만 다룬 대화에서 disclosed_stage가 1로 오염됨).
+
+    2026-07-28: 이 값을 "지금까지 공개된 적 있는 최댓값"(한 번 오르면 절대
+    안 내려가는 래칫)에서 "이번 턴에 실제로 언급된 단계"로 바꿨다 - 래칫
+    방식에선 [Step 1-3]까지 간 뒤 사용자가 [Step 1-2]를 다시 물어봐도 값이
+    3에 머물러서, 바로 다음 턴에 [Step 1-3]을 건너뛰고 [Step 1-4]로 점프하는
+    문제가 있었다(세션 f377454d에서 재현). 이제는 되짚어간 턴 다음엔 값이
+    2로 내려가 [Step 1-3]부터 다시 자연스럽게 진행된다. max_mentioned가
+    0인 턴(이번 답변에 마커가 아예 없음)은 무시한다 - 안 그러면 무관한
+    답변 때문에 매번 0으로 리셋된다. 트레이드오프: 다른 도메인 답변에
+    실수로 낮은 번호의 [Step 1-N]이 섞이면 이번엔 값이 잘못 내려갈 수
+    있지만, 최악의 결과가 "이미 본 단계를 한 번 더 설명"하는 정도라
+    이전의 오염 버그(잘못된 단계로 건너뜀)보다 훨씬 가볍다고 판단해
+    지금은 별도 방어를 추가하지 않는다 - 실제로 관측되면 그때 대응한다.
     """
     messages = state["messages"]
     last_text = extract_text(messages[-1].content)
@@ -1076,9 +1143,14 @@ def guard_node(state: AgentState) -> dict:
 
     update: dict = {}
     capped = min(max_mentioned, allowed)
-    current = state.get("disclosed_stage", {}).get(_STAGE_DOMAIN, 0)
-    if capped > current:
-        update["disclosed_stage"] = {**state.get("disclosed_stage", {}), _STAGE_DOMAIN: capped}
+    disclosed_stage = state.get("disclosed_stage", {})
+    new_disclosed_stage = dict(disclosed_stage)
+    if max_mentioned > 0 and capped != disclosed_stage.get(_STAGE_DOMAIN, 0):
+        new_disclosed_stage[_STAGE_DOMAIN] = capped
+    if not disclosed_stage.get("construction_guide") and _construction_guide_shown(messages):
+        new_disclosed_stage["construction_guide"] = 1
+    if new_disclosed_stage != disclosed_stage:
+        update["disclosed_stage"] = new_disclosed_stage
     return update
 
 
