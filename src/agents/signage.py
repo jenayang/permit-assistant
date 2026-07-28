@@ -65,15 +65,37 @@ def classify_signage(facts: dict) -> str | None:
     갈음한다.
     """
     sign_type = facts.get("sign_type")
-    if sign_type is None or _missing_fields_signage(sign_type, facts):
+    if sign_type is None:
         return None
 
+    # 벽면이용간판ᆞ돌출간판은 2026-07-28 전까지 진입 전에 REQUIRED_FIELDS_SIGNAGE
+    # 전체를 무조건 요구했다 - 그런데 예를 들어 length_m=15(10m 이상) 하나만
+    # 알아도 이미 "허가"가 확정되는데(아래 주석 참고), floor/is_third_party_ad/
+    # area_sqm까지 다 모여야만 판정을 내려서 사용자가 이미 답이 나온 값을
+    # 계속 추가로 질문받는 문제가 있었다(docs/test_scenarios.md류 경계값
+    # 점검 중 permit.py의 대수선에서 같은 패턴을 먼저 발견ᆞ수정한 뒤 이
+    # 파일도 감사해서 발견). 아래 두 분기는 부분 정보로도 안전하게 확정
+    # 가능한 조건만 먼저 확인하고, 그렇지 않으면 나머지 필드를 마저 요구한다.
+    # "허가"(더 엄격한 쪽) 방향으로만 조기 확정을 허용한다는 원칙을 지킨다 -
+    # 신고ᆞ불필요(더 완화된 쪽)를 부분 정보로 성급히 말했다가 나중에 실제로는
+    # 허가 대상이었던 걸로 드러나는 위험을 피하기 위함.
+
     if sign_type == "벽면이용간판":
-        # 시행령 제4조1항1호: 한 변 10m 이상, 또는 4층 이상+타사광고 → 허가
-        if facts["length_m"] >= 10:
+        # 시행령 제4조1항1호: 한 변 10m 이상 → 다른 필드와 무관하게 즉시 허가.
+        if facts.get("length_m") is not None and facts["length_m"] >= 10:
             return "허가"
-        if facts["floor"] >= 4 and facts["is_third_party_ad"]:
+        # 시행령 제4조1항1호: 4층 이상 + 타사광고 → 허가(두 필드 다 알아야
+        # 확정/배제 가능 - floor만 알고 is_third_party_ad를 모르면 신고인지
+        # 허가인지 아직 갈릴 수 있다).
+        if (
+            facts.get("floor") is not None and facts.get("is_third_party_ad") is not None
+            and facts["floor"] >= 4 and facts["is_third_party_ad"]
+        ):
             return "허가"
+        # 위 두 "허가" 조건을 완전히 배제해야 신고ᆞ불필요를 안전하게 말할 수
+        # 있는데, 그러려면 결국 네 필드가 다 필요하다.
+        if any(facts.get(f) is None for f in ("length_m", "floor", "is_third_party_ad", "area_sqm")):
+            return None
         # 시행령 제5조1항1호: 면적 5㎡ 이상, 또는 4층 이상(자사광고) → 신고
         if facts["area_sqm"] >= 5:
             return "신고"
@@ -84,12 +106,24 @@ def classify_signage(facts: dict) -> str | None:
     if sign_type == "돌출간판":
         # 시행령 제4조1항2호: 원칙 허가. 다만 의료ᆞ약국ᆞ이용ᆞ미용업소
         # 표지등이거나, 높이 5m 미만이거나, 면적 1㎡ 미만이면(셋 중 하나만
-        # 해당돼도) 허가 대상에서 제외되어 신고로 완화(제5조1항4호).
-        if facts["is_medical_or_salon_sign"] or facts["height_m"] < 5 or facts["area_sqm"] < 1:
+        # 해당돼도, OR 조건) 허가 대상에서 제외되어 신고로 완화(제5조1항4호).
+        # OR 조건이라 셋 중 하나라도 먼저 확인되면 나머지를 몰라도 즉시 신고로
+        # 확정할 수 있다(다른 값이 뭐든 이 조건 하나만으로 이미 완화 대상).
+        if facts.get("is_medical_or_salon_sign"):
             return "신고"
+        if facts.get("height_m") is not None and facts["height_m"] < 5:
+            return "신고"
+        if facts.get("area_sqm") is not None and facts["area_sqm"] < 1:
+            return "신고"
+        # 셋 다 완화 조건에 안 걸리는 걸 확인해야만(=셋 다 알아야만) 허가로
+        # 확정할 수 있다.
+        if any(facts.get(f) is None for f in ("height_m", "area_sqm", "is_medical_or_salon_sign")):
+            return None
         return "허가"
 
     if sign_type == "지주이용간판":
+        if _missing_fields_signage(sign_type, facts):
+            return None
         # 시행령 제4조1항5호/제5조1항5호: 높이 4m 이상 허가, 미만 신고
         return "허가" if facts["height_m"] >= 4 else "신고"
 
@@ -99,6 +133,8 @@ def classify_signage(facts: dict) -> str | None:
         return "신고"
 
     if sign_type == "현수막":
+        if _missing_fields_signage(sign_type, facts):
+            return None
         # 시행령 제4조2항2호/제5조2항: 게시시설 면적 30㎡ 초과면 허가, 그 외 신고
         return "허가" if facts["display_facility_area_sqm"] > 30 else "신고"
 
