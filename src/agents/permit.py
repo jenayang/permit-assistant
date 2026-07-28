@@ -132,13 +132,23 @@ PROCEDURE_TREE: dict[str, dict] = {
 #
 # 각 act_type별로 classify_case가 요구하는 case_facts 필드. 하나라도 비어있으면(None)
 # 아직 분류 안 함(None 반환) — 그래프가 이걸로 "정보 충분?" 판단.
+#
+# "대수선"은 size_sqm/floors를 여기 넣지 않는다 - 원래는 넣었었는데
+# (2026-07-28 발견) renovation_scope=False(시행령 8개 기준 어디에도
+# 해당 안 됨)면 애초에 대수선 자체가 아니라서 size_sqm/floors 값이 결과에
+# 전혀 영향을 안 주는데도, 이 필드가 항상 필수라서 사용자가 그 값을 알려줄
+# 때까지 챗봇이 계속 되물었다(docs/test_scenarios.md Part A 12번 케이스로
+# 발견 - 문서엔 "size/floors 무관"이라고 이미 적혀 있었는데 코드가 그 스펙을
+# 못 지키고 있었음). size_sqm/floors가 실제로 필요한 건 renovation_scope가
+# True일 때뿐이라, 그 조건부 요구는 classify_case의 "대수선" 분기 안으로
+# 옮겼다.
 REQUIRED_FIELDS: dict[str, list[str]] = {
     "신축": ["size_sqm", "floors", "land_zone"],
     "증축": ["extension_size_sqm"],
     "개축": ["extension_size_sqm"],
     "재축": ["extension_size_sqm"],
     "이전": [],
-    "대수선": ["renovation_scope", "size_sqm", "floors"],
+    "대수선": ["renovation_scope"],
     "용도변경": ["current_facility_group", "desired_facility_group"],
     "일반수선": [],
     "가설건축물": ["temporary_purpose", "temporary_duration_years", "temporary_is_concrete"],
@@ -199,6 +209,10 @@ def classify_case(facts: dict) -> str | None:
     if act_type == "대수선":
         if not facts["renovation_scope"]:
             return "인허가불필요"  # 시행령 제3조의2 8개 기준 어디에도 안 걸림
+        # size_sqm/floors는 renovation_scope가 True일 때만 실제로 필요하다 -
+        # REQUIRED_FIELDS엔 넣지 않았으니(위 주석 참고) 여기서 직접 확인한다.
+        if facts.get("size_sqm") is None or facts.get("floors") is None:
+            return None
         renov = thresholds["대수선_신고"]
         if facts["size_sqm"] < renov["연면적_미만_sqm"] and facts["floors"] < renov["층수_미만"]:
             return "건축신고"

@@ -20,8 +20,10 @@ from langchain_core.messages import AIMessage
 from langchain_core.messages import ToolMessage
 
 from src import config
-from src.agent import extract_text, graph
+from src.agent import GROUNDING_TOOL_NAMES, extract_text, graph
+from src.agents.roadmap_progress import TASK_PROGRESS_FIELDS
 from src.ingestion import ingest_all
+from src.project_status import compute_project_status
 from src.retriever import index_documents, count_documents, reset_collection
 from src import parent_store
 
@@ -119,6 +121,16 @@ def query(question: str, user_id: Optional[str] = None) -> dict:
         if isinstance(msg, ToolMessage):
             contexts.extend(part for part in msg.content.split("\n\n") if part.strip())
 
+    # "법령 원문 보기" 카드용 - contexts와 달리 record_case_facts("기록됨.")나
+    # lookup_building_ledger(건축물대장 조회 결과) 같은 비-법령 도구 응답은
+    # 빼고, 실제로 [출처: ...] 인용의 근거가 되는 도구(GROUNDING_TOOL_NAMES,
+    # guard_node와 동일 기준)만 남긴다 - 안 그러면 카드에 "기록됨." 같은
+    # 엉뚱한 내용이 법령 원문인 것처럼 뜬다.
+    law_contexts = []
+    for msg in current_turn_messages:
+        if isinstance(msg, ToolMessage) and msg.name in GROUNDING_TOOL_NAMES:
+            law_contexts.append({"tool": msg.name, "text": msg.content})
+
     logger.info("[User: %s] 답변 길이: %d, 도구 호출: %d회",
                 user_id, len(answer), len(tool_calls))
 
@@ -127,8 +139,44 @@ def query(question: str, user_id: Optional[str] = None) -> dict:
         "user_id": user_id,
         "tool_calls": tool_calls,
         "contexts": contexts,
+        "law_contexts": law_contexts,
         "permit_result": result.get("permit_result"),
+        "food_result": result.get("food_result"),
+        "fire_result": result.get("fire_result"),
+        "signage_result": result.get("signage_result"),
+        "task_progress": result.get("task_progress"),
+        "project_status": compute_project_status(result),
     }
+
+
+# === 프로젝트 진행 현황 조회 (LLM 호출 없음) ===
+def get_project_status(user_id: str) -> dict:
+    """재접속 요약 배너ᆞNext Action 위젯 등이 페이지 로드 시(대화 없이도)
+    바로 쓸 수 있도록 현재 그래프 상태에서 진행 현황만 조회한다. query()의
+    project_status와 같은 compute_project_status()를 재사용해 두 경로가
+    서로 다른 계산을 하지 않게 한다.
+    """
+    config_dict = {"configurable": {"thread_id": user_id}}
+    state = graph.get_state(config_dict)
+    return compute_project_status(state.values)
+
+
+# === 로드맵 체크박스 직접 갱신 (LLM 호출 없음) ===
+def update_task_progress(user_id: str, field: str, value: bool) -> dict:
+    """사용자가 프론트 로드맵 체크박스를 직접 클릭했을 때 task_progress를
+    그래프 상태에 바로 반영한다. record_task_progress(LLM 도구)가 대화 중
+    자연어로 자기보고를 받는 것과 신뢰 수준이 동일한 자기보고라 - 체크박스
+    클릭도 "사용자가 방금 완료라고 밝힌 것"이므로 - 굳이 LLM을 거쳐 자연어를
+    왕복시키지 않고 graph.update_state로 직접 패치한다(대화 이력에는 안
+    남지만 다음 질의ᆞ답변에는 그대로 반영됨).
+    """
+    if field not in TASK_PROGRESS_FIELDS:
+        raise ValueError(f"알 수 없는 진행상황 항목: {field}")
+
+    config_dict = {"configurable": {"thread_id": user_id}}
+    graph.update_state(config_dict, {"task_progress": {field: value}})
+    state = graph.get_state(config_dict)
+    return state.values.get("task_progress") or {}
 
 
 
