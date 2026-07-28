@@ -224,16 +224,23 @@ pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진�
 ## 2. 도구 선택
 - 법률 용어 정의("OO이 뭐야") → search_by_term (핵심 용어만 추출)
 - 절차ᆞ조건ᆞ서류 등 일반 질문 → search_regulations
-- 착공신고ᆞ건축사 설계ᆞ공사감리ᆞ사용승인(Step 2: 공사)을 물으면 →
-  get_construction_guide 하나만 호출하세요(내부적으로 이미 여러 관점으로
-  search_regulations를 호출해 합쳐서 돌려주니, 따로 search_regulations를
-  또 부르지 마세요). **[Step 1-4: 예상 소요 기간]까지 안내가 끝나면, 사용자가
-  안 물어봐도 "다음은 Step 2(공사) 단계입니다"처럼 존재를 짧게 짚어주고
-  계속 안내할지 물어보세요** - 인허가 설명이 끝났다고 곧장 식품위생ᆞ
-  사업자등록 등 창업 준비 트랙으로 건너뛰지 마세요(실제로 Step 2를 통째로
-  건너뛰고 사용자가 "공사는 왜 안 알려줘?"라고 지적한 사례가 있었습니다 -
-  2026-07-27). 단, 공통 원칙대로 사용자가 동의ᆞ요청할 때 실제 내용을
-  꺼내세요 - 짚어주는 것과 바로 전체 내용을 쏟아내는 건 다릅니다.
+- 착공신고ᆞ건축사 설계ᆞ공사감리ᆞ사용승인ᆞ인테리어ᆞ장비설치(Step 2: 공사)를
+  물으면 → get_construction_guide 하나만 호출하세요(내부적으로 이미 여러
+  관점으로 search_regulations를 호출 + 실무 체크리스트까지 합쳐서
+  돌려주니, 따로 search_regulations를 또 부르지 마세요). **[Step 1-4:
+  예상 소요 기간]까지 안내가 끝나면, 사용자가 안 물어봐도 "다음은 Step 2
+  (공사) 단계입니다"처럼 존재를 짧게 짚어주고 계속 안내할지 물어보세요**
+  - 인허가 설명이 끝났다고 곧장 식품위생ᆞ사업자등록 등 창업 준비 트랙으로
+  건너뛰지 마세요(실제로 Step 2를 통째로 건너뛰고 사용자가 "공사는 왜
+  안 알려줘?"라고 지적한 사례가 있었습니다 - 2026-07-27). 단, 공통
+  원칙대로 사용자가 동의ᆞ요청할 때 실제 내용을 꺼내세요 - 짚어주는 것과
+  바로 전체 내용을 쏟아내는 건 다릅니다. **공사 단계로 넘어갈 때는 착공
+  얘기부터 바로 하지 말고, 건축사사무소를 이미 선정했는지부터 먼저
+  확인하세요** - 아직 안 정했다면 착공 전에 먼저 선정해야 한다고
+  짚어주고(인허가 신청 때 이미 건축사사무소를 통해 설계도서를 준비했다면
+  그 사무소에 감리ᆞ착공신고까지 이어서 의뢰하는 게 일반적이라는 것도
+  안내하세요), 인테리어ᆞ장비 설치도 "오픈 준비"가 아니라 이 공사 단계
+  안에서 함께 다루세요(2026-07-28 - 실제로는 시공의 일부라 이동함).
 - 사업자등록을 어떻게ᆞ언제까지 하는지, 무슨 서류가 필요한지 물으면 →
   get_business_registration_guide 하나만 호출하세요(내부적으로 이미
   검색합니다). food_result가 이미 나온 사용자라면 검색 결과의
@@ -244,11 +251,13 @@ pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진�
   get_hygiene_education_guide 하나만 호출하세요(내부적으로 이미
   검색합니다). 실제 교육 운영기관ᆞ비용처럼 검색 결과에 없는 세부사항은
   지어내지 말고 "관할 보건소에 확인하라"고 안내하세요.
-- 오픈 준비(인테리어ᆞ장비설치ᆞ직원등록ᆞ영업시작)를 물으면 →
-  get_opening_checklist 하나만 호출하세요(직원등록 부분은 내부적으로 이미
-  검색합니다). **인테리어ᆞ장비설치ᆞ영업시작 항목은 법령 근거가 없는 순수
-  실무 체크리스트이니 [출처]를 지어내 붙이지 마세요** - 직원등록(4대보험)
-  항목만 검색 결과에 실제로 있는 출처를 그대로 쓰세요.
+- 오픈 준비(직원등록ᆞ영업시작)를 물으면 → get_opening_checklist 하나만
+  호출하세요(직원등록 부분은 내부적으로 이미 검색합니다). **인테리어ᆞ
+  장비설치는 여기가 아니라 get_construction_guide(공사 단계)에서
+  다룹니다** - 사용자가 인테리어를 물으면 이 도구 대신 그쪽을 호출하세요.
+  영업시작 항목은 법령 근거가 없는 순수 실무 체크리스트이니 [출처]를
+  지어내 붙이지 마세요 - 직원등록(4대보험) 항목만 검색 결과에 실제로
+  있는 출처를 그대로 쓰세요.
 - 용도지역을 모르는데 주소는 아는 경우 → lookup_land_zone
 - 건폐율ㆍ용적률 질문 → lookup_building_ratio_limits (세부 용도지역을
   모르면 계산하지 말고 직접 질문)
@@ -308,6 +317,17 @@ classify 시점에 이미 완결된 짧은 판정 문구가 도구 응답으로 
 단계/턴에서 말한 내용을 다시 설명하지 마세요. 각 단계 끝에 다음 단계를
 계속 안내할지 짧게 묻고, 사용자가 동의하거나 관련 질문을 이어가면 다음
 단계로 넘어가세요. "한 번에 다 알려줘" 요청 시에만 4단계를 모두 한 번에.
+**"다음 단계로 넘어갈까요?"처럼 그냥 제안만 하는 문장에는 `[Step 1-N]`
+헤더를 붙이지 마세요** - `[Step 1-N: ...]`은 그 단계의 실제 내용(서류
+목록ᆞ사전진단 항목 등)을 진짜로 설명할 때만 쓰는 헤더입니다. 헤더만
+붙이고 내용은 다음 턴으로 미루면, 시스템이 "이번 턴에 그 단계까지 실제로
+공개했다"고 잘못 세어서 다음 턴에 사용자가 그냥 근황만 말했는데도(예:
+"서류 받았어") AI가 그 다음다음 단계까지 한 번에 건너뛰는 사고로 이어집니다
+(실제로 겪은 문제 - 세션 2cda4d67, 2026-07-28: "[Step 1-3: 사전 진단]으로
+넘어갈까요?"라고 제목만 붙이고 실제 사전진단 내용은 없었는데, 그 헤더
+때문에 다음 턴에 [Step 1-4]와 Step 2까지 한꺼번에 쏟아짐). 제안 문장은
+"다음으로 사전 진단 내용을 안내해 드릴까요?"처럼 괄호 헤더 없이 평문으로
+쓰세요.
 **판정이 확정되는 순간 시스템이 이미 관련 법령을 한 번 자동 검색해서
 도구 응답으로 넣어뒀습니다** - [Step 1-2: 필수 서류]를 쓸 때 그 검색 결과가
 있는지 먼저 확인하고, 있으면 다시 검색하지 말고 그대로 근거로 쓰세요.
@@ -702,7 +722,27 @@ _CITATION_PATTERN = re.compile(r"\[출처:\s*([^\]]+)\]")
 # 검증 중 별개 버그도 하나 발견: LLM이 마커를 "**[Step 1-2: ...]**"처럼
 # 볼드로 감싸면 `**`가 라인 앵커 바로 뒤 매칭을 막아서 guard가 아예 못
 # 잡았음(허용치 초과가 조용히 통과됨, 2026-07-27 실측) - \*{0,2} 허용 추가.
-_STAGE_MARKER_PATTERN = re.compile(r"^#{0,3}\s*\*{0,2}\s*\[Step\s*1-([1-4])", re.MULTILINE)
+_STAGE_MARKER_LINE_PATTERN = re.compile(r"^#{0,3}\s*\*{0,2}\s*\[Step\s*1-([1-4])")
+
+
+def _mentioned_stages(text: str) -> list[int]:
+    """줄 시작에 오는 [Step 1-N] 중 "실제로 그 단계 내용을 공개한" 것만 센다.
+
+    라인 앵커만으로는 부족한 사례가 실측으로 확인됐다(세션 2cda4d67,
+    2026-07-28) - "**[Step 1-3: 사전 진단]**으로 넘어가서 ... 안내해
+    드릴까요?"처럼 헤더가 줄 맨 앞에 오면서도 실제 내용은 없이 "다음 단계로
+    넘어가도 될지 묻기만" 하는 문장이었는데, 헤더 형식 때문에 disclosed_stage
+    가 잘못 올라가서 다음 턴에 사용자가 근황만 말했는데도 AI가 그다음
+    단계까지 건너뛰는 사고로 이어졌다. 진짜 내용 공개는 헤더 줄 자체가
+    물음표로 안 끝난다(제목만 있거나 요약 한 줄로 끝남) - 반대로 "~안내해
+    드릴까요?"처럼 헤더가 있는 줄이 물음표로 끝나면 제안일 뿐이므로 제외한다.
+    """
+    mentioned = []
+    for line in text.splitlines():
+        m = _STAGE_MARKER_LINE_PATTERN.match(line)
+        if m and not line.rstrip().endswith(("?", "？")):
+            mentioned.append(int(m.group(1)))
+    return mentioned
 
 
 def extract_text(content) -> str:
@@ -853,13 +893,47 @@ def _synthesis_gap_violations(state: AgentState, max_mentioned: int) -> list[str
     return violations
 
 
+def _building_ledger_gap_violations(state: AgentState, messages) -> list[str]:
+    """이번 턴에 lookup_building_ledger 조회가 성공했는데 case_facts에
+    current_facility_group이 기록되지 않은 경우를 잡는다. SYSTEM_PROMPT에
+    "조회 성공 시 같은 턴에 current_facility_group을 기록하라"는 지시가
+    이미 있지만, 실측으로 반복 확인된 실패 패턴이다(세션 79430043 -
+    lookup_building_ledger가 "제2종근린생활시설"을 정확히 조회했는데도
+    current_facility_group이 끝내 기록 안 돼 permit_result가 영영 None으로
+    남고 Step1이 멈춘 채 안 움직였음, 2026-07-28 확인ᆞguard로 승격). 조회
+    자체가 실패한 경우("조회에 실패했습니다"/"등록된 건축물대장이 없습니다"
+    등)는 애초에 기록할 값이 없으니 위반이 아니다 - 이번 턴(마지막
+    HumanMessage 이후)만 스캔한다(_guard_retry_count와 동일한 스코프 기준).
+    """
+    ledger_succeeded = False
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage):
+            break
+        if isinstance(m, ToolMessage) and m.name == "lookup_building_ledger":
+            content = str(m.content)
+            if not any(kw in content for kw in ("실패", "없습니다", "설정되어 있지 않습니다")):
+                ledger_succeeded = True
+    if not ledger_succeeded:
+        return []
+    case_facts = state.get("case_facts") or {}
+    if case_facts.get("current_facility_group"):
+        return []
+    return [
+        "lookup_building_ledger 조회가 성공했는데(건축물대장상 주용도가 확인됨) "
+        "case_facts에 current_facility_group이 기록되지 않았습니다. 지금 바로 "
+        "record_case_facts(current_facility_group=...)를 조회된 주용도 기준으로 "
+        "호출하고, act_type이 용도변경이면 desired_facility_group도 같은 턴에 "
+        "함께 기록한 뒤 답변을 마무리하세요."
+    ]
+
+
 def guard_node(state: AgentState) -> dict:
     """agent가 자유 텍스트로 답을 끝내려 할 때, 근거ᆞ판정ᆞ기록 없이 앞서나간
     답변을 한 번 걸러낸다. LLM 판단이 아니라 정규식+상태로 결정론적으로
     감지한다(classify_case와 같은 원칙 - 프롬프트 지시만으로는 못 막는다는 게
     2026-07-26 실사용 세션에서 재현됨).
 
-    막는 위반 세 가지:
+    막는 위반 네 가지:
     1. 허용된 단계 수([_max_allowed_stage])를 넘겨 [Step 1-N]을 안내 - 판정 전
        절차 안내를 아예 시도한 경우(허용치 0)와, 판정 후 한 턴에 여러 단계를
        몰아서 공개한 경우(사용자가 "1단계만" 이라고 명시해도 무시하고 4단계를
@@ -869,6 +943,9 @@ def guard_node(state: AgentState) -> dict:
     3. [Step 1-2]/[Step 1-3]을 언급했는데 record_permit_synthesis로 실제 기록은
        안 한 경우 - "도구를 호출했다"는 문장까지 텍스트로 지어내고 실제로는
        안 부른 사례가 실측으로 확인됨(_synthesis_gap_violations 참고).
+    4. lookup_building_ledger 조회가 성공했는데 case_facts에
+       current_facility_group을 안 채운 경우 - 판정이 영영 안 나서 Step1이
+       멈추는 실제 사례가 반복됨(_building_ledger_gap_violations 참고).
 
     같은 사용자 턴 안에서 최대 1회만 재시도를 유도한다(무한 루프 방지) - 그
     이상 반복되면 프롬프트만으로는 못 막는 한계로 보고 그냥 통과시킨다.
@@ -884,7 +961,7 @@ def guard_node(state: AgentState) -> dict:
     last_text = extract_text(messages[-1].content)
 
     allowed = _max_allowed_stage(state)
-    mentioned = [int(n) for n in _STAGE_MARKER_PATTERN.findall(last_text)]
+    mentioned = _mentioned_stages(last_text)
     max_mentioned = max(mentioned, default=0)
 
     violations = []
@@ -901,6 +978,7 @@ def guard_node(state: AgentState) -> dict:
             "지어내지 말고, 먼저 해당 도구를 호출해 실제 근거를 확보한 뒤 답변하세요."
         )
     violations.extend(_synthesis_gap_violations(state, max_mentioned))
+    violations.extend(_building_ledger_gap_violations(state, messages))
 
     if violations and _guard_retry_count(messages) < 1:
         logger.info("[guard] 위반 감지, 재시도 유도: %s", violations)

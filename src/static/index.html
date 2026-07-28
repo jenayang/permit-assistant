@@ -125,43 +125,6 @@
     margin-bottom: 16px;
     text-align: center;
   }
-  .fact-tags {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 6px;
-    margin-bottom: 14px;
-  }
-  .fact-tag {
-    font-size: 11px;
-    padding: 3px 9px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text-muted);
-    white-space: nowrap;
-  }
-  .fact-tag.result {
-    border-color: var(--accent);
-    background: var(--accent);
-    color: var(--accent-text);
-    font-weight: 600;
-  }
-  .fact-tag.result.food {
-    border-color: #b45309;
-    background: #b45309;
-    color: #ffffff;
-  }
-  .fact-tag.result.fire {
-    border-color: #b91c1c;
-    background: #b91c1c;
-    color: #ffffff;
-  }
-  .fact-tag.result.signage {
-    border-color: #7c3aed;
-    background: #7c3aed;
-    color: #ffffff;
-  }
   /* Next Action 위젯 - "질문에 답하는 챗봇"이 아니라 "먼저 알려주는 프로젝트
      매니저"가 되자는 원칙(2026-07-28 논의)에 따라, 사용자가 안 물어봐도
      항상 보이는 위치에 지금 단계ᆞ진행률ᆞ다음 할 일을 고정 표시한다.
@@ -187,7 +150,7 @@
     flex-shrink: 0;
   }
   .next-action-body { flex: 1; min-width: 0; }
-  .next-action-progress { margin-bottom: 6px; }
+  .next-action-progress { margin-bottom: 10px; }
   .next-action-bar {
     height: 6px;
     border-radius: 3px;
@@ -200,26 +163,21 @@
     border-radius: 3px;
     transition: width 0.3s ease;
   }
-  .next-action-track {
+  /* "해야 할 일" 표기 - 아티팩트 A 시안 그대로: 헤드라인(A와 동일한
+     12.5px, 일반 굵기, 핵심 문구만 강조)ᆞpct(22px) 크기를 그대로 따른다
+     (2026-07-28: 한 차례 과하게 키웠다가 "너무 크다ᆞ서체도 다르다"는
+     피드백으로 A 원안 크기로 되돌림). 트랙이 2개(건축ᆞ창업 준비)라도
+     A 예시처럼 한 줄로 합쳐서 보여준다("2개라도 한 줄로" 피드백) -
+     트랙별로 줄을 나누면 위젯이 다시 길어지고 눈에 덜 띈다. %는 B의
+     원형 링 대신 기존 긴 막대 그래프를 유지. */
+  .next-action-headline {
     font-size: 12.5px;
-    font-weight: 600;
-    margin-top: 3px;
-  }
-  .next-action-track-label {
-    font-family: var(--mono);
-    font-size: 9.5px;
-    font-weight: 700;
-    letter-spacing: .02em;
+    font-weight: 400;
     color: var(--text-muted);
-    background: var(--surface-2);
-    padding: 1px 6px;
-    border-radius: 4px;
-    margin-right: 4px;
+    line-height: 1.5;
+    text-wrap: balance;
   }
-  .next-action-task {
-    font-size: 12.5px;
-    font-weight: 600;
-  }
+  .next-action-headline strong { color: var(--accent); font-weight: 700; }
   /* 전체 창업 로드맵(Step 0~4) - "AI가 확인된 사실만 진행률에 반영한다"는
      원칙에 따라, 판정(permit_result/food_result/fire_result/signage_result)이
      난 항목과 사용자가 완료를 직접 말한 항목(task_progress)만 체크된다 -
@@ -381,6 +339,7 @@
     font-size: 11px;
     color: var(--text-muted);
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
     gap: 5px;
   }
@@ -388,6 +347,29 @@
   .roadmap-substep-icon { flex-shrink: 0; font-weight: 700; }
   .roadmap-substep-icon.done { color: var(--done); }
   .roadmap-substep.info { padding-left: 17px; opacity: 0.8; }
+  /* case_facts에서 온 "확인된 사실"(임차인ᆞ용도지역ᆞ시설군 등) - 별도 줄로
+     아래 나열하지 않고, 그 사실이 근거가 된 "허가ᆞ신고 대상 확인" 항목
+     우측에 인라인 배지로 붙인다(2026-07-28 피드백: "체크한 항목 우측에"). */
+  .roadmap-substep-tags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-left: 2px;
+  }
+  .fact-tag-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+    color: var(--text);
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .roadmap-substep-fact-icon { flex-shrink: 0; font-size: 9px; }
   /* 사용자가 직접 완료를 표시할 수 있는 항목(task_progress 기반)만 실제
      체크박스 - 판정 축(permit/food/fire/signage)이 있는 항목은 시스템이
      확인한 사실이라 사용자가 임의로 못 바꾸게 readonly 아이콘 그대로 둔다. */
@@ -467,6 +449,10 @@
     box-shadow: var(--shadow);
     border-bottom-left-radius: 4px;
   }
+  /* 볼드(**강조**)가 그냥 굵기만 바뀌어서 잘 안 보인다는 피드백(2026-07-28) -
+     색까지 넣어서 실제로 눈에 띄게. 사용자 말풍선은 이미 accent 배경이라
+     굳이 색을 더 안 넣어도 되니 봇 말풍선에만 적용한다. */
+  .msg.bot .bubble strong { color: #3b82f6; font-weight: 700; }
   .msg.bot .bubble.error {
     background: #fef2f2;
     color: var(--error);
@@ -621,7 +607,6 @@
     <aside class="side-panel">
       <div class="roadmap-title">📍 창업 로드맵</div>
       <div class="roadmap" id="roadmap"></div>
-      <div class="fact-tags" id="factTags" style="display:none;"></div>
       <div class="branch-prompt" id="branchPrompt" style="display:none;"></div>
       <div class="stage-caption">✓ᆞ●는 시스템이 확인한 사실, 체크박스는 직접
         눌러서 진행상황을 표시할 수 있어요.<br>실제 절차는 사안에 따라 다를 수
@@ -640,7 +625,6 @@
   const userIdLabel = document.getElementById("userIdLabel");
   const newChatBtn = document.getElementById("newChatBtn");
   const branchPromptEl = document.getElementById("branchPrompt");
-  const factTagsEl = document.getElementById("factTags");
   const roadmapEl = document.getElementById("roadmap");
   const nextActionEl = document.getElementById("nextAction");
 
@@ -668,6 +652,7 @@
   let latestSignageResult = null; // /query 응답의 signage_result(간판ᆞ옥외광고물 허가/신고 판정)를 그대로 보관
   let taskProgress = {}; // /query 응답의 task_progress(사용자가 실제로 완료했다고 밝힌 항목)를 그대로 보관
   let expandedSteps = null; // 로드맵 Step 아코디언 펼침 상태(Set<index>) - null이면 renderRoadmap()이 첫 렌더링 때 "지금 여기" 단계로 초기화
+  let lastCurrentIdx = null; // 직전 렌더링의 "지금 여기" 단계 - 이 값이 바뀌면(단계 전환) 이전 단계는 자동으로 접고 새 단계는 자동으로 편다
 
   // case_facts 필드 → 태그 텍스트 변환. 여기 없는 필드는 태그로 안 보임(값
   // 하나만으로는 뜻이 안 통하는 필드는 아래에서 조합해서 별도 처리).
@@ -683,60 +668,6 @@
     temporary_duration_years: (v) => `존치 ${v}년`,
     temporary_is_concrete: (v) => (v ? "철근콘크리트조" : "비철콘크리트조"),
   };
-
-  function renderFactTags() {
-    const chips = [];
-    for (const [key, value] of Object.entries(caseFacts)) {
-      if (value == null || key === "_classified") continue;
-      if (key === "current_facility_group" || key === "desired_facility_group") continue;
-      const fmt = FACT_TAG_LABELS[key];
-      if (fmt) chips.push(fmt(value));
-    }
-    if (caseFacts.current_facility_group != null && caseFacts.desired_facility_group != null) {
-      chips.push(`시설군 ${caseFacts.current_facility_group}→${caseFacts.desired_facility_group}`);
-    }
-
-    factTagsEl.innerHTML = "";
-    chips.forEach((text) => {
-      const span = document.createElement("span");
-      span.className = "fact-tag";
-      span.textContent = text;
-      factTagsEl.appendChild(span);
-    });
-    if (caseTypeResult) {
-      const span = document.createElement("span");
-      span.className = "fact-tag result";
-      span.textContent = caseTypeResult;
-      factTagsEl.appendChild(span);
-    }
-    // "해당없음"(식품위생법 영업신고 대상 아님)은 칩으로 안 보여줌 - 정보성이
-    // 낮고 사무실 등 무관한 업종에서 매번 뜨면 UI만 어수선해짐.
-    const showFoodTag = latestFoodResult && latestFoodResult !== "해당없음";
-    if (showFoodTag) {
-      const span = document.createElement("span");
-      span.className = "fact-tag result food";
-      span.textContent = `🍽 ${latestFoodResult}`;
-      factTagsEl.appendChild(span);
-    }
-    // 빈 배열([], 설치 대상 없음)은 food의 "해당없음"과 같은 이유로 칩 생략.
-    const showFireTag = latestFireResult && latestFireResult.length > 0;
-    if (showFireTag) {
-      const span = document.createElement("span");
-      span.className = "fact-tag result fire";
-      span.textContent = `🧯 ${latestFireResult.join(", ")}`;
-      factTagsEl.appendChild(span);
-    }
-    // "허가ᆞ신고 불필요"는 food의 "해당없음"과 같은 이유로 칩 생략.
-    const showSignageTag = latestSignageResult && latestSignageResult !== "허가ᆞ신고 불필요";
-    if (showSignageTag) {
-      const span = document.createElement("span");
-      span.className = "fact-tag result signage";
-      span.textContent = `🪧 ${latestSignageResult}`;
-      factTagsEl.appendChild(span);
-    }
-    factTagsEl.style.display = chips.length || caseTypeResult || showFoodTag || showFireTag || showSignageTag ? "flex" : "none";
-    renderRoadmap();
-  }
 
   async function loadProcedureStages() {
     try {
@@ -861,6 +792,22 @@
     const docs = latestPermitResult?.required_documents || [];
     const diag = latestPermitResult?.pre_diagnosis_items || [];
 
+    // 확인된 사실(case_facts)은 별도 "하위 태그" 줄로 떼어 보여주지 않고,
+    // 그 사실이 실제로 쓰인 Step 안에 바로 넣는다 - act_type은 Step0
+    // substep 자체가 이미 보여주고 있으니(아래), 나머지(소유여부ᆞ연면적ᆞ
+    // 용도지역ᆞ시설군 등 판정 입력값)는 Step1 안에 참고용 줄로 넣는다
+    // (2026-07-28 논의: "체킹된 내용은 해당 Step 안에").
+    const factInfoLines = [];
+    for (const [key, value] of Object.entries(caseFacts)) {
+      if (value == null || key === "_classified" || key === "act_type") continue;
+      if (key === "current_facility_group" || key === "desired_facility_group") continue;
+      const fmt = FACT_TAG_LABELS[key];
+      if (fmt) factInfoLines.push(fmt(value));
+    }
+    if (caseFacts.current_facility_group != null && caseFacts.desired_facility_group != null) {
+      factInfoLines.push(`시설군 ${caseFacts.current_facility_group}→${caseFacts.desired_facility_group}`);
+    }
+
     // Step 1의 서류ᆞ사전진단은 판정이 나오면 실제 항목명을 그대로 보여준다
     // (예전 고도계가 보여주던 상세 정보 - 요약 라벨로 뭉개면 정보 손실).
     // 단, 항목이 "나열됐다"는 것과 "완료됐다"는 것은 다르다 - AI가 서류ᆞ
@@ -868,7 +815,7 @@
     // 아무것도 확인 안 된 채로 통째로 체크되는 회귀 버그가 있었다(2026-07-27).
     // 그래서 실제 항목 목록은 info(참고용, 체크 여부 없음)로만 보여주고,
     // 완료 여부는 사용자가 직접 확인한 task_progress 체크박스 하나로만 반영한다.
-    const step1Substeps = [{ text: "허가ᆞ신고 대상 확인", done: permitStage >= 2 }];
+    const step1Substeps = [{ text: "허가ᆞ신고 대상 확인", done: permitStage >= 2, tags: factInfoLines }];
     if (docs.length) {
       docs.forEach((d) => step1Substeps.push({ text: `📄 ${d}`, info: true }));
       step1Substeps.push({ text: "서류 준비 완료", done: !!taskProgress.documents_prepared, field: "documents_prepared" });
@@ -890,13 +837,23 @@
       {
         title: "Step 1 · 건축 인허가",
         substeps: step1Substeps,
-        note: latestPermitResult ? `판정: ${latestPermitResult.permit_type}` : null,
+        // finalize_node가 서류ᆞ사전진단까지 조립하기 전에도 set_procedure_stage
+        // 로 판정 자체는 먼저 확정될 수 있어서(caseTypeResult), latestPermitResult
+        // 가 아직 없을 때는 그 값을 대신 보여준다 - 판정 결과를 최대한 빨리
+        // Step1 안에서 확인할 수 있게(예전엔 이 값도 별도 "결과" 태그로 중복 표시).
+        note: latestPermitResult ? `판정: ${latestPermitResult.permit_type}` : (caseTypeResult ? `판정: ${caseTypeResult}` : null),
       },
       {
         title: "Step 2 · 공사",
+        // 인테리어ᆞ장비 설치는 원래 Step4(오픈 준비)에 있었는데, 실제로는
+        // "시공"의 일부라 공사 단계 안에 있는 게 더 정확하다는 피드백으로
+        // 이동(2026-07-28) - get_construction_guide가 시공 전 건축사사무소
+        // 선정 필요 여부까지 같이 안내하니 이 Step 전체가 "공사 실행에
+        // 필요한 것"으로 일관된다.
         substeps: [
           { text: "착공신고", done: !!taskProgress.construction_notice, field: "construction_notice" },
           { text: "시공", done: !!taskProgress.construction, field: "construction" },
+          { text: "인테리어ᆞ장비 설치", done: !!taskProgress.interior_equipment, field: "interior_equipment" },
           { text: "사용승인", done: !!taskProgress.use_approval, field: "use_approval" },
         ],
       },
@@ -907,10 +864,13 @@
         // 세로 목록 대신 나란한 칩 클러스터로 렌더링해서 "동시에 진행되는
         // 여러 일"이라는 게 시각적으로도 드러나게 한다(2026-07-28, 시안 A2).
         parallel: true,
+        // 판정 결과(제과점영업/신고 등 실제 값)도 별도 태그가 아니라 그
+        // 항목 라벨 자체에 바로 넣는다 - 판정 전엔 일반 라벨, 판정 후엔
+        // 실제 값으로 텍스트가 바뀐다(2026-07-28).
         substeps: [
-          { text: "식품위생 영업신고", done: latestFoodResult != null },
-          { text: "소방시설", done: latestFireResult != null },
-          { text: "간판ᆞ옥외광고물", done: latestSignageResult != null },
+          { text: latestFoodResult ? `식품위생: ${latestFoodResult}` : "식품위생 영업신고", done: latestFoodResult != null },
+          { text: latestFireResult && latestFireResult.length ? `소방시설: ${latestFireResult.join("ᆞ")}` : "소방시설", done: latestFireResult != null },
+          { text: latestSignageResult ? `간판: ${latestSignageResult}` : "간판ᆞ옥외광고물", done: latestSignageResult != null },
           { text: "사업자등록", done: !!taskProgress.business_registration, field: "business_registration" },
           { text: "위생교육", done: !!taskProgress.hygiene_education, field: "hygiene_education" },
         ],
@@ -918,7 +878,6 @@
       {
         title: "Step 4 · 오픈 준비",
         substeps: [
-          { text: "인테리어ᆞ장비 설치", done: !!taskProgress.interior_equipment, field: "interior_equipment" },
           { text: "직원 등록", done: !!taskProgress.staff_registration, field: "staff_registration" },
           { text: "영업 시작", done: !!taskProgress.opened, field: "opened" },
         ],
@@ -945,11 +904,18 @@
     });
     if (currentIdx === -1) currentIdx = steps.length;
 
-    // Step를 눌러 펼치고 접을 수 있게 - 처음 렌더링될 때만 "지금 여기"
-    // 단계 하나를 기본으로 펼쳐두고, 이후 사용자가 직접 펼치고 접은 상태는
-    // 재렌더링(체크박스 클릭 등)에도 그대로 유지한다(2026-07-28 논의).
+    // Step를 눌러 수동으로도 펼치고 접을 수 있지만, 기본은 "지금 여기"
+    // 단계를 자동으로 따라간다 - 새 단계로 넘어가면 그 단계는 자동으로
+    // 펼치고, 방금 끝난(직전 current였던) 단계는 자동으로 접는다
+    // (2026-07-28 논의 - 예전엔 처음 한 번만 자동으로 펼치고 이후엔 사용자
+    // 조작만 따랐는데, 매번 손으로 펼쳐야 해서 불편하다는 피드백).
     if (expandedSteps === null) {
-      expandedSteps = new Set(currentIdx < steps.length ? [currentIdx] : []);
+      expandedSteps = new Set();
+    }
+    if (currentIdx !== lastCurrentIdx) {
+      if (lastCurrentIdx !== null) expandedSteps.delete(lastCurrentIdx);
+      if (currentIdx < steps.length) expandedSteps.add(currentIdx);
+      lastCurrentIdx = currentIdx;
     }
 
     roadmapEl.innerHTML = "";
@@ -1025,9 +991,14 @@
           li.appendChild(label);
         } else {
           // 판정 축 - 시스템이 확인한 사실만 표시, 사용자가 임의로 못 바꾼다.
+          // case_facts 근거(sub.tags)가 있으면 이 항목이 왜 체크됐는지
+          // 우측에 인라인 배지로 붙여서 바로 확인할 수 있게 한다.
           li.className = chipOrSubstep + (sub.done ? " done" : "");
           const iconCls = step.parallel ? "" : ` class="roadmap-substep-icon${sub.done ? " done" : ""}"`;
-          li.innerHTML = `<span${iconCls}>${sub.done ? "✓" : "○"}</span><span>${sub.text}</span>`;
+          const tagsHtml = sub.tags && sub.tags.length
+            ? `<span class="roadmap-substep-tags">${sub.tags.map((t) => `<span class="fact-tag-inline"><span class="roadmap-substep-fact-icon">📌</span>${t}</span>`).join("")}</span>`
+            : "";
+          li.innerHTML = `<span${iconCls}>${sub.done ? "✓" : "○"}</span><span>${sub.text}</span>${tagsHtml}`;
         }
         list.appendChild(li);
       });
@@ -1062,22 +1033,22 @@
       { label: "건축", data: status.construction_track },
       { label: "창업 준비", data: status.startup_track },
     ];
-    const trackLines = tracks
-      .filter((t) => t.data && (t.data.current_step || t.data.next_action))
-      .map((t) => `
-        <div class="next-action-track">
-          <span class="next-action-track-label">${t.label}</span>
-          ${t.data.current_step ? `${t.data.current_step} · ` : ""}👉 ${t.data.next_action}
-        </div>
-      `)
-      .join("");
+    // 트랙이 2개(건축ᆞ창업 준비)라도 아티팩트 A 예시처럼 한 줄로 합쳐
+    // 보여준다 - "다음 할 일 — {트랙}: {행동} · {트랙}: {행동}"(2026-07-28
+    // 피드백: "2개라도 한 줄로 표기해줘").
+    const trackParts = tracks
+      .filter((t) => t.data && t.data.next_action)
+      .map((t) => `${t.label}: <strong>${t.data.next_action}</strong>`);
+    const headline = trackParts.length
+      ? `👉 다음 할 일 — ${trackParts.join(" · ")}`
+      : "🎉 모든 절차를 완료했어요!";
     nextActionEl.innerHTML = `
       <div class="next-action-pct">${pct}%</div>
       <div class="next-action-body">
         <div class="next-action-progress">
           <div class="next-action-bar"><div class="next-action-fill" style="width:${pct}%"></div></div>
         </div>
-        ${trackLines || '<div class="next-action-task">🎉 모든 절차를 완료했어요!</div>'}
+        <div class="next-action-headline">${headline}</div>
       </div>
     `;
   }
@@ -1135,7 +1106,7 @@
         renderBranchPrompt(caseType, nodeId);
       } catch (err) { /* ignore */ }
     }
-    renderFactTags();
+    renderRoadmap();
   }
 
   function resetStageIndicator() {
@@ -1150,7 +1121,8 @@
     latestSignageResult = null;
     taskProgress = {};
     expandedSteps = null;
-    renderFactTags();
+    lastCurrentIdx = null;
+    renderRoadmap();
     renderNextAction(null);
   }
 
@@ -1326,7 +1298,7 @@
           factsChanged = true;
         }
       });
-      if (factsChanged) renderFactTags();
+      if (factsChanged) renderRoadmap();
 
       if (data.permit_result) {
         latestPermitResult = data.permit_result;
@@ -1335,19 +1307,19 @@
       if (data.food_result) {
         latestFoodResult = data.food_result;
         localStorage.setItem("permit_assistant_food_result", latestFoodResult);
-        renderFactTags();
+        renderRoadmap();
       }
       // fire_result는 배열이라 null이 아니면(빈 배열 []도 포함) 판정 완료로 본다 -
       // JS에서 빈 배열도 truthy이므로 이 조건이 그대로 맞게 동작한다.
       if (data.fire_result) {
         latestFireResult = data.fire_result;
         localStorage.setItem("permit_assistant_fire_result", JSON.stringify(latestFireResult));
-        renderFactTags();
+        renderRoadmap();
       }
       if (data.signage_result) {
         latestSignageResult = data.signage_result;
         localStorage.setItem("permit_assistant_signage_result", latestSignageResult);
-        renderFactTags();
+        renderRoadmap();
       }
       // task_progress는 서버(merge_facts)가 이미 누적해서 전체 dict로 돌려주므로
       // 그대로 덮어쓴다 - 단, 아직 아무 것도 기록 안 된 턴엔 null/{}로 오니
@@ -1355,7 +1327,7 @@
       if (data.task_progress && Object.keys(data.task_progress).length > 0) {
         taskProgress = data.task_progress;
         localStorage.setItem("permit_assistant_task_progress", JSON.stringify(taskProgress));
-        renderFactTags();
+        renderRoadmap();
       }
       renderRoadmap();
       renderNextAction(data.project_status);
