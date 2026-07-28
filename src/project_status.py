@@ -64,7 +64,11 @@ def _step_substeps(state: dict) -> list[list[tuple[str, bool]]]:
         ],
         [
             ("인테리어ᆞ장비 설치", bool(tp.get("interior_equipment"))),
-            ("직원 등록(4대보험 가입)", bool(tp.get("staff_registration"))),
+            # 직원을 안 두는 1인ᆞ가족 운영 사업자는 4대보험 가입 신고 자체가
+            # 대상이 아니다 - hires_staff=False로 명시되면 이 항목이 영원히
+            # 미완료로 남아 진행률이 100%를 못 채우는 문제가 있었다
+            # (2026-07-28, 세션 2cda4d67류에서 신고).
+            ("직원 등록(4대보험 가입)", bool(tp.get("staff_registration")) or tp.get("hires_staff") is False),
             ("영업 시작", bool(tp.get("opened"))),
         ],
     ]

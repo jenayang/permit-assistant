@@ -11,6 +11,7 @@
 - opening_checklist: 오픈 준비(Step 4) 체크리스트(정적 콘텐츠) - 인테리어ᆞ장비설치ᆞ직원등록ᆞ영업시작.
 - signage: 간판ᆞ옥외광고물 허가/신고 판정(규칙 기반) - 벽면이용간판ᆞ돌출간판ᆞ지주이용간판ᆞ입간판ᆞ현수막.
 - roadmap_progress: 사용자가 실제로 완료했다고 밝힌 창업 절차 항목 추적(착공ᆞ사업자등록ᆞ영업개시 등) - 판정이 아니라 자기보고 기반.
+- interaction: 선택지 질문(예: 소유자/임차인)을 버튼으로도 답할 수 있게 하는 범용 UI 힌트 도구(ask_choice) - 특정 도메인에 속하지 않음.
 
 아직 별도 서브그래프/오케스트레이터는 아니고, agent.py의 단일 ReAct 루프가
 이 모듈들을 도구로 바인딩해서 쓰는 구조. 향후 Planner 도입 시 이 경계를
@@ -22,6 +23,7 @@ from src.agents.business_registration import get_business_registration_guide
 from src.agents.construction import get_construction_guide
 from src.agents.fire_safety import classify_fire_safety, fire_safety_message, record_fire_facts
 from src.agents.hygiene_education import get_hygiene_education_guide
+from src.agents.interaction import ask_choice
 from src.agents.opening_checklist import get_opening_checklist
 from src.agents.food_safety import classify_food_business, food_business_message, record_food_facts
 from src.agents.permit import (
@@ -56,4 +58,5 @@ TOOLS = [
     get_opening_checklist,
     record_signage_facts,
     record_task_progress,
+    ask_choice,
 ]

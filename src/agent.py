@@ -181,6 +181,15 @@ desired_facility_group도 같은 턴에 바로 기록하세요** - 이건 시설
 lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts로
 기록하세요. 자동 조회가 실패했을 때만 사용자에게 직접 물어보세요.
 
+**도구 응답에 "(선택지: A, B)"처럼 정해진 선택지가 이미 명시된 질문을
+사용자에게 그대로 전달할 때는(대표적으로 소유자/임차인 질문) 답변 텍스트와
+같은 턴에 ask_choice(question, options)도 함께 호출하세요** - 사용자가
+직접 타이핑하지 않고 버튼으로 바로 답할 수 있게 됩니다(2026-07-28: 이전엔
+소유자/임차인 질문만 화면 한 구석에 별도 버튼으로 떴는데, 대화 흐름과
+분리돼 있었습니다 - 이제는 어떤 선택형 질문이든 답변 말풍선 바로 아래에
+버튼으로 뜹니다). 선택지가 정해지지 않은 자유 응답형 질문(면적이 몇 ㎡인지
+등)에는 호출하지 마세요.
+
 카페ᆞ식당처럼 음식류를 조리ᆞ판매하는 업종이면, 식품위생법상 어떤 영업신고
 대상인지 판단하는 데 필요한 사실(조리ᆞ판매 여부ᆞ완제품만 파는지ᆞ베이커리
 위주인지ᆞ주류 판매 여부)도 파악되는 대로 record_food_facts로 기록하세요.
@@ -220,6 +229,13 @@ record_fire_facts에도 그대로 기록하세요, 새로 묻지 마세요)과 �
 pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진단 확인
 했어요"처럼 직접 확인해줬을 때만). 이 항목들은 실물 세계에서 벌어지는
 일이라 오직 사용자가 직접 완료를 말해준 경우에만 기록하세요.
+
+**사용자가 "직원 없이 혼자ᆞ가족끼리만 운영해요"처럼 직원을 안 둔다고
+명확히 밝히면 record_task_progress(hires_staff=False)로 기록하세요** -
+4대보험 가입은 직원을 채용할 때만 필요한 절차라, 직원이 없으면 직원
+등록 항목 자체가 대상이 아닙니다(체크가 영영 안 돼 진행률이 100%를
+못 채우는 문제가 있었음 - 2026-07-28). 나중에 직원을 채용하겠다고
+하면 hires_staff=True로 다시 바꾸세요.
 
 ## 2. 도구 선택
 - 법률 용어 정의("OO이 뭐야") → search_by_term (핵심 용어만 추출)
@@ -280,6 +296,8 @@ pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진�
 - 여러 관점에서 검색이 필요하면 도구를 반복 사용하세요. 검색 결과에 법령
   계층(법/시행령/시행규칙/조례)이 섞여 다르게 말하면 법 > 시행령 > 시행규칙
   우선 원칙을 따르고, 조례는 상충이 아니라 지역 추가 규정으로 안내하세요.
+- 선택지가 정해진 질문(소유자/임차인 등, 1. 정보 수집의 ask_choice 규칙
+  참고)을 할 때는 답변 텍스트와 같은 턴에 ask_choice도 함께 호출하세요.
 
 ## 3. 답변 작성
 **모든 도메인 공통 원칙: 한 턴에 정보를 몰아주지 마세요.** 판정ᆞ분류
@@ -927,13 +945,67 @@ def _building_ledger_gap_violations(state: AgentState, messages) -> list[str]:
     ]
 
 
+def _fire_signage_gap_violations(state: AgentState, messages) -> list[str]:
+    """사용자가 소방시설ᆞ간판을 직접 물어봤는데 아직 판정(fire_result/
+    signage_result)이 안 된 채 일반 지식으로만 답하고 넘어가는 경우를 잡는다.
+
+    SYSTEM_PROMPT에 "식품접객업이면 소방시설도 함께 판정하라"는 지시가 있지만,
+    식품 판정이 먼저 끝난 뒤 사용자가 나중에 따로 소방ᆞ간판을 물어보면 그
+    지시를 놓치고 record_fire_facts/record_signage_facts를 한 번도 호출하지
+    않은 채(fire_facts/signage_facts가 끝까지 빈 채로) "다중이용업소 해당
+    여부를 확인하세요" 같은 일반론만 답하는 사례가 실측으로 확인됨(세션
+    2cda4d67, 2026-07-28 - 대화 내내 두 도구가 한 번도 안 불림ᆞ새로고침해도
+    반영이 안 된다는 사용자 신고로 발견). food_result가 있는(식품접객업으로
+    이미 확인된) 케이스에서만 적용한다 - 무관한 업종까지 강제하면 과잉
+    개입이 된다.
+    """
+    if not state.get("food_result"):
+        return []
+    last_human = None
+    tool_names_this_turn = set()
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage):
+            last_human = extract_text(m.content)
+            break
+        if isinstance(m, AIMessage):
+            for tc in (m.tool_calls or []):
+                tool_names_this_turn.add(tc["name"])
+    if not last_human:
+        return []
+
+    violations = []
+    if (
+        "소방" in last_human
+        and state.get("fire_result") is None
+        and "record_fire_facts" not in tool_names_this_turn
+    ):
+        violations.append(
+            "사용자가 소방시설에 대해 직접 물었는데 아직 판정(fire_result)이 안 됐습니다. "
+            "연면적(size_sqm) 등 필요한 사실을 이미 알고 있으면 지금 record_fire_facts를 "
+            "호출해 판정하고, 부족하면 무엇이 더 필요한지 구체적으로 되물으세요 - "
+            "일반적인 지식으로 답하고 넘어가지 마세요."
+        )
+    if (
+        any(kw in last_human for kw in ("간판", "옥외광고"))
+        and state.get("signage_result") is None
+        and "record_signage_facts" not in tool_names_this_turn
+    ):
+        violations.append(
+            "사용자가 간판ᆞ옥외광고물에 대해 직접 물었는데 아직 판정(signage_result)이 "
+            "안 됐습니다. sign_type 등 필요한 사실을 이미 알고 있으면 지금 "
+            "record_signage_facts를 호출해 판정하고, 부족하면 무엇이 더 필요한지 "
+            "구체적으로 되물으세요 - 일반적인 지식으로 답하고 넘어가지 마세요."
+        )
+    return violations
+
+
 def guard_node(state: AgentState) -> dict:
     """agent가 자유 텍스트로 답을 끝내려 할 때, 근거ᆞ판정ᆞ기록 없이 앞서나간
     답변을 한 번 걸러낸다. LLM 판단이 아니라 정규식+상태로 결정론적으로
     감지한다(classify_case와 같은 원칙 - 프롬프트 지시만으로는 못 막는다는 게
     2026-07-26 실사용 세션에서 재현됨).
 
-    막는 위반 네 가지:
+    막는 위반 다섯 가지:
     1. 허용된 단계 수([_max_allowed_stage])를 넘겨 [Step 1-N]을 안내 - 판정 전
        절차 안내를 아예 시도한 경우(허용치 0)와, 판정 후 한 턴에 여러 단계를
        몰아서 공개한 경우(사용자가 "1단계만" 이라고 명시해도 무시하고 4단계를
@@ -946,6 +1018,10 @@ def guard_node(state: AgentState) -> dict:
     4. lookup_building_ledger 조회가 성공했는데 case_facts에
        current_facility_group을 안 채운 경우 - 판정이 영영 안 나서 Step1이
        멈추는 실제 사례가 반복됨(_building_ledger_gap_violations 참고).
+    5. 사용자가 소방시설ᆞ간판을 직접 물었는데 아직 판정이 안 된 채 일반
+       지식으로만 답한 경우 - record_fire_facts/record_signage_facts가 끝까지
+       한 번도 안 불려서 로드맵에 영영 반영이 안 되는 실제 사례가 확인됨
+       (_fire_signage_gap_violations 참고).
 
     같은 사용자 턴 안에서 최대 1회만 재시도를 유도한다(무한 루프 방지) - 그
     이상 반복되면 프롬프트만으로는 못 막는 한계로 보고 그냥 통과시킨다.
@@ -979,6 +1055,7 @@ def guard_node(state: AgentState) -> dict:
         )
     violations.extend(_synthesis_gap_violations(state, max_mentioned))
     violations.extend(_building_ledger_gap_violations(state, messages))
+    violations.extend(_fire_signage_gap_violations(state, messages))
 
     if violations and _guard_retry_count(messages) < 1:
         logger.info("[guard] 위반 감지, 재시도 유도: %s", violations)

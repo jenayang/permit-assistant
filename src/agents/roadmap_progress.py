@@ -34,6 +34,7 @@ TASK_PROGRESS_FIELDS: list[str] = [
     "construction_notice", "construction", "use_approval",
     "business_registration", "hygiene_education",
     "interior_equipment", "staff_registration", "opened",
+    "hires_staff",
 ]
 
 
@@ -49,6 +50,7 @@ def record_task_progress(
     interior_equipment: bool | None = None,
     staff_registration: bool | None = None,
     opened: bool | None = None,
+    hires_staff: bool | None = None,
 ) -> str:
     """사용자가 실제로 완료했다고 명시적으로 말한 창업 절차 항목을 기록하세요.
 
@@ -69,6 +71,12 @@ def record_task_progress(
     - False로 기록할 필요는 거의 없습니다(언급이 없으면 자동으로 미완료
       상태) - 사용자가 "아직 안 했어요"처럼 명시적으로 되돌리는 경우에만
       False를 쓰세요.
+    - **직원을 안 두고 혼자ᆞ가족끼리만 운영한다고 명확히 밝히면
+      hires_staff=False로 기록하세요** - 4대보험 가입 신고는 직원을 채용할
+      때만 필요한 절차라, 직원이 없으면 staff_registration 자체가 대상이
+      아닙니다(체크가 영영 안 돼서 진행률이 100%를 못 채우는 문제가 있었음,
+      2026-07-28). 나중에 직원을 채용하겠다고 하면 hires_staff=True로
+      다시 바꾸세요.
 
     Args:
         documents_prepared: 건축 인허가 필수 서류 준비를 완료했는지
@@ -81,6 +89,7 @@ def record_task_progress(
         interior_equipment: 인테리어ᆞ장비 설치를 완료했는지
         staff_registration: 직원 등록(4대보험 가입)을 완료했는지
         opened: 실제로 영업을 시작했는지
+        hires_staff: 직원을 채용하는지(False면 직원 등록 항목이 대상 제외로 처리됨)
     """
     logger.info("[도구] record_task_progress(%r)", {
         k: v for k, v in locals().items() if v is not None
