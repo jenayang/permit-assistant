@@ -15,6 +15,13 @@
     --accent-text: #ffffff;
     --bot-bubble: #f0f2f5;
     --error: #dc2626;
+    /* 로드맵 "완료" 상태색 - 원래 초록(#1f9d55)이었는데 전체 팔레트를 파란
+       계열로 통일해달라는 요청(2026-07-28)으로 --accent(진행중)보다 짙은
+       남색으로 교체. 완료ᆞ진행중ᆞ대기를 색상(hue)이 아니라 명도로 구분한다. */
+    --done: #1e40af;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    --shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 4px 14px rgba(16, 24, 40, .05);
+    --surface-2: #eef1f5;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -24,26 +31,26 @@
     background: var(--bg);
     color: var(--text);
   }
+  /* 시안 A(2단 대시보드) 화면 비율ᆞ구조를 그대로 반영(2026-07-28) - 가운데
+     정렬된 1180px 컨테이너, 상단에 헤더+진행률 카드(전체 폭), 그 아래
+     "채팅 카드(1fr) + 로드맵 카드(360px 고정)" 그리드. 예전엔 채팅이
+     그냥 전체 배경 위에 떠 있었는데, 이제 채팅도 카드로 감싸 로드맵
+     패널과 시각적으로 동급인 두 개의 패널처럼 보이게 한다. */
   .layout {
-    display: flex;
-    height: 100vh;
-  }
-  .app {
-    flex: 1;
-    min-width: 0;
-    max-width: 760px;
+    max-width: 1180px;
     margin: 0 auto;
+    padding: 20px 20px 0;
     height: 100vh;
     display: flex;
     flex-direction: column;
+    box-sizing: border-box;
   }
   header {
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border);
-    background: var(--panel);
+    padding-bottom: 14px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-shrink: 0;
   }
   header h1 {
     font-size: 16px;
@@ -66,13 +73,47 @@
   }
   #newChatBtn:hover { background: var(--bg); }
 
-  /* 사이드 패널: 인허가 등반 로드맵 */
-  .side-panel {
-    width: 240px;
+  .main-grid {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 20px;
+    padding-bottom: 20px;
+  }
+  .app {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface-2);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .chat-panel-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 14px 20px 0;
     flex-shrink: 0;
-    border-left: 1px solid var(--border);
+  }
+  #composer { background: var(--surface-2); }
+
+  /* 사이드 패널: 창업 로드맵 - main-grid의 두 번째 열(360px)을 그대로 채우는
+     카드. 예전엔 폭 고정 flex sibling + 왼쪽 테두리선이었는데, 시안 A처럼
+     채팅 패널과 동급인 독립 카드(둥근 테두리+그림자)로 바꿨다. */
+  .side-panel {
+    min-width: 0;
+    min-height: 0;
+    border: 1px solid var(--border);
+    border-radius: 14px;
     background: var(--panel);
-    padding: 20px 16px;
+    box-shadow: var(--shadow);
+    padding: 18px 16px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -121,6 +162,64 @@
     background: #7c3aed;
     color: #ffffff;
   }
+  /* Next Action 위젯 - "질문에 답하는 챗봇"이 아니라 "먼저 알려주는 프로젝트
+     매니저"가 되자는 원칙(2026-07-28 논의)에 따라, 사용자가 안 물어봐도
+     항상 보이는 위치에 지금 단계ᆞ진행률ᆞ다음 할 일을 고정 표시한다.
+     compute_project_status()가 계산한 값을 그대로 반영만 하고, 프론트에서
+     새로 판단하지 않는다(로드맵 패널과 서로 다른 숫자를 말하면 안 됨). */
+  .next-action {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+  }
+  .next-action-pct {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .next-action-body { flex: 1; min-width: 0; }
+  .next-action-progress { margin-bottom: 6px; }
+  .next-action-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--bg);
+    overflow: hidden;
+  }
+  .next-action-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+  .next-action-track {
+    font-size: 12.5px;
+    font-weight: 600;
+    margin-top: 3px;
+  }
+  .next-action-track-label {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    color: var(--text-muted);
+    background: var(--surface-2);
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-right: 4px;
+  }
+  .next-action-task {
+    font-size: 12.5px;
+    font-weight: 600;
+  }
   /* 전체 창업 로드맵(Step 0~4) - "AI가 확인된 사실만 진행률에 반영한다"는
      원칙에 따라, 판정(permit_result/food_result/fire_result/signage_result)이
      난 항목과 사용자가 완료를 직접 말한 항목(task_progress)만 체크된다 -
@@ -151,28 +250,40 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: 14px;
+    width: 20px;
     flex-shrink: 0;
   }
+  /* 시안 A(2단 대시보드) 검증 후 실제 반영(2026-07-28) - 작은 점 옆에 따로
+     아이콘 글자를 붙이던 것을, 상태 글자(✓/●/·)를 품은 20px 원형 배지
+     하나로 통합. 이어지는 세로선(로드맵을 "따라 내려가는" 느낌)은 시안에
+     없던 부분이지만 이전에 이미 좋은 반응을 받은 기능이라 그대로 유지. */
   .roadmap-rail-dot {
-    width: 10px;
-    height: 10px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
     background: var(--border);
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 800;
     box-shadow: 0 0 0 3px var(--panel);
     flex-shrink: 0;
-    margin-top: 3px;
   }
-  .roadmap-rail-dot.done { background: #1f9d55; }
+  .roadmap-rail-dot.done { background: var(--done); color: #fff; }
   .roadmap-rail-dot.current {
     background: var(--accent);
+    color: #fff;
     animation: railPulse 1.8s ease-in-out infinite;
   }
   /* 순서를 벗어나 먼저 일부만 확인된 단계(예: 인허가보다 식품위생이 먼저
      판정난 경우) - "지금 여기"는 아니지만 진행이 있었다는 것만 조용히 표시,
      반짝이지 않는다(단계가 동시에 여러 곳에서 반짝이면 순서가 끊겨 보임). */
   .roadmap-rail-dot.partial {
-    background: color-mix(in srgb, #1f9d55 50%, var(--border));
+    background: color-mix(in srgb, var(--done) 50%, var(--border));
+    color: var(--panel);
   }
   @keyframes railPulse {
     0%, 100% { box-shadow: 0 0 0 3px var(--panel), 0 0 0 3px var(--panel); }
@@ -181,11 +292,19 @@
   .roadmap-rail-line {
     flex: 1;
     width: 2px;
-    min-height: 14px;
+    min-height: 10px;
     background: var(--border);
     margin: 2px 0;
   }
-  .roadmap-rail-line.done { background: #1f9d55; }
+  .roadmap-rail-line.done { background: var(--done); }
+  /* Step 2↔3, 3↔4 사이 연결선 - 병렬 트랙으로 들어가고 나오는 구간이라
+     "고정된 순서가 아니다"를 점선으로 표시(2026-07-28, 시안 A2). */
+  .roadmap-rail-line.dashed {
+    background: repeating-linear-gradient(to bottom, var(--border) 0 4px, transparent 4px 8px);
+  }
+  .roadmap-rail-line.dashed.done {
+    background: repeating-linear-gradient(to bottom, var(--done) 0 4px, transparent 4px 8px);
+  }
   .roadmap-step-body {
     flex: 1;
     min-width: 0;
@@ -200,7 +319,55 @@
   }
   .roadmap-step.done .roadmap-step-head { color: var(--text-muted); }
   .roadmap-step.current .roadmap-step-head { color: var(--accent); }
-  .roadmap-step-icon { font-size: 11px; flex-shrink: 0; }
+  .roadmap-step-head { cursor: pointer; user-select: none; }
+  .roadmap-parallel-badge {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--text-muted);
+  }
+  .roadmap-step-chevron {
+    margin-left: auto;
+    font-size: 9px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  .roadmap-parallel-cluster {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 6px 0 0;
+  }
+  .roadmap-parallel-cluster.collapsed { display: none; }
+  .roadmap-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 9px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text-muted);
+  }
+  .roadmap-chip.done {
+    border-color: var(--done);
+    background: color-mix(in srgb, var(--done) 10%, var(--panel));
+    color: var(--done);
+  }
+  .roadmap-chip.checkable { cursor: pointer; }
+  .roadmap-chip.checkable input[type="checkbox"] {
+    width: 11px;
+    height: 11px;
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
   .roadmap-substeps {
     list-style: none;
     margin: 5px 0 0;
@@ -209,6 +376,7 @@
     flex-direction: column;
     gap: 4px;
   }
+  .roadmap-substeps.collapsed { display: none; }
   .roadmap-substep {
     font-size: 11px;
     color: var(--text-muted);
@@ -217,7 +385,8 @@
     gap: 5px;
   }
   .roadmap-substep.done { color: var(--text); }
-  .roadmap-substep-icon { flex-shrink: 0; }
+  .roadmap-substep-icon { flex-shrink: 0; font-weight: 700; }
+  .roadmap-substep-icon.done { color: var(--done); }
   .roadmap-substep.info { padding-left: 17px; opacity: 0.8; }
   /* 사용자가 직접 완료를 표시할 수 있는 항목(task_progress 기반)만 실제
      체크박스 - 판정 축(permit/food/fire/signage)이 있는 항목은 시스템이
@@ -246,6 +415,7 @@
   }
   @media (max-width: 900px) {
     .side-panel { display: none; }
+    .main-grid { grid-template-columns: 1fr; }
   }
 
   .branch-prompt {
@@ -291,8 +461,10 @@
     border-bottom-right-radius: 4px;
   }
   .msg.bot .bubble {
-    background: var(--bot-bubble);
+    background: var(--panel);
     color: var(--text);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
     border-bottom-left-radius: 4px;
   }
   .msg.bot .bubble.error {
@@ -324,6 +496,35 @@
     font-size: 11px;
     color: var(--text-muted);
     margin-top: 4px;
+  }
+  /* 법령 원문 카드 - [출처: ...] 인용의 실제 근거(law_contexts, GROUNDING_TOOL_NAMES
+     도구 응답만)를 펼쳐서 보여준다. answer 텍스트를 그대로 믿지 말고 실제
+     검색된 원문을 확인할 수 있게(2026-07-28, 시안 A 반영). */
+  .law-card {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-top: 6px;
+    background: var(--panel);
+    font-size: 12px;
+  }
+  .law-card summary {
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .02em;
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .law-card summary::-webkit-details-marker { display: none; }
+  .law-card-body {
+    margin: 8px 0 0;
+    white-space: pre-wrap;
+    line-height: 1.6;
+    color: var(--text-muted);
+    max-height: 240px;
+    overflow-y: auto;
   }
   .typing { display: flex; gap: 4px; padding: 12px 14px; }
   .typing span {
@@ -381,6 +582,9 @@
       --text: #e8e9ec;
       --text-muted: #9aa0a8;
       --bot-bubble: #2a2c32;
+      --done: #60a5fa;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 18px rgba(0, 0, 0, .35);
+      --surface-2: #26282f;
     }
     .msg.bot .bubble.error { background: #3a1f1f; }
   }
@@ -388,37 +592,42 @@
 </head>
 <body>
 <div class="layout">
-  <div class="app">
-    <header>
-      <div>
-        <h1>서울시 건축 인허가 어시스턴트</h1>
-        <div class="sub" id="userIdLabel"></div>
-      </div>
-      <button id="newChatBtn" type="button">새 대화</button>
-    </header>
+  <header>
+    <div>
+      <h1>서울시 건축 인허가 어시스턴트</h1>
+      <div class="sub" id="userIdLabel"></div>
+    </div>
+    <button id="newChatBtn" type="button">새 대화</button>
+  </header>
 
-    <div id="chat">
-      <div class="empty-hint" id="emptyHint">
-        지역, 시설 유형, 규모를 알려주시면 인허가 절차를 안내해드려요.<br>
-        예) "강남구에 20평 카페 창업하려는데 뭐부터 해야 해?"
+  <div class="next-action" id="nextAction"></div>
+
+  <div class="main-grid">
+    <div class="app">
+      <div class="chat-panel-title">AI Assistant</div>
+      <div id="chat">
+        <div class="empty-hint" id="emptyHint">
+          지역, 시설 유형, 규모를 알려주시면 인허가 절차를 안내해드려요.<br>
+          예) "강남구에 20평 카페 창업하려는데 뭐부터 해야 해?"
+        </div>
       </div>
+
+      <form id="composer">
+        <textarea id="question" rows="1" placeholder="질문을 입력하세요 (Enter로 전송, Shift+Enter로 줄바꿈)"></textarea>
+        <button id="sendBtn" type="submit">전송</button>
+      </form>
     </div>
 
-    <form id="composer">
-      <textarea id="question" rows="1" placeholder="질문을 입력하세요 (Enter로 전송, Shift+Enter로 줄바꿈)"></textarea>
-      <button id="sendBtn" type="submit">전송</button>
-    </form>
+    <aside class="side-panel">
+      <div class="roadmap-title">📍 창업 로드맵</div>
+      <div class="roadmap" id="roadmap"></div>
+      <div class="fact-tags" id="factTags" style="display:none;"></div>
+      <div class="branch-prompt" id="branchPrompt" style="display:none;"></div>
+      <div class="stage-caption">✓ᆞ●는 시스템이 확인한 사실, 체크박스는 직접
+        눌러서 진행상황을 표시할 수 있어요.<br>실제 절차는 사안에 따라 다를 수
+        있어 참고용입니다.</div>
+    </aside>
   </div>
-
-  <aside class="side-panel">
-    <div class="roadmap-title">📍 창업 로드맵</div>
-    <div class="roadmap" id="roadmap"></div>
-    <div class="fact-tags" id="factTags" style="display:none;"></div>
-    <div class="branch-prompt" id="branchPrompt" style="display:none;"></div>
-    <div class="stage-caption">✅ᆞ🟢는 시스템이 확인한 사실, 체크박스는 직접
-      눌러서 진행상황을 표시할 수 있어요.<br>실제 절차는 사안에 따라 다를 수
-      있어 참고용입니다.</div>
-  </aside>
 </div>
 
 <script>
@@ -433,6 +642,7 @@
   const branchPromptEl = document.getElementById("branchPrompt");
   const factTagsEl = document.getElementById("factTags");
   const roadmapEl = document.getElementById("roadmap");
+  const nextActionEl = document.getElementById("nextAction");
 
   function getUserId() {
     let id = localStorage.getItem("permit_assistant_user_id");
@@ -457,6 +667,7 @@
   let latestFireResult = null; // /query 응답의 fire_result(필요 소방시설 목록, 배열)를 그대로 보관
   let latestSignageResult = null; // /query 응답의 signage_result(간판ᆞ옥외광고물 허가/신고 판정)를 그대로 보관
   let taskProgress = {}; // /query 응답의 task_progress(사용자가 실제로 완료했다고 밝힌 항목)를 그대로 보관
+  let expandedSteps = null; // 로드맵 Step 아코디언 펼침 상태(Set<index>) - null이면 renderRoadmap()이 첫 렌더링 때 "지금 여기" 단계로 초기화
 
   // case_facts 필드 → 태그 텍스트 변환. 여기 없는 필드는 태그로 안 보임(값
   // 하나만으로는 뜻이 안 통하는 필드는 아래에서 조합해서 별도 처리).
@@ -691,6 +902,11 @@
       },
       {
         title: "Step 3 · 창업 행정",
+        // 이 항목들은 건축 트랙(Step 0~2)과 무관하게 병렬로 진행 가능하다
+        // (예: 인허가 얘기 전에 식품위생부터 판정나는 실제 사례가 흔함) -
+        // 세로 목록 대신 나란한 칩 클러스터로 렌더링해서 "동시에 진행되는
+        // 여러 일"이라는 게 시각적으로도 드러나게 한다(2026-07-28, 시안 A2).
+        parallel: true,
         substeps: [
           { text: "식품위생 영업신고", done: latestFoodResult != null },
           { text: "소방시설", done: latestFireResult != null },
@@ -729,6 +945,13 @@
     });
     if (currentIdx === -1) currentIdx = steps.length;
 
+    // Step를 눌러 펼치고 접을 수 있게 - 처음 렌더링될 때만 "지금 여기"
+    // 단계 하나를 기본으로 펼쳐두고, 이후 사용자가 직접 펼치고 접은 상태는
+    // 재렌더링(체크박스 클릭 등)에도 그대로 유지한다(2026-07-28 논의).
+    if (expandedSteps === null) {
+      expandedSteps = new Set(currentIdx < steps.length ? [currentIdx] : []);
+    }
+
     roadmapEl.innerHTML = "";
     steps.forEach((step, idx) => {
       const items = countable(step);
@@ -737,7 +960,7 @@
       const allDone = doneCount === total;
       const hasProgress = doneCount > 0 && !allDone;
       const isCurrent = idx === currentIdx && !allDone;
-      const icon = allDone ? "✅" : hasProgress ? "🟢" : "○";
+      const iconGlyph = allDone ? "✓" : isCurrent || hasProgress ? "●" : "·";
 
       const stepEl = document.createElement("div");
       stepEl.className = "roadmap-step" + (allDone ? " done" : "") + (isCurrent ? " current" : "");
@@ -746,10 +969,14 @@
       rail.className = "roadmap-rail";
       const dot = document.createElement("span");
       dot.className = "roadmap-rail-dot" + (allDone ? " done" : isCurrent ? " current" : hasProgress ? " partial" : "");
+      dot.textContent = iconGlyph;
       rail.appendChild(dot);
       if (idx < steps.length - 1) {
+        // 병렬 트랙으로 들어가거나 나오는 연결선은 점선으로 - "이 구간은
+        // 순서가 고정된 게 아니다"를 선 굵기가 아니라 선의 종류로 표현한다.
+        const dashed = step.parallel || steps[idx + 1]?.parallel;
         const line = document.createElement("span");
-        line.className = "roadmap-rail-line" + (allDone ? " done" : "");
+        line.className = "roadmap-rail-line" + (allDone ? " done" : "") + (dashed ? " dashed" : "");
         rail.appendChild(line);
       }
       stepEl.appendChild(rail);
@@ -757,23 +984,34 @@
       const body = document.createElement("div");
       body.className = "roadmap-step-body";
 
+      const isExpanded = expandedSteps.has(idx);
       const head = document.createElement("div");
       head.className = "roadmap-step-head";
-      head.innerHTML = `<span class="roadmap-step-icon">${icon}</span><span>${step.title}</span>`;
+      const parallelBadge = step.parallel ? `<span class="roadmap-parallel-badge">병렬 가능</span>` : "";
+      head.innerHTML = `<span>${step.title}</span>${parallelBadge}<span class="roadmap-step-chevron">${isExpanded ? "▾" : "▸"}</span>`;
+      head.addEventListener("click", () => {
+        if (expandedSteps.has(idx)) expandedSteps.delete(idx);
+        else expandedSteps.add(idx);
+        renderRoadmap();
+      });
       body.appendChild(head);
 
-      const list = document.createElement("ul");
-      list.className = "roadmap-substeps";
+      // 병렬 진행 가능한 Step(창업 행정)은 세로 목록이 아니라 나란한 칩
+      // 클러스터로 - "여러 일이 동시에 진행 중"이라는 게 눈에 보이게 한다
+      // (2026-07-28, 시안 A2). 판정 축ᆞtask_progress 축 구분은 기존과 동일.
+      const list = document.createElement(step.parallel ? "div" : "ul");
+      list.className = (step.parallel ? "roadmap-parallel-cluster" : "roadmap-substeps") + (isExpanded ? "" : " collapsed");
       step.substeps.forEach((sub) => {
-        const li = document.createElement("li");
+        const li = document.createElement(step.parallel ? "span" : "li");
+        const chipOrSubstep = step.parallel ? "roadmap-chip" : "roadmap-substep";
         if (sub.info) {
           // 참고용 목록(실제 서류ᆞ사전진단 항목명) - 완료 개념이 없으니
           // 체크/미체크 아이콘 없이 그대로 표시만 한다.
-          li.className = "roadmap-substep info";
+          li.className = `${chipOrSubstep} info`;
           li.textContent = sub.text;
         } else if (sub.field) {
           // task_progress 축 - 사용자가 직접 완료 여부를 토글할 수 있다.
-          li.className = "roadmap-substep checkable" + (sub.done ? " done" : "");
+          li.className = `${chipOrSubstep} checkable` + (sub.done ? " done" : "");
           const checkboxId = `roadmap-check-${sub.field}`;
           const checkbox = document.createElement("input");
           checkbox.type = "checkbox";
@@ -787,8 +1025,9 @@
           li.appendChild(label);
         } else {
           // 판정 축 - 시스템이 확인한 사실만 표시, 사용자가 임의로 못 바꾼다.
-          li.className = "roadmap-substep" + (sub.done ? " done" : "");
-          li.innerHTML = `<span class="roadmap-substep-icon">${sub.done ? "✅" : "○"}</span><span>${sub.text}</span>`;
+          li.className = chipOrSubstep + (sub.done ? " done" : "");
+          const iconCls = step.parallel ? "" : ` class="roadmap-substep-icon${sub.done ? " done" : ""}"`;
+          li.innerHTML = `<span${iconCls}>${sub.done ? "✓" : "○"}</span><span>${sub.text}</span>`;
         }
         list.appendChild(li);
       });
@@ -804,6 +1043,43 @@
       stepEl.appendChild(body);
       roadmapEl.appendChild(stepEl);
     });
+  }
+
+  // /project-status(또는 /query 응답에 같이 오는 project_status)를 그대로
+  // 반영만 한다 - 진행률ᆞ현재 단계ᆞ다음 할 일을 여기서 새로 판단하지 않는다
+  // (로드맵 패널과 서로 다른 숫자를 말하면 신뢰가 깨진다, 2026-07-28 논의:
+  // "같은 데이터를 다르게 보여주는 문제"가 되도록 단일 소스만 쓰기로 함).
+  // 건축 트랙ᆞ창업 준비 트랙을 각각 따로 보여준다 - 예전엔 Step 0~4를 한
+  // 줄로만 훑어서 "현재 단계" 하나만 말했는데, 두 트랙이 실제로는 병렬로
+  // 진행돼서(예: 인허가 판정 전에 식품위생부터 끝나는 경우) 위젯이 계속
+  // "Step1"이라고만 말하는 문제가 있었다(실사용 세션 79430043, 2026-07-28
+  // 확인). compute_project_status()가 이미 트랙별로 나눠 계산해주니 그대로
+  // 반영만 한다.
+  function renderNextAction(status) {
+    if (!status) { nextActionEl.innerHTML = ""; return; }
+    const pct = status.progress ?? 0;
+    const tracks = [
+      { label: "건축", data: status.construction_track },
+      { label: "창업 준비", data: status.startup_track },
+    ];
+    const trackLines = tracks
+      .filter((t) => t.data && (t.data.current_step || t.data.next_action))
+      .map((t) => `
+        <div class="next-action-track">
+          <span class="next-action-track-label">${t.label}</span>
+          ${t.data.current_step ? `${t.data.current_step} · ` : ""}👉 ${t.data.next_action}
+        </div>
+      `)
+      .join("");
+    nextActionEl.innerHTML = `
+      <div class="next-action-pct">${pct}%</div>
+      <div class="next-action-body">
+        <div class="next-action-progress">
+          <div class="next-action-bar"><div class="next-action-fill" style="width:${pct}%"></div></div>
+        </div>
+        ${trackLines || '<div class="next-action-task">🎉 모든 절차를 완료했어요!</div>'}
+      </div>
+    `;
   }
 
   // 분기(owner_check 등) 질문에 버튼으로 바로 답할 수 있게 - 세부 로드맵
@@ -873,7 +1149,27 @@
     latestFireResult = null;
     latestSignageResult = null;
     taskProgress = {};
+    expandedSteps = null;
     renderFactTags();
+    renderNextAction(null);
+  }
+
+  // 재접속ᆞ새로고침 시(대화를 시작하기 전) 프로젝트 진행 현황을 먼저
+  // 보여준다 - "질문에 답하는 챗봇"이 아니라 "먼저 알려주는 프로젝트
+  // 매니저" 원칙(2026-07-28 논의)의 핵심 기능. 진행한 게 있을 때만
+  // 요약 말풍선을 띄운다(빈 세션은 emptyHint가 이미 안내 중이라 중복 불필요).
+  async function loadProjectStatus() {
+    try {
+      const res = await fetch(`${API_BASE}/project-status?user_id=${encodeURIComponent(userId)}`);
+      if (!res.ok) return;
+      const status = await res.json();
+      renderNextAction(status);
+      if (status.progress > 0) {
+        addMessage("bot", status.summary);
+      }
+    } catch (err) {
+      console.error("진행 현황 조회 실패:", err);
+    }
   }
 
   // 봇 답변에 섞여오는 마크다운(**굵게**, - 목록, `코드`)을 그대로 텍스트로
@@ -928,7 +1224,7 @@
     return html.join("");
   }
 
-  function addMessage(role, text, { toolCalls = [], isError = false } = {}) {
+  function addMessage(role, text, { toolCalls = [], isError = false, lawContexts = [] } = {}) {
     emptyHint.remove();
     const wrap = document.createElement("div");
     wrap.className = `msg ${role}`;
@@ -948,6 +1244,21 @@
       tag.textContent = "🔧 " + toolCalls.map(tc => tc.tool).join(", ");
       wrap.appendChild(tag);
     }
+
+    // 법령 원문 카드 - answer의 [출처: ...] 인용을 실제로 검색된 원문과
+    // 대조해볼 수 있게, 도구별로 펼쳐볼 수 있는 카드를 붙인다.
+    (lawContexts || []).forEach((ctx) => {
+      const details = document.createElement("details");
+      details.className = "law-card";
+      const summary = document.createElement("summary");
+      summary.textContent = `📖 근거 원문 보기 — ${ctx.tool}`;
+      const body = document.createElement("div");
+      body.className = "law-card-body";
+      body.textContent = ctx.text;
+      details.appendChild(summary);
+      details.appendChild(body);
+      wrap.appendChild(details);
+    });
 
     chatEl.appendChild(wrap);
     chatEl.scrollTop = chatEl.scrollHeight;
@@ -993,7 +1304,7 @@
       localStorage.setItem("permit_assistant_user_id", userId);
       userIdLabel.textContent = `세션: ${userId.slice(0, 8)}`;
 
-      addMessage("bot", data.answer, { toolCalls: data.tool_calls });
+      addMessage("bot", data.answer, { toolCalls: data.tool_calls, lawContexts: data.law_contexts });
 
       // 한 턴에 여러 번 호출될 수 있어(record_case_facts + set_procedure_stage가
       // 같이 온 경우 등) 순서대로 전부 반영. 게이지에 필요한 required_documents/
@@ -1047,6 +1358,7 @@
         renderFactTags();
       }
       renderRoadmap();
+      renderNextAction(data.project_status);
     } catch (err) {
       removeTypingIndicator();
       addMessage("bot", `서버에 연결할 수 없습니다: ${err.message}`, { isError: true });
@@ -1096,7 +1408,7 @@
     resetStageIndicator();
   });
 
-  loadProcedureStages().then(restoreStageIndicator);
+  loadProcedureStages().then(restoreStageIndicator).then(loadProjectStatus);
   questionEl.focus();
 </script>
 </body>

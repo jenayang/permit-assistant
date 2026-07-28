@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src import config
-from src.pipeline import ingest, query, update_task_progress
+from src.pipeline import get_project_status, ingest, query, update_task_progress
 from src.retriever import count_documents
 from src.agents.permit import PROCEDURE_TREE, PermitResult
 
@@ -54,6 +54,11 @@ class ToolCallInfo(BaseModel):
     args: dict
 
 
+class LawContext(BaseModel):
+    tool: str
+    text: str
+
+
 class QueryResponse(BaseModel):
     question: str
     answer: str
@@ -64,6 +69,21 @@ class QueryResponse(BaseModel):
     fire_result: Optional[list[str]] = None
     signage_result: Optional[str] = None
     task_progress: Optional[dict] = None
+    project_status: Optional[dict] = None
+    law_contexts: list[LawContext] = []
+
+
+class TrackStatus(BaseModel):
+    current_step: Optional[str] = None
+    next_action: Optional[str] = None
+
+
+class ProjectStatusResponse(BaseModel):
+    progress: int
+    completed: list[str]
+    construction_track: TrackStatus
+    startup_track: TrackStatus
+    summary: str
 
 
 class TaskProgressUpdateRequest(BaseModel):
@@ -137,13 +157,29 @@ def query_endpoint(req: QueryRequest) -> QueryResponse:
             fire_result=result["fire_result"],
             signage_result=result["signage_result"],
             task_progress=result["task_progress"],
+            project_status=result["project_status"],
+            law_contexts=result["law_contexts"],
         )
-        
+
     except ValueError as e: # 400 클라이언트 잘못(빈 질문 등)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:  # 500 서버 잘못(LLM호출 실패 등)
         logger.error("질의 실패: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"답변 생성 실패: {e}")
+
+
+@app.get("/project-status", response_model=ProjectStatusResponse, tags=["로드맵"])
+def project_status_endpoint(user_id: str) -> ProjectStatusResponse:
+    """대화 없이(페이지 로드 시점 등) 현재 프로젝트 진행 현황만 조회한다.
+
+    재접속 요약 배너ᆞ사이드바 Next Action 위젯이 이 엔드포인트를 쓴다 -
+    LLM 호출 없이 그래프 상태에서 바로 계산(project_status.py 참고).
+    """
+    try:
+        return ProjectStatusResponse(**get_project_status(user_id))
+    except Exception as e:
+        logger.error("진행 현황 조회 실패: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"진행 현황 조회 실패: {e}")
 
 
 @app.post("/task-progress", response_model=TaskProgressUpdateResponse, tags=["로드맵"])

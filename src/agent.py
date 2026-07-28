@@ -225,8 +225,9 @@ pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진�
 - 법률 용어 정의("OO이 뭐야") → search_by_term (핵심 용어만 추출)
 - 절차ᆞ조건ᆞ서류 등 일반 질문 → search_regulations
 - 착공신고ᆞ건축사 설계ᆞ공사감리ᆞ사용승인(Step 2: 공사)을 물으면 →
-  get_construction_guide (절차가 법령상 고정돼 있어 검색 불필요, 바로 이
-  도구 호출). **[Step 1-4: 예상 소요 기간]까지 안내가 끝나면, 사용자가
+  get_construction_guide 하나만 호출하세요(내부적으로 이미 여러 관점으로
+  search_regulations를 호출해 합쳐서 돌려주니, 따로 search_regulations를
+  또 부르지 마세요). **[Step 1-4: 예상 소요 기간]까지 안내가 끝나면, 사용자가
   안 물어봐도 "다음은 Step 2(공사) 단계입니다"처럼 존재를 짧게 짚어주고
   계속 안내할지 물어보세요** - 인허가 설명이 끝났다고 곧장 식품위생ᆞ
   사업자등록 등 창업 준비 트랙으로 건너뛰지 마세요(실제로 Step 2를 통째로
@@ -234,19 +235,20 @@ pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진�
   2026-07-27). 단, 공통 원칙대로 사용자가 동의ᆞ요청할 때 실제 내용을
   꺼내세요 - 짚어주는 것과 바로 전체 내용을 쏟아내는 건 다릅니다.
 - 사업자등록을 어떻게ᆞ언제까지 하는지, 무슨 서류가 필요한지 물으면 →
-  get_business_registration_guide (절차가 법령상 고정돼 있어 검색 불필요,
-  바로 이 도구 호출). food_result가 이미 나온 사용자라면 안내문의
+  get_business_registration_guide 하나만 호출하세요(내부적으로 이미
+  검색합니다). food_result가 이미 나온 사용자라면 검색 결과의
   "허가ᆞ등록ᆞ신고증 사본"이 그 영업신고증이라는 걸 답변에서 연결해
   설명하세요 - 간이/일반과세자 중 어느 쪽인지는 사용자 매출을 추정해서
   단정하지 말고 기준만 안내하세요.
 - 위생교육을 언제ᆞ몇 시간ᆞ어떻게 받아야 하는지 물으면 →
-  get_hygiene_education_guide (마찬가지로 법령상 고정된 정적 안내). 실제
-  교육 운영기관ᆞ비용처럼 안내문에 없는 세부사항은 지어내지 말고 "관할
-  보건소에 확인하라"고 안내하세요.
+  get_hygiene_education_guide 하나만 호출하세요(내부적으로 이미
+  검색합니다). 실제 교육 운영기관ᆞ비용처럼 검색 결과에 없는 세부사항은
+  지어내지 말고 "관할 보건소에 확인하라"고 안내하세요.
 - 오픈 준비(인테리어ᆞ장비설치ᆞ직원등록ᆞ영업시작)를 물으면 →
-  get_opening_checklist. **인테리어ᆞ장비설치ᆞ영업시작 항목은 법령 근거가
-  없는 순수 실무 체크리스트이니 [출처]를 지어내 붙이지 마세요** - 직원등록
-  (4대보험) 항목만 안내문에 이미 포함된 출처를 그대로 쓰세요.
+  get_opening_checklist 하나만 호출하세요(직원등록 부분은 내부적으로 이미
+  검색합니다). **인테리어ᆞ장비설치ᆞ영업시작 항목은 법령 근거가 없는 순수
+  실무 체크리스트이니 [출처]를 지어내 붙이지 마세요** - 직원등록(4대보험)
+  항목만 검색 결과에 실제로 있는 출처를 그대로 쓰세요.
 - 용도지역을 모르는데 주소는 아는 경우 → lookup_land_zone
 - 건폐율ㆍ용적률 질문 → lookup_building_ratio_limits (세부 용도지역을
   모르면 계산하지 말고 직접 질문)
@@ -793,7 +795,9 @@ def _max_allowed_stage(state: AgentState) -> int:
 # 포함한다 - 안 넣으면 guard가 실제로 근거 있는 인용을 "지어낸 것"으로
 # 오판해 불필요한 재시도를 유도한다(2026-07-27 실측 확인). 위생교육ᆞ
 # 간판신고처럼 향후 추가될 정적 콘텐츠 도구도 여기 이름만 추가하면 된다.
-_GROUNDING_TOOL_NAMES = (
+# pipeline.py도 "법령 원문 카드" UI에서 어떤 ToolMessage가 진짜 법령 근거인지
+# 걸러낼 때 이 목록을 그대로 재사용한다(밑줄 없는 공개 이름 - 단일 소스).
+GROUNDING_TOOL_NAMES = (
     "search_regulations", "search_by_term",
     "get_business_registration_guide", "get_hygiene_education_guide",
     "get_opening_checklist", "get_construction_guide",
@@ -806,7 +810,7 @@ def _has_grounding_search(messages) -> bool:
     인용까지 통과될 수 있다는 한계는 있지만, "아무 근거 없이 조항을
     지어내는" 가장 심각한 사례는 확실히 잡는다(1차 구현, 2026-07-26)."""
     return any(
-        isinstance(m, ToolMessage) and m.name in _GROUNDING_TOOL_NAMES
+        isinstance(m, ToolMessage) and m.name in GROUNDING_TOOL_NAMES
         for m in messages
     )
 
