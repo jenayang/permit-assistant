@@ -332,21 +332,100 @@ def _facility_group_reason(result_type: str, facts: dict) -> str:
     return ""
 
 
+def _act_type_reason(result_type: str, facts: dict) -> str:
+    """용도변경 외 나머지 act_type(신축ᆞ증축ᆞ개축ᆞ재축ᆞ이전ᆞ대수선ᆞ일반수선ᆞ
+    가설건축물)의 판정 사유를 문장으로 서술한다. _facility_group_reason과 같은
+    원칙 - classify_case()가 이미 확정한 result_type을 다시 판정하지 않고
+    사유만 서술한다. 숫자는 get_thresholds()를 그대로 참조해서 법정 임계값이
+    바뀌어도 이 함수를 따로 안 고쳐도 되고, 비교 부등호(<, <=)는 classify_case()
+    와 반드시 같은 방향으로 맞춰뒀다(재-비교이므로 어긋나면 사유와 판정이
+    서로 다른 말을 하게 됨 - 단일 진실 공급원 원칙, _facility_group_reason 참고).
+
+    2026-07-29: 지금까지 용도변경만 "왜?" 사유 문장이 있었고 나머지 act_type은
+    LLM이 즉흥적으로 설명해야 했다(RAG 활용도 점검 중 사용자 피드백으로 발견) -
+    판정 신뢰성 원칙을 전체 act_type으로 넓힌다.
+    """
+    act_type = facts.get("act_type")
+    thresholds = get_thresholds()
+
+    if act_type in ("증축", "개축", "재축"):
+        limit = thresholds["증축개축재축_신고_상한_바닥면적_sqm"]
+        size = facts.get("extension_size_sqm")
+        if size is None:
+            return ""
+        if size <= limit:
+            return f" (사유: {act_type} 대상 부분 바닥면적 {size}㎡가 {limit}㎡ 이내)"
+        return f" (사유: {act_type} 대상 부분 바닥면적 {size}㎡가 {limit}㎡ 초과)"
+
+    if act_type == "신축":
+        new_build = thresholds["신축_신고"]
+        zone = facts.get("land_zone")
+        size, floors = facts.get("size_sqm"), facts.get("floors")
+        if zone not in new_build["대상_용도지역"]:
+            # "관리지역"ᆞ"농림지역"ᆞ"자연환경보전지역"은 받침 있음(은), "기타"는
+            # 받침 없음(는) - Literal 값 4개 중 "기타"만 예외라 하드코딩 분기.
+            particle = "는" if zone == "기타" else "은"
+            return f" (사유: 용도지역 '{zone}'{particle} 관리ᆞ농림ᆞ자연환경보전지역이 아니라 신고 예외 대상이 아님)"
+        if size is None or floors is None:
+            return ""
+        limit_size, limit_floors = new_build["연면적_미만_sqm"], new_build["층수_미만"]
+        if size < limit_size and floors < limit_floors:
+            return f" (사유: {zone}이고 연면적 {size}㎡ᆞ{floors}층이 각각 {limit_size}㎡ᆞ{limit_floors}층 미만 기준을 충족)"
+        return f" (사유: {zone}이지만 연면적ᆞ층수 기준({limit_size}㎡ᆞ{limit_floors}층 미만) 중 하나 이상을 초과)"
+
+    if act_type == "이전":
+        return " (사유: 건축법 제14조 신고 예외 목록에 '이전'이 없어 원칙(제11조)대로 허가 대상)"
+
+    if act_type == "대수선":
+        if facts.get("renovation_scope") is False:
+            return " (사유: 대수선 정의(시행령 제3조의2 8개 기준) 중 어디에도 해당하지 않음)"
+        renov = thresholds["대수선_신고"]
+        size, floors = facts.get("size_sqm"), facts.get("floors")
+        if size is None or floors is None:
+            return ""
+        limit_size, limit_floors = renov["연면적_미만_sqm"], renov["층수_미만"]
+        if size < limit_size and floors < limit_floors:
+            return f" (사유: 대수선 정의에 해당하고 연면적 {size}㎡ᆞ{floors}층이 각각 {limit_size}㎡ᆞ{limit_floors}층 미만 기준을 충족)"
+        return f" (사유: 대수선 정의에 해당하지만 연면적ᆞ층수 기준({limit_size}㎡ᆞ{limit_floors}층 미만) 중 하나 이상을 초과)"
+
+    if act_type == "일반수선":
+        return " (사유: 일반수선은 대수선ᆞ신고ᆞ허가 대상 행위에 해당하지 않음)"
+
+    if act_type == "가설건축물":
+        temp = thresholds["가설건축물"]
+        purpose = facts.get("temporary_purpose")
+        duration = facts.get("temporary_duration_years")
+        is_concrete = facts.get("temporary_is_concrete")
+        if purpose in temp["신고_목적_예외"]:
+            return f" (사유: '{purpose}' 목적은 존치기간ᆞ구조와 무관하게 신고 대상(시행령 제15조 예외 목적))"
+        if duration is None or is_concrete is None:
+            return ""
+        limit_years = temp["신고_존치기간_이하_년"]
+        if duration <= limit_years and not is_concrete:
+            return f" (사유: 존치기간 {duration}년이 {limit_years}년 이내이고 비철근콘크리트ᆞ철골조라 신고 요건 충족)"
+        if duration > limit_years:
+            return f" (사유: 존치기간 {duration}년이 {limit_years}년을 초과해 신고 요건 미충족)"
+        return " (사유: 철근콘크리트ᆞ철골조라 신고 요건(비철콘조) 미충족)"
+
+    return ""
+
+
 def procedure_stage_message(result_type: str, node_id: str, facts: dict | None = None) -> str:
     """(result_type, node_id)에 해당하는 안내 문구를 만든다.
 
     LLM이 직접 부르는 도구가 아니라, agent.py의 classify_case 그래프 노드가
     분류 결과를 답변에 반영할 때 참고용으로 쓰는 헬퍼 함수 - 허가/신고 판정
     자체는 이제 규칙 기반이라 LLM이 이 판단을 직접 할 필요가 없어졌다.
-    판정 사유(예: 용도변경의 시설군 이동 방향)까지 이미 확정된 result_type
-    기준으로 미리 문장을 만들어 같이 넘긴다(facts 전체를 받는 이유는
-    _facility_group_reason 참고).
+    판정 사유(예: 용도변경의 시설군 이동 방향, 신축/대수선의 규모 기준 충족
+    여부 등)까지 이미 확정된 result_type 기준으로 미리 문장을 만들어 같이
+    넘긴다(facts 전체를 받는 이유는 _facility_group_reason 참고). 용도변경은
+    _facility_group_reason이, 나머지 act_type은 _act_type_reason이 담당한다.
     """
     tree = PROCEDURE_TREE.get(result_type)
     if tree is None or node_id not in tree["nodes"]:
         return f"'{node_id}'는 {result_type} 트리에 없는 노드입니다."
 
-    reason = _facility_group_reason(result_type, facts or {})
+    reason = _facility_group_reason(result_type, facts or {}) or _act_type_reason(result_type, facts or {})
     node = tree["nodes"][node_id]
     if node["type"] == "branch":
         options = ", ".join(node["options"].keys())

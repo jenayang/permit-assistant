@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from src.agent import _STAGE_DOMAIN, guard_node, permit_phase_directive
+from src.agent import (
+    _STAGE_DOMAIN,
+    _should_force_construction_guide,
+    guard_node,
+    permit_phase_directive,
+)
 
 # permit_synthesis가 채워져 있어야 [Step 1-2]/[Step 1-3] 언급이 synthesis-gap
 # 위반(guard_node 위반 3번)에 안 걸린다 - 이 파일의 테스트는 disclosed_stage
@@ -136,6 +141,121 @@ def test_unrelated_answer_does_not_touch_disclosed_stage():
     ]
     update = guard_node(state)
     assert "disclosed_stage" not in update or _apply(state, update)["disclosed_stage"].get(_STAGE_DOMAIN) == 3
+
+
+def test_construction_guide_gap_triggers_retry():
+    """회귀 테스트(세션 5db53ccb, 2026-07-29) - Step1이 다 끝난 뒤
+    permit_phase_directive가 get_construction_guide 호출을 지시하는데도,
+    그 지시를 무시하고 "Step 2(공사)" 내용을 도구 호출 없이 텍스트로만
+    설명하면 재시도를 유도해야 한다(RAG 검색 없이 절차를 지어내는 걸 막음)."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 3}
+    state["messages"] = [
+        HumanMessage(content="공사는 어떻게 진행돼?"),
+        AIMessage(content="다음은 Step 2(공사) 단계입니다. 착공신고를 먼저 진행하셔야 해요."),
+    ]
+    update = guard_node(state)
+    guard_msgs = [m for m in update.get("messages", []) if isinstance(m, ToolMessage) and m.name == "_answer_guard"]
+    assert guard_msgs, "get_construction_guide 미호출인데도 재시도가 유도되지 않음"
+    assert "get_construction_guide" in guard_msgs[0].content
+
+
+def test_construction_guide_called_suppresses_gap_violation():
+    """get_construction_guide를 실제로 호출한 뒤라면(같은 턴이든 이전 턴이든)
+    Step 2 내용을 언급해도 더 이상 걸리지 않아야 한다 - 정상 경로까지
+    막으면 안 됨."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 3}
+    call_id = "c1"
+    state["messages"] = [
+        HumanMessage(content="공사는 어떻게 진행돼?"),
+        AIMessage(content="", tool_calls=[{"name": "get_construction_guide", "args": {}, "id": call_id}]),
+        ToolMessage(content="[착공ᆞ공사 단계 안내]...", tool_call_id=call_id, name="get_construction_guide"),
+        AIMessage(content="다음은 Step 2(공사) 단계입니다. 착공신고를 먼저 진행하셔야 해요."),
+    ]
+    update = guard_node(state)
+    assert not any(
+        isinstance(m, ToolMessage) and m.name == "_answer_guard" for m in update.get("messages", [])
+    )
+
+
+def test_construction_guide_gap_ignores_unrelated_topics():
+    """Step2 관련 키워드가 아예 없는(다른 도메인) 답변은 이 체크가 무시해야
+    한다 - Step2를 아직 안 물었는데 강제로 끼워넣으면 과잉 개입이 된다."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 3}
+    state["messages"] = [
+        HumanMessage(content="간판은 신고 대상인가요?"),
+        AIMessage(content="네, 벽면이용간판은 신고 대상입니다."),
+    ]
+    update = guard_node(state)
+    assert not any(
+        isinstance(m, ToolMessage) and m.name == "_answer_guard" for m in update.get("messages", [])
+    )
+
+
+def test_force_construction_guide_when_ai_just_proposed_step2():
+    """AI가 방금 "Step 2(공사 단계)" 안내를 제안했고 사용자가 그에 응답하는
+    턴이면 tool_choice 강제 대상이다 - 세션 5db53ccb의 실패 패턴 그대로."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 3}
+    state["messages"] = [
+        HumanMessage(content="서류ᆞ사전진단 다 끝냈어."),
+        AIMessage(content="완료하셨군요! 다음은 Step 2(공사 단계)입니다. 안내해 드릴까요?"),
+        HumanMessage(content="응 알려줘"),
+    ]
+    assert _should_force_construction_guide(state) is True
+
+
+def test_no_force_when_construction_guide_already_shown():
+    """이미 한 번 호출됐으면(플래그 세팅됨) 더 강제할 필요 없다."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 3, "construction_guide": 1}
+    state["messages"] = [
+        HumanMessage(content="공사는 어떻게 진행돼?"),
+        AIMessage(content="다음은 Step 2(공사 단계)입니다. 안내해 드릴까요?"),
+        HumanMessage(content="응"),
+    ]
+    assert _should_force_construction_guide(state) is False
+
+
+def test_no_force_when_step1_not_finished():
+    """Step 1이 아직 안 끝났으면(disclosed<3) 강제 대상이 아니다."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 1}
+    state["messages"] = [
+        HumanMessage(content="공사는 어떻게 돼?"),
+        AIMessage(content="Step 2(공사 단계)는 나중에 안내해 드릴게요."),
+        HumanMessage(content="응"),
+    ]
+    assert _should_force_construction_guide(state) is False
+
+
+def test_no_force_on_unrelated_topic_even_if_step1_done():
+    """직전 AI 메시지가 Step2를 제안한 게 아니라 완전히 다른 주제(예: 간판)
+    였다면, 사용자가 뭘 답하든 강제하면 안 된다 - 무관한 질문까지 공사
+    안내로 강제 전환되는 부작용을 막는 게 이 함수의 핵심 존재 이유."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 3}
+    state["messages"] = [
+        HumanMessage(content="간판은 신고 대상인가요?"),
+        AIMessage(content="네, 벽면이용간판은 신고 대상입니다."),
+        HumanMessage(content="응 알겠어"),
+    ]
+    assert _should_force_construction_guide(state) is False
+
+
+def test_no_force_when_last_message_is_not_human():
+    """방금 도구가 호출된 직후(마지막 메시지가 HumanMessage가 아님)라면
+    이번 판단 대상이 아니다 - agent_node가 다음 LLM 호출 전에 판단하는
+    시점 자체가 아직 아님."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 3}
+    state["messages"] = [
+        HumanMessage(content="응 알려줘"),
+        AIMessage(content="다음은 Step 2(공사 단계)입니다. 안내해 드릴까요?"),
+    ]
+    assert _should_force_construction_guide(state) is False
 
 
 def test_synthesis_gap_still_triggers_retry():

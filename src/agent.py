@@ -409,8 +409,20 @@ def _is_quota_error(exc: Exception) -> bool:
     return "RESOURCE_EXHAUSTED" in msg or "429" in msg
 
 
-def _get_cerebras_llm_with_tools():
+def _get_cerebras_llm_with_tools(tool_choice: str | None = None):
+    """tool_choice가 없으면(평소 경로) 모듈 전역 싱글턴을 재사용한다. 특정
+    도구를 강제할 때(tool_choice 지정)는 그때만 쓰는 상황이라 캐싱하지 않고
+    매번 새로 바인딩한다 - 강제 바인딩을 캐싱해버리면 이후 평소 호출까지
+    계속 그 도구만 강제되는 사고로 이어진다."""
     global _cerebras_llm_with_tools
+    if tool_choice:
+        cerebras_llm = ChatCerebras(
+            model=config.CEREBRAS_MODEL,
+            api_key=config.CEREBRAS_API_KEY,
+            temperature=config.TEMPERATURE,
+            max_tokens=config.MAX_OUTPUT_TOKENS,
+        )
+        return cerebras_llm.bind_tools(TOOLS, tool_choice=tool_choice)
     if _cerebras_llm_with_tools is None:
         cerebras_llm = ChatCerebras(
             model = config.CEREBRAS_MODEL,
@@ -512,6 +524,37 @@ def permit_phase_directive(state: AgentState) -> str | None:
     return "[진행 상태] Step 1~2(건축 인허가ᆞ공사) 안내가 모두 끝났습니다."
 
 
+def _should_force_construction_guide(state: AgentState) -> bool:
+    """이번 턴에 get_construction_guide 호출을 tool_choice로 강제해도 되는지.
+
+    permit_phase_directive는 "사용자가 안 물어봐도 먼저 짚어달라"고 매 턴
+    요청하지만, 그 조건 그대로 tool_choice를 강제하면 이 구간(Step1 끝ᆞ
+    Step2 미시작)에 사용자가 완전히 다른 주제(예: 간판 신고)를 물어봐도
+    매번 공사 안내로 강제 전환되는 부작용이 생긴다 - 그래서 "AI가 방금
+    Step 2를 먼저 제안했고, 사용자가 그 제안에 응답하는 턴"으로만 범위를
+    좁혔다(_STEP2_KEYWORDS로 직전 AI 메시지가 실제 제안인지 확인). 정확히
+    세션 5db53ccb(2026-07-29)에서 재현된 실패 패턴 - AI가 "다음은 Step
+    2(공사 단계)입니다... 안내해 드릴까요?"라고 제안한 뒤 사용자가 "응
+    알려줘"라고 답했는데 도구 호출 없이 텍스트로만 답한 사례 - 만 겨냥한다.
+
+    2026-07-31: 컨텍스트 트리밍(A/B 실험, 효과 미입증으로 롤백)에 이은
+    두 번째 시도. 이번엔 프롬프트 신뢰에 기대지 않고 API 레벨에서 구조적으로
+    강제한다는 점이 다르다.
+    """
+    disclosed_stage = state.get("disclosed_stage", {})
+    if disclosed_stage.get(_STAGE_DOMAIN, 0) < 3:
+        return False
+    if disclosed_stage.get("construction_guide"):
+        return False
+    messages = state.get("messages", [])
+    if len(messages) < 2 or not isinstance(messages[-1], HumanMessage):
+        return False
+    if not isinstance(messages[-2], AIMessage):
+        return False
+    prior_text = extract_text(messages[-2].content)
+    return any(kw in prior_text for kw in _STEP2_KEYWORDS)
+
+
 # === 노드 정의 ===
 def agent_node(state: AgentState) -> dict:
     """LLM을 호출해서 다음 액션 결정.
@@ -525,6 +568,15 @@ def agent_node(state: AgentState) -> dict:
       guard_node가 담당).
     - 매 턴 _roadmap_status_summary로 건축 인허가 트랙(순차)ᆞ창업 준비 트랙
       (병렬 가능)의 진행 상태를 함께 전달한다.
+    - _should_force_construction_guide가 True면 tool_choice를 강제해서
+      get_construction_guide 호출을 API 레벨에서 보장한다(2026-07-31 -
+      프롬프트 지시만으로는 못 막는다는 게 반복 확인되어, guard_node의
+      사후 검증에 이어 이번엔 애초에 스킵 자체가 불가능하게 만드는 접근).
+
+    2026-07-30: 오래된 턴의 tool_call/ToolMessage를 걷어내는 컨텍스트
+    트리밍(_trim_tool_noise)을 먼저 시도했다가 되돌렸다 - 실제 A/B 실험에서
+    트리밍 유무와 무관하게 결과가 같아서(재현 자체가 안 됨) 효과를 증명하지
+    못했다. 상세는 docs/project_report.md 4-9 참고.
     """
     global _gemini_quota_exhausted
     messages = [SystemMessage(content=SYSTEM_PROMPT), SystemMessage(content=_roadmap_status_summary(state))]
@@ -533,9 +585,12 @@ def agent_node(state: AgentState) -> dict:
         messages.append(SystemMessage(content=directive))
     messages.extend(state["messages"])
 
+    force_tool = "get_construction_guide" if _should_force_construction_guide(state) else None
+
     if not _gemini_quota_exhausted:
         try:
-            response = llm_with_tools.invoke(messages)
+            bound = llm.bind_tools(TOOLS, tool_choice=force_tool) if force_tool else llm_with_tools
+            response = bound.invoke(messages)
             return _agent_result(response)
         except Exception as exc:
             if not _is_quota_error(exc):
@@ -546,7 +601,7 @@ def agent_node(state: AgentState) -> dict:
             )
             _gemini_quota_exhausted = True
 
-    response = _get_cerebras_llm_with_tools().invoke(messages)
+    response = _get_cerebras_llm_with_tools(tool_choice=force_tool).invoke(messages)
     return _agent_result(response)
 
 
@@ -1053,13 +1108,50 @@ def _fire_signage_gap_violations(state: AgentState, messages) -> list[str]:
     return violations
 
 
+# permit_phase_directive가 "이번 턴에 get_construction_guide를 먼저 호출하라"고
+# 지시하는 시점(Step 1 다 끝남 + 아직 미호출)에, 그 지시를 어기고 실제로는
+# Step 2 내용을 텍스트로만 설명하고 넘어갔는지 판별하는 신호. 이미 Step1
+# 요약(예: "허가 신청 → 착공신고 → 공사 → 사용승인")에도 등장할 수 있는
+# "착공"ᆞ"감리"ᆞ"사용승인" 같은 낱말은 일부러 안 넣었다 - 실사용 세션
+# (5db53ccb, 2026-07-29)에서 실제로 관측된 건 "Step 2(공사 단계)"라는 표제를
+# 달고 도구 호출 없이 안내를 시작한 경우였고, 이 표제 문구는 Step1 요약에는
+# 등장하지 않아 오탐 위험이 적다.
+_STEP2_KEYWORDS = ("Step 2", "공사 단계")
+
+
+def _construction_guide_gap_violations(state: AgentState, last_text: str, messages) -> list[str]:
+    """Step 1 안내가 다 끝났는데(permit_phase_directive가 get_construction_guide
+    호출을 지시하는 시점) 그 지시를 무시하고 Step 2 내용을 텍스트로만 설명한
+    경우를 잡는다. permit_phase_directive는 연성 유도(SystemMessage)일 뿐이고
+    실제로 안 지켜도 막는 장치가 없었다 - 실사용 세션(5db53ccb, 2026-07-29)에서
+    "Step 2(공사 단계)"를 통째로 도구 호출 없이 안내하고 넘어가는 사례가
+    확인됨(2026-07-29, RAG 활용도 점검 중 발견).
+
+    disclosed_stage["construction_guide"] 플래그가 아니라 _construction_guide_shown
+    (메시지 이력을 직접 스캔)을 쓴다 - 그 플래그는 이 함수가 속한 guard_node
+    호출의 결과로 이번 턴에 막 세워지는 값이라, 정상적으로 도구를 호출한 턴
+    자체에서 플래그를 참조하면 아직 갱신 전이라 오탐이 난다.
+    """
+    if state.get("disclosed_stage", {}).get(_STAGE_DOMAIN, 0) < 3:
+        return []
+    if _construction_guide_shown(messages):
+        return []
+    if not any(kw in last_text for kw in _STEP2_KEYWORDS):
+        return []
+    return [
+        "Step 1 안내가 모두 끝난 뒤 Step 2(공사) 내용을 언급했지만 get_construction_guide를 "
+        "한 번도 호출하지 않았습니다. 근거 없이 착공신고ᆞ감리ᆞ사용승인 절차를 서술하지 말고, "
+        "지금 그 도구를 호출해 검색된 내용으로 답변을 다시 구성하세요."
+    ]
+
+
 def guard_node(state: AgentState) -> dict:
     """agent가 자유 텍스트로 답을 끝내려 할 때, 근거ᆞ판정ᆞ기록 없이 앞서나간
     답변을 한 번 걸러낸다. LLM 판단이 아니라 정규식+상태로 결정론적으로
     감지한다(classify_case와 같은 원칙 - 프롬프트 지시만으로는 못 막는다는 게
     2026-07-26 실사용 세션에서 재현됨).
 
-    막는 위반 다섯 가지:
+    막는 위반 여섯 가지:
     1. 허용된 단계 수([_max_allowed_stage])를 넘겨 [Step 1-N]을 안내 - 판정 전
        절차 안내를 아예 시도한 경우(허용치 0)와, 판정 후 한 턴에 여러 단계를
        몰아서 공개한 경우(사용자가 "1단계만" 이라고 명시해도 무시하고 전체
@@ -1076,6 +1168,11 @@ def guard_node(state: AgentState) -> dict:
        지식으로만 답한 경우 - record_fire_facts/record_signage_facts가 끝까지
        한 번도 안 불려서 로드맵에 영영 반영이 안 되는 실제 사례가 확인됨
        (_fire_signage_gap_violations 참고).
+    6. Step 1 안내가 다 끝나 permit_phase_directive가 get_construction_guide
+       호출을 지시하는 시점인데, 그 지시를 무시하고 "Step 2(공사)" 내용을
+       도구 호출 없이 텍스트로만 설명한 경우 - RAG 검색 없이 착공ᆞ감리
+       절차를 서술하게 되는 실제 사례가 확인됨(_construction_guide_gap_violations
+       참고, 2026-07-29).
 
     같은 사용자 턴 안에서 최대 1회만 재시도를 유도한다(무한 루프 방지) - 그
     이상 반복되면 프롬프트만으로는 못 막는 한계로 보고 그냥 통과시킨다.
@@ -1123,6 +1220,7 @@ def guard_node(state: AgentState) -> dict:
     violations.extend(_synthesis_gap_violations(state, max_mentioned))
     violations.extend(_building_ledger_gap_violations(state, messages))
     violations.extend(_fire_signage_gap_violations(state, messages))
+    violations.extend(_construction_guide_gap_violations(state, last_text, messages))
 
     if violations and _guard_retry_count(messages) < 1:
         logger.info("[guard] 위반 감지, 재시도 유도: %s", violations)

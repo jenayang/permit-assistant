@@ -13,6 +13,7 @@ import json
 import logging
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -386,9 +387,19 @@ def _vworld_resolve_region_and_bunji(address: str) -> tuple[str, str, str, str] 
     return bdong_full_code[:5], bdong_full_code[5:], bun, ji
 
 
+# 건축HUB(BldRgstHubService)가 순간적으로 500을 내는 걸 실측으로 확인했다
+# (2026-07-29, 세션 로그 - 같은 요청을 몇 초 뒤 그대로 재시도하니 정상 200으로
+# 성공). 4xx(서비스키 오류ᆞ잘못된 파라미터 등 재시도해도 똑같이 실패하는
+# 경우)는 재시도해도 의미가 없으므로 5xx일 때만 재시도한다. 최초 시도 포함
+# 최대 2번(재시도 1회)이면 실측 사례를 덮기에 충분하다고 판단 - 더 늘리면
+# 사용자가 실패 응답을 기다리는 시간만 늘어난다.
+_LEDGER_MAX_RETRIES = 1
+_LEDGER_RETRY_DELAY_SEC = 1.0
+
+
 def _query_building_ledger(sigungu_code: str, bdong_code: str, bun: str, ji: str) -> pd.DataFrame | None:
     """건축HUB 표제부 API를 직접 REST 호출(PublicDataReader는 URL/컬럼매핑만 재사용).
-    결과 없으면 None.
+    결과 없으면 None. 5xx 응답은 순간적인 서버 오류로 보고 짧게 재시도한다.
     """
     inst = _get_ledger_client()
     # PublicDataReader가 하드코딩한 BldRgstService_v2는 폐지된 URL이라 항상
@@ -411,6 +422,15 @@ def _query_building_ledger(sigungu_code: str, bdong_code: str, bun: str, ji: str
         params["ji"] = ji.zfill(4)
 
     resp = requests.get(url, params=params, timeout=20)  # 정부 API가 가끔 느려서(10초 타임아웃 실측) 여유있게
+    for attempt in range(1, _LEDGER_MAX_RETRIES + 1):
+        if resp.status_code < 500:
+            break
+        logger.warning(
+            "[lookup_building_ledger] %d 응답(순간 오류로 추정) - %.1f초 후 재시도(%d/%d)",
+            resp.status_code, _LEDGER_RETRY_DELAY_SEC, attempt, _LEDGER_MAX_RETRIES,
+        )
+        time.sleep(_LEDGER_RETRY_DELAY_SEC)
+        resp = requests.get(url, params=params, timeout=20)
     resp.raise_for_status()
     data = resp.json()
     body = data.get("response", {}).get("body", {})
