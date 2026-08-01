@@ -13,7 +13,7 @@ LLM을 호출하지 않는다 - 조립은 상태(AgentState)와 최근 유저 �
 """
 from __future__ import annotations
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from src.agent import (
     _ANSWER_PERMIT_STAGES,
@@ -97,6 +97,37 @@ def test_keyword_turns_on_domain_at_first_mention():
     """상태엔 아직 없지만 유저가 처음 꺼낸 도메인은 키워드로 켜져야 한다."""
     assert "signage" in _active(build_system_prompt(_state("간판도 달려고요")))
     assert "food" in _active(build_system_prompt(_state("카페 하려고요")))
+
+
+def test_keyword_activation_sticks_even_if_tool_call_was_skipped():
+    """회귀 테스트(2026-08-01) - 키워드로 켜진 도메인은 그 턴에 record_* 도구가
+    안 불려 상태에 아무것도 안 남았더라도 이후 턴에서 계속 켜져 있어야 한다.
+
+    최근 한 턴만 스캔하면: "카페 창업하려고요"(food 켜짐) → LLM이
+    record_food_facts 스킵(실측으로 확인된 문제) → 다음 턴 "그럼 건폐율은?"에
+    키워드도 상태도 없어 food 블록이 꺼지고, 수집 규칙이 사라졌으니 이후로도
+    영영 안 불려 식품 판정 자체가 조용히 실패한다."""
+    state = {
+        "messages": [
+            HumanMessage(content="카페 창업하려고요"),
+            AIMessage(content="어떤 건물인가요?"),  # 도구 호출 없음 = 스킵된 턴
+            HumanMessage(content="그럼 건폐율은 어떻게 되나요?"),
+        ]
+    }
+    assert "food" in _active(build_system_prompt(state))
+
+
+def test_domain_stays_on_after_unrelated_followup():
+    """도메인이 켜진 뒤 무관한 발언이 이어져도 유지돼야 한다 - 블록이 턴마다
+    깜빡이면 대화 흐름이 불안정해진다."""
+    state = {
+        "messages": [
+            HumanMessage(content="간판 달려고요"),
+            AIMessage(content="어떤 종류인가요?"),
+            HumanMessage(content="일단 그건 나중에 정할게요"),
+        ]
+    }
+    assert "signage" in _active(build_system_prompt(state))
 
 
 def test_fire_turns_on_proactively_for_food_business():

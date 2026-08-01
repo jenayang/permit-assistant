@@ -138,11 +138,13 @@ class AgentState(MessagesState):
 # 다 나가는 낭비가 있었다(2026-08-01 실측: "## 1. 정보 수집" 절 하나가 전체의 44%).
 #
 # 블록을 켜는 조건은 둘 중 하나만 맞으면 되는 느슨한 OR이다 - ① 그 도메인이 이미
-# 상태에 살아있음(facts/result 기록됨) ② 이번 유저 메시지에 그 도메인 키워드가 있음.
-# 상태 조건 덕분에 한 번 켜진 도메인은 계속 켜진 채로 남고(턴마다 깜빡이지 않음),
-# 키워드 조건은 주로 그 도메인이 처음 등장하는 턴을 잡는 용도다. 조건을 느슨하게
-# 잡은 건 의도적이다 - 꺼야 할 블록을 켜두는 비용은 토큰 몇 백이지만, 켜야 할
-# 블록을 끄면 그 도메인의 판정 자체가 조용히 실패한다(비대칭 리스크).
+# 상태에 살아있음(facts/result 기록됨) ② 대화 전체의 유저 발화 어딘가에 그 도메인
+# 키워드가 있음. 두 조건 다 "한 번 켜지면 대화가 끝날 때까지 유지"되는 성질이라
+# 블록이 턴마다 깜빡이지 않는다 - 키워드 조건을 최근 한 턴이 아니라 대화 전체로
+# 보는 이유는 _all_human_text 참고(도구 스킵과 맞물려 판정이 조용히 실패하던 버그).
+#
+# 조건을 느슨하게 잡은 건 의도적이다 - 꺼야 할 블록을 켜두는 비용은 토큰 몇 백이지만,
+# 켜야 할 블록을 끄면 그 도메인의 판정 자체가 조용히 실패한다(비대칭 리스크).
 _PROMPT_HEADER = """당신은 서울시 건축 인허가 전문 어시스턴트입니다.
 건축ᆞ용도변경 등 인허가 절차를 건축법ᆞ시행령ᆞ시행규칙ᆞ서울시 조례
 기준으로 정확히 안내하고, 카페ᆞ음식점 등 식품접객업 창업 시 필요한
@@ -413,12 +415,24 @@ _PROGRESS_PROMPT_KEYWORDS = (
 )
 
 
-def _latest_human_text(messages) -> str:
-    """가장 최근 사용자 발화. 블록 점등의 키워드 조건에만 쓴다(상태 조건과 OR)."""
-    for m in reversed(messages or []):
-        if isinstance(m, HumanMessage):
-            return extract_text(m.content)
-    return ""
+def _all_human_text(messages) -> str:
+    """대화 전체의 사용자 발화를 이어붙인다. 블록 점등의 키워드 조건에 쓴다.
+
+    최근 한 턴만 보면 안 되는 이유(2026-08-01 실측으로 확인한 버그): 키워드로
+    켜진 도메인이 그 턴에 record_* 도구까지 불려야 상태에 남는데, 바로 그
+    tool-calling 스킵이 실제로 일어난다(docs/idea_notes.md 최우선 과제).
+    그러면 "카페 창업하려고요"(food 켜짐 → 도구 스킵) → "그럼 건폐율은?"에서
+    키워드도 상태도 없어 food 블록이 꺼지고, 수집 규칙이 사라졌으니 이후
+    record_food_facts가 영영 안 불려 식품 판정 자체가 조용히 실패한다.
+
+    대화 전체를 보면 한 번 언급된 도메인은 대화가 끝날 때까지 켜진 채로
+    남는다 - 블록이 턴마다 깜빡이지 않아 대화 흐름도 안정적이다. 대신 대화가
+    길어질수록 켜지는 블록이 누적돼 절감폭은 줄어드는데, 이건 의도한
+    트레이드오프다(꺼야 할 걸 켜두는 비용 < 켜야 할 걸 끄는 비용).
+    """
+    return "\n".join(
+        extract_text(m.content) for m in (messages or []) if isinstance(m, HumanMessage)
+    )
 
 
 def _permit_track_active(state: AgentState, text: str) -> bool:
@@ -442,7 +456,7 @@ def build_system_prompt(state: AgentState) -> str:
     직접 언급하기 전에 선제적으로 판정해야 하기 때문이다(그 선제성을 잃으면
     guard_node의 소방 미판정 체크에 계속 걸린다).
     """
-    text = _latest_human_text(state.get("messages"))
+    text = _all_human_text(state.get("messages"))
     parts = [_PROMPT_HEADER, _COLLECT_HEADER, _COLLECT_COMMON]
 
     permit_on = _permit_track_active(state, text)
