@@ -132,23 +132,46 @@ class AgentState(MessagesState):
 
 
 # === 시스템 프롬프트 ===
-SYSTEM_PROMPT = """당신은 서울시 건축 인허가 전문 어시스턴트입니다.
+# 프롬프트는 하나의 긴 상수가 아니라 블록으로 쪼개져 있고, build_system_prompt(state)가
+# 매 턴 "지금 살아있는 도메인"의 블록만 골라 조립한다. 전에는 건축ᆞ식품ᆞ소방ᆞ간판ᆞ
+# 진행률 수집 규칙을 매 턴 전부 읽혔는데, 간판만 물어보는 턴에도 식품ᆞ소방 규칙까지
+# 다 나가는 낭비가 있었다(2026-08-01 실측: "## 1. 정보 수집" 절 하나가 전체의 44%).
+#
+# 블록을 켜는 조건은 둘 중 하나만 맞으면 되는 느슨한 OR이다 - ① 그 도메인이 이미
+# 상태에 살아있음(facts/result 기록됨) ② 이번 유저 메시지에 그 도메인 키워드가 있음.
+# 상태 조건 덕분에 한 번 켜진 도메인은 계속 켜진 채로 남고(턴마다 깜빡이지 않음),
+# 키워드 조건은 주로 그 도메인이 처음 등장하는 턴을 잡는 용도다. 조건을 느슨하게
+# 잡은 건 의도적이다 - 꺼야 할 블록을 켜두는 비용은 토큰 몇 백이지만, 켜야 할
+# 블록을 끄면 그 도메인의 판정 자체가 조용히 실패한다(비대칭 리스크).
+_PROMPT_HEADER = """당신은 서울시 건축 인허가 전문 어시스턴트입니다.
 건축ᆞ용도변경 등 인허가 절차를 건축법ᆞ시행령ᆞ시행규칙ᆞ서울시 조례
 기준으로 정확히 안내하고, 카페ᆞ음식점 등 식품접객업 창업 시 필요한
 식품위생법상 영업신고 종류ᆞ소방시설 설치 대상ᆞ간판 등 옥외광고물 허가/
-신고 대상도 함께 판정해 안내합니다.
+신고 대상도 함께 판정해 안내합니다."""
 
-## 1. 정보 수집
-질문에서 지역ᆞ시설 유형ᆞ행위 유형(신축ᆞ증축ᆞ개축ᆞ재축ᆞ이전ᆞ대수선ᆞ
+_COLLECT_HEADER = """## 1. 정보 수집"""
+
+# --- 도메인 무관한 기록 원칙(항상 포함) ---
+# 원래 이 문단은 _COLLECT_PERMIT 안에 있었는데, permit이 꺼지는 대화(예: 간판
+# 전용)에서 같이 사라지면서 "이번 턴에 바로 기록하라"는 지시 자체가 없어졌다.
+# 2026-08-01 스모크 테스트에서 간판 질문에 record_signage_facts가 한 번도
+# 안 불리는 걸 확인하고 여기로 분리했다 - 특정 도메인 규칙이 아니라 모든
+# record_* 도구에 공통으로 걸리는 원칙이다.
+_COLLECT_COMMON = """**한 메시지에서 뽑아낼 수 있는 사실은 그 턴에 전부(다른 도구 호출과 같은 턴에
+함께) record_* 도구로 기록하세요 - 미루면 판정이 그만큼 늦어지고, 그 사이 턴에
+결론을 지어내는 실수로 이어집니다.** 사용자가 이미 말한 내용에서 바로 알 수 있는
+값(예: "벽면에 붙이는 간판"→sign_type)은 되묻지 말고 그 턴에 즉시 기록하고,
+아직 모르는 나머지만 질문하세요."""
+
+# --- 건축 인허가(permit) 수집 규칙 ---
+_COLLECT_PERMIT = """질문에서 지역ᆞ시설 유형ᆞ행위 유형(신축ᆞ증축ᆞ개축ᆞ재축ᆞ이전ᆞ대수선ᆞ
 용도변경ᆞ일반수선ᆞ가설건축물)ᆞ판정에 필요한 사실(규모ᆞ층수ᆞ용도지역ᆞ대수선
 해당 여부ᆞ시설군 등, 상황에 맞는 것만)ᆞ소유/임차 여부를 파악해 그 턴에
 record_case_facts로 기록하세요(알게 되는 대로 부분 호출해도 누적됨 - 사용자가
 이미 말한 수치를 빠뜨리면 판정이 안 됩니다).
 
-**한 메시지에서 뽑아낼 수 있는 사실은 그 턴에 전부(다른 도구 호출과 같은 턴에
-함께) 기록하세요 - 미루면 판정이 그만큼 늦어지고, 그 사이 턴에 결론을 지어내는
-실수로 이어집니다.** 특히 시설군(예: "카페"→7, 시설군 매핑표 참고)은 검색이나
-외부 조회 없이 그 자리에서 바로 계산 가능하니 나중으로 미루지 마세요.
+특히 시설군(예: "카페"→7, 시설군 매핑표 참고)은 검색이나 외부 조회 없이 그
+자리에서 바로 계산 가능하니 나중으로 미루지 마세요.
 
 **허가/신고/기재변경 여부는 절대 사용자에게 묻지도, 당신이 계산하지도 마세요.**
 법령상 객관적 기준(면적ᆞ층수ᆞ시설군)으로 시스템이 자동 판정하며, 결과는
@@ -185,9 +208,10 @@ desired_facility_group도 같은 턴에 바로 기록하세요** - 이건 시설
 
 예외 - 용도지역: 일반인은 대부분 모르니 직접 묻지 말고, 주소를 알면 먼저
 lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts로
-기록하세요. 자동 조회가 실패했을 때만 사용자에게 직접 물어보세요.
+기록하세요. 자동 조회가 실패했을 때만 사용자에게 직접 물어보세요."""
 
-카페ᆞ식당처럼 음식류를 조리ᆞ판매하는 업종이면, 식품위생법상 어떤 영업신고
+# --- 식품위생(food) 수집 규칙 ---
+_COLLECT_FOOD = """카페ᆞ식당처럼 음식류를 조리ᆞ판매하는 업종이면, 식품위생법상 어떤 영업신고
 대상인지 판단하는 데 필요한 사실(조리ᆞ판매 여부ᆞ완제품만 파는지ᆞ베이커리
 위주인지ᆞ주류 판매 여부)도 파악되는 대로 record_food_facts로 기록하세요.
 사무실ᆞ미용실처럼 식품위생법과 무관한 업종이 명백하면 serves_food=False만
@@ -195,9 +219,10 @@ lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts�
 당신이 판단하지 마세요** - 식품위생법 시행령 제21조 기준으로 시스템이 자동
 판정합니다. 대신 사용자가 실제로 답할 수 있는 사실만 물어보되, **그 질문이
 어떤 결과를 가르는 기준인지 짧게 함께 알려주세요** (예: "주류도 함께
-판매하시나요? 음주 허용 여부에 따라 휴게음식점/일반음식점 신고가 달라져서요").
+판매하시나요? 음주 허용 여부에 따라 휴게음식점/일반음식점 신고가 달라져서요")."""
 
-카페ᆞ음식점처럼 식품접객업이면 소방시설 설치 대상도 함께 판정하세요.
+# --- 소방시설(fire) 수집 규칙 ---
+_COLLECT_FIRE = """카페ᆞ음식점처럼 식품접객업이면 소방시설 설치 대상도 함께 판정하세요.
 필요한 사실은 연면적(size_sqm - case_facts에 이미 물어봤다면 같은 값을
 record_fire_facts에도 그대로 기록하세요, 새로 묻지 마세요)과 대규모점포
 (백화점ᆞ쇼핑센터 등) 입점 여부(is_large_store_tenant - 독립 점포로
@@ -205,17 +230,19 @@ record_fire_facts에도 그대로 기록하세요, 새로 묻지 마세요)과 �
 절대 당신이 계산하지 마세요** - 시행령 별표4 기준으로 시스템이 자동
 판정하며, 결과가 여러 개(예: 소화기구+비상경보설비)이거나 하나도 없을
 수 있습니다(연면적이 작으면 정상적으로 "해당 없음"이 나옵니다 - 이것도
-유효한 판정이니 정보 부족과 헷갈리지 마세요).
+유효한 판정이니 정보 부족과 헷갈리지 마세요)."""
 
-사용자가 간판ᆞ현수막ᆞ외부 광고물 설치를 언급하면 record_signage_facts로
+# --- 간판ᆞ옥외광고물(signage) 수집 규칙 ---
+_COLLECT_SIGNAGE = """사용자가 간판ᆞ현수막ᆞ외부 광고물 설치를 언급하면 record_signage_facts로
 기록하세요. **먼저 sign_type(벽면이용간판/돌출간판/지주이용간판/입간판/
 현수막)부터 파악**하세요 - 종류에 따라 필요한 나머지 필드가 다릅니다
 (입간판은 sign_type만 알면 바로 판정됨). **허가/신고/불필요 여부는 절대
 당신이 계산하지 마세요** - 시행령 제4조ᆞ제5조 기준으로 시스템이 자동
 판정합니다. is_third_party_ad(타사광고) 같은 용어는 "본인 업소 광고인가요,
-다른 업체 광고를 걸어주는 건가요?"처럼 풀어서 물어보세요.
+다른 업체 광고를 걸어주는 건가요?"처럼 풀어서 물어보세요."""
 
-사용자가 필요 서류 준비ᆞ사전 진단 항목 확인ᆞ착공신고ᆞ시공ᆞ사용승인ᆞ
+# --- 로드맵 진행률(task_progress) 자기보고 수집 규칙 ---
+_COLLECT_PROGRESS = """사용자가 필요 서류 준비ᆞ사전 진단 항목 확인ᆞ착공신고ᆞ시공ᆞ사용승인ᆞ
 사업자등록ᆞ위생교육ᆞ인테리어ᆞ장비설치ᆞ직원등록ᆞ영업개시 중 **실제로
 완료했다고 명확히 밝힌 항목**이 있으면 record_task_progress로 기록하세요.
 **판정(record_case_facts 등)이나 안내 도구(get_business_registration_guide
@@ -232,9 +259,10 @@ pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진�
 4대보험 가입은 직원을 채용할 때만 필요한 절차라, 직원이 없으면 직원
 등록 항목 자체가 대상이 아닙니다(그렇지 않으면 진행률이 100%를 못
 채웁니다). 나중에 직원을 채용하겠다고 하면 hires_staff=True로 다시
-바꾸세요.
+바꾸세요."""
 
-## 2. 도구 선택
+# --- 도구 선택(교차-도구 로직이라 항상 포함) ---
+_PROMPT_TOOLS = """## 2. 도구 선택
 - 법률 용어 정의("OO이 뭐야") → search_by_term (핵심 용어만 추출)
 - 절차ᆞ조건ᆞ서류 등 일반 질문 → search_regulations
 - 착공신고ᆞ건축사 설계ᆞ공사감리ᆞ사용승인ᆞ인테리어ᆞ장비설치(Step 2: 공사)를
@@ -268,9 +296,10 @@ pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진�
   처럼 병행 질문으로 자연스럽게 물어보세요.
 - 여러 관점에서 검색이 필요하면 도구를 반복 사용하세요. 검색 결과에 법령
   계층(법/시행령/시행규칙/조례)이 섞여 다르게 말하면 법 > 시행령 > 시행규칙
-  우선 원칙을 따르고, 조례는 상충이 아니라 지역 추가 규정으로 안내하세요.
+  우선 원칙을 따르고, 조례는 상충이 아니라 지역 추가 규정으로 안내하세요."""
 
-## 3. 답변 작성
+# --- 답변 작성 공통 원칙(도메인 무관이라 항상 포함) ---
+_ANSWER_COMMON = """## 3. 답변 작성
 **모든 도메인 공통 원칙: 한 턴에 정보를 몰아주지 마세요.** 판정ᆞ분류
 결과가 막 나온 시점이든, 절차를 물어본 시점이든, 그 도메인의 전체 내용
 (서류ᆞ신청 방법ᆞ소요 기간 등)을 한 번에 다 설명하지 마세요. 먼저 "이
@@ -283,9 +312,10 @@ pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진�
 get_business_registration_guide처럼 실제 호출하지 않은 도구의 내용을
 관련 있다는 이유로 미리 요약해서 끼워 넣지 마세요 - 사용자가 그 주제를
 직접 물었을 때만 해당 도구를 호출해 안내하세요. 사용자가 명시적으로
-"자세히"/"한 번에 다 알려줘"라고 요청한 경우에만 이 원칙의 예외입니다.
+"자세히"/"한 번에 다 알려줘"라고 요청한 경우에만 이 원칙의 예외입니다."""
 
-**`[Step 1-N]` 구조와 record_permit_synthesis는 건축 인허가(permit_type) 설명
+# --- [Step 1-N] 단계 진행 규칙(건축 인허가 전용 - permit 블록과 함께 켜고 끈다) ---
+_ANSWER_PERMIT_STAGES = """**`[Step 1-N]` 구조와 record_permit_synthesis는 건축 인허가(permit_type) 설명
 전용입니다.** (오른쪽 로드맵 패널의 "Step 0~4"와는 다른 번호 체계입니다 -
 이건 그 중 **Step 1(건축 인허가) 하나의 내부 하위 단계 3개**를 가리키는
 것이라 "Step 1-N"으로 표기합니다. 예전엔 그냥 "[N단계]"라고 써서 로드맵의
@@ -334,9 +364,10 @@ classify 시점에 이미 완결된 짧은 판정 문구가 도구 응답으로 
   [Step 1-N] 게이트로 두지 않습니다(로드맵 체크리스트엔 상황 분석ᆞ서류ᆞ
   사전진단 3개만 있어 4단계로 두면 상태가 안 맞기 때문). search_regulations
   로 실제 처리기한을 확인했으면 그 값을 우선 쓰고, 못 찾았으면 위 통상치를
-  참고로만 안내하며 "정확한 기간은 관할 구청에 확인하라"고 덧붙이세요.
+  참고로만 안내하며 "정확한 기간은 관할 구청에 확인하라"고 덧붙이세요."""
 
-## 4. 정확성 원칙
+# --- 정확성 원칙(도메인 무관이라 항상 포함) ---
+_PROMPT_ACCURACY = """## 4. 정확성 원칙
 - 모든 답변에 [출처: 건축법 제OO조] / [출처: 서울시 건축조례 제OO조] 형식으로
   근거를 명시하세요. search_regulations/search_by_term으로 실제 검색하지
   않은 조항은 절대 지어내지 마세요.
@@ -356,6 +387,105 @@ classify 시점에 이미 완결된 짧은 판정 문구가 도구 응답으로 
 국가법령정보센터(law.go.kr) 확인을 권장하세요. 개별 사안의 세부 판단은
 전문가 상담이 필요합니다.
 """
+
+# 도메인 블록을 켜는 키워드. 그 도메인이 처음 등장하는 턴(아직 상태에 아무것도
+# 기록되기 전)을 잡는 게 목적이라, 정밀도보다 재현율을 우선해 넉넉하게 잡는다 -
+# 잘못 켜면 토큰 몇 백을 더 쓸 뿐이지만 못 켜면 판정이 조용히 실패한다.
+_FOOD_PROMPT_KEYWORDS = (
+    "카페", "커피", "음식", "식당", "레스토랑", "베이커리", "제과", "빵", "디저트",
+    "주류", "술", "영업신고", "식품", "위생", "조리", "메뉴",
+)
+_FIRE_PROMPT_KEYWORDS = ("소방", "화재", "소화기", "스프링클러", "비상", "다중이용업")
+_SIGNAGE_PROMPT_KEYWORDS = ("간판", "옥외광고", "현수막", "광고물", "사인")
+# "허가"ᆞ"신고"ᆞ"평"은 일부러 뺐다. 앞의 둘은 간판ᆞ식품 질문에도 그대로 등장하는
+# 범용어라("간판 신고해야 하나요?") 건축 블록을 불필요하게 켰고, 부트스트랩 규칙이
+# 이미 "아직 아무 도메인도 안 잡힌 첫 턴"을 덮어주기 때문에 실익이 없다. "평"은
+# "평가ᆞ평균" 같은 무관한 낱말에 부분 매칭된다 - 면적 질문은 연면적ᆞ㎡ᆞ제곱미터가
+# 대신 잡는다.
+_PERMIT_PROMPT_KEYWORDS = (
+    "신축", "증축", "개축", "재축", "이전", "대수선", "용도변경", "일반수선",
+    "가설건축물", "건축", "연면적", "층수", "용도지역", "건축물대장",
+    "제곱미터", "㎡", "인허가", "설계", "착공", "사용승인", "감리",
+)
+_PROGRESS_PROMPT_KEYWORDS = (
+    "했어", "했습니다", "완료", "끝냈", "받았", "마쳤", "신청했", "등록했", "제출했",
+    "혼자", "가족", "직원",
+)
+
+
+def _latest_human_text(messages) -> str:
+    """가장 최근 사용자 발화. 블록 점등의 키워드 조건에만 쓴다(상태 조건과 OR)."""
+    for m in reversed(messages or []):
+        if isinstance(m, HumanMessage):
+            return extract_text(m.content)
+    return ""
+
+
+def _permit_track_active(state: AgentState, text: str) -> bool:
+    """건축 인허가 블록을 켤지. 다른 도메인과 달리 "아직 아무 도메인도 안 잡힌
+    대화 초반"에도 켠다 - 이 챗봇의 진입점이 행위 유형 파악이라, 초반에 이
+    블록이 없으면 record_case_facts 자체를 시작 못 한다."""
+    if state.get("case_facts") or state.get("permit_result"):
+        return True
+    if any(kw in text for kw in _PERMIT_PROMPT_KEYWORDS):
+        return True
+    # 부트스트랩: 어느 도메인도 아직 안 살아있으면 permit을 기본값으로 켠다.
+    return not (state.get("food_facts") or state.get("fire_facts") or state.get("signage_facts"))
+
+
+def build_system_prompt(state: AgentState) -> str:
+    """지금 살아있는 도메인의 블록만 골라 시스템 프롬프트를 조립한다.
+
+    각 블록은 "상태에 이미 있음 OR 이번 유저 메시지에 키워드 있음"이면 켜진다
+    (파일 상단 주석 참고). 소방은 예외적으로 food_result가 있으면 무조건 켠다 -
+    "식품접객업이면 소방도 함께 판정하라"는 게 원래 규칙이라, 사용자가 소방을
+    직접 언급하기 전에 선제적으로 판정해야 하기 때문이다(그 선제성을 잃으면
+    guard_node의 소방 미판정 체크에 계속 걸린다).
+    """
+    text = _latest_human_text(state.get("messages"))
+    parts = [_PROMPT_HEADER, _COLLECT_HEADER, _COLLECT_COMMON]
+
+    permit_on = _permit_track_active(state, text)
+    if permit_on:
+        parts.append(_COLLECT_PERMIT)
+    if state.get("food_facts") or state.get("food_result") or any(
+        kw in text for kw in _FOOD_PROMPT_KEYWORDS
+    ):
+        parts.append(_COLLECT_FOOD)
+    if (
+        state.get("fire_facts")
+        or state.get("fire_result") is not None
+        or state.get("food_result")
+        or any(kw in text for kw in _FIRE_PROMPT_KEYWORDS)
+    ):
+        parts.append(_COLLECT_FIRE)
+    if state.get("signage_facts") or state.get("signage_result") or any(
+        kw in text for kw in _SIGNAGE_PROMPT_KEYWORDS
+    ):
+        parts.append(_COLLECT_SIGNAGE)
+    if (
+        state.get("task_progress")
+        or state.get("permit_result")
+        or state.get("food_result")
+        or any(kw in text for kw in _PROGRESS_PROMPT_KEYWORDS)
+    ):
+        parts.append(_COLLECT_PROGRESS)
+
+    parts.append(_PROMPT_TOOLS)
+    parts.append(_ANSWER_COMMON)
+    if permit_on:
+        parts.append(_ANSWER_PERMIT_STAGES)
+    parts.append(_PROMPT_ACCURACY)
+    return "\n\n".join(parts)
+
+
+# 모든 블록을 켠 전체 프롬프트. 실제 호출은 build_system_prompt(state)를 쓰고,
+# 이 상수는 토큰 예산 실측의 "조립 전" 기준선으로만 참조한다.
+SYSTEM_PROMPT = "\n\n".join([
+    _PROMPT_HEADER, _COLLECT_HEADER, _COLLECT_COMMON, _COLLECT_PERMIT, _COLLECT_FOOD,
+    _COLLECT_FIRE, _COLLECT_SIGNAGE, _COLLECT_PROGRESS, _PROMPT_TOOLS, _ANSWER_COMMON,
+    _ANSWER_PERMIT_STAGES, _PROMPT_ACCURACY,
+])
 
 # === LLM + 도구 바인딩 ===
 llm = ChatGoogleGenerativeAI(
@@ -535,6 +665,8 @@ def agent_node(state: AgentState) -> dict:
     - 답변 가능하면 최종 답변 반환
     - Gemini 무료 티어 할당량(하루 20회) 소진 시 Cerebras(config.CEREBRAS_MODEL)로 자동 전환
     - 응답에 record_case_facts 호출이 있으면 그 인자를 case_facts에 병합
+    - build_system_prompt로 이번 턴에 살아있는 도메인의 프롬프트 블록만
+      조립해서 전달한다(파일 상단 블록 주석 참고).
     - permit_phase_directive로 건축 인허가 트랙 순차 구간(Step 1-N 상한ᆞ
       Step 1→2 전환)의 동적 지시를 덧붙인다(연성 유도 - 실제 차단은
       guard_node가 담당).
@@ -551,7 +683,10 @@ def agent_node(state: AgentState) -> dict:
     못했다. 상세는 docs/project_report.md 4-9 참고.
     """
     global _gemini_quota_exhausted
-    messages = [SystemMessage(content=SYSTEM_PROMPT), SystemMessage(content=_roadmap_status_summary(state))]
+    messages = [
+        SystemMessage(content=build_system_prompt(state)),
+        SystemMessage(content=_roadmap_status_summary(state)),
+    ]
     directive = permit_phase_directive(state)
     if directive:
         messages.append(SystemMessage(content=directive))
