@@ -272,3 +272,73 @@ def test_synthesis_gap_still_triggers_retry():
         isinstance(m, ToolMessage) and m.name == "_answer_guard"
         for m in update.get("messages", [])
     )
+
+
+def test_correction_omission_triggers_retry():
+    """idea_notes.md 스펙 그대로 재현: 유저가 이미 기록된 수치를 정정하는
+    발화를 했는데(기존 size_sqm=85, "아까 85㎡라고 했는데 사실 100㎡야")
+    AI가 record_case_facts를 다시 호출하지 않고 답만 하면 재시도를
+    유도해야 한다 - 옛 값이 남으면 잘못된 판정으로 이어짐."""
+    state = _base_state()
+    state["case_facts"] = {"_classified": True, "size_sqm": 85, "floors": 2}
+    state["messages"] = [
+        HumanMessage(content="아까 85㎡라고 했는데 사실 100㎡야"),
+        AIMessage(content="네, 확인했습니다."),
+    ]
+    update = guard_node(state)
+    guard_msgs = [
+        m for m in update.get("messages", []) if isinstance(m, ToolMessage) and m.name == "_answer_guard"
+    ]
+    assert guard_msgs, "정정 발화인데도 record_case_facts 미호출이 재시도로 안 잡힘"
+    assert "record_case_facts" in guard_msgs[0].content
+
+
+def test_correction_omission_suppressed_when_tool_called():
+    """같은 정정 발화라도, AI가 실제로 record_case_facts를 다시 호출했다면
+    (merge_facts가 알아서 필드를 덮어씀) 위반이 아니다 - 정상 경로를 막으면
+    안 된다."""
+    state = _base_state()
+    state["case_facts"] = {"_classified": True, "size_sqm": 85, "floors": 2}
+    call_id = "c1"
+    state["messages"] = [
+        HumanMessage(content="아까 85㎡라고 했는데 사실 100㎡야"),
+        AIMessage(
+            content="정정 감사합니다.",
+            tool_calls=[{"name": "record_case_facts", "args": {"size_sqm": 100}, "id": call_id}],
+        ),
+        ToolMessage(content="기록됨.", tool_call_id=call_id, name="record_case_facts"),
+    ]
+    update = guard_node(state)
+    assert not any(
+        isinstance(m, ToolMessage) and m.name == "_answer_guard" for m in update.get("messages", [])
+    )
+
+
+def test_correction_omission_ignores_reconfirmation():
+    """언급된 숫자가 이미 기록된 값과 같으면(재확인일 뿐 정정이 아님) 위반이
+    아니다 - "아까 85㎡라고 했잖아" 같은 재확인까지 오탐하면 안 된다."""
+    state = _base_state()
+    state["case_facts"] = {"_classified": True, "size_sqm": 85}
+    state["messages"] = [
+        HumanMessage(content="아까 85㎡라고 했잖아"),
+        AIMessage(content="네, 맞습니다."),
+    ]
+    update = guard_node(state)
+    assert not any(
+        isinstance(m, ToolMessage) and m.name == "_answer_guard" for m in update.get("messages", [])
+    )
+
+
+def test_correction_omission_ignores_without_prior_numeric_facts():
+    """정정할 기존 수치 자체가 없으면(case_facts에 숫자 필드가 하나도 없음)
+    키워드ᆞ숫자가 있어도 위반이 아니다."""
+    state = _base_state()
+    state["case_facts"] = {"_classified": False}
+    state["messages"] = [
+        HumanMessage(content="아니 정정할게, 85㎡야"),
+        AIMessage(content="네, 알겠습니다."),
+    ]
+    update = guard_node(state)
+    assert not any(
+        isinstance(m, ToolMessage) and m.name == "_answer_guard" for m in update.get("messages", [])
+    )

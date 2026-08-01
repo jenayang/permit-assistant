@@ -238,45 +238,22 @@ pre_diagnosis_checked는 사용자가 "서류 다 준비했어요"/"사전 진�
 - 법률 용어 정의("OO이 뭐야") → search_by_term (핵심 용어만 추출)
 - 절차ᆞ조건ᆞ서류 등 일반 질문 → search_regulations
 - 착공신고ᆞ건축사 설계ᆞ공사감리ᆞ사용승인ᆞ인테리어ᆞ장비설치(Step 2: 공사)를
-  물으면 → get_construction_guide 하나만 호출하세요(내부적으로 이미 여러
-  관점으로 search_regulations를 호출 + 실무 체크리스트까지 합쳐서
-  돌려주니, 따로 search_regulations를 또 부르지 마세요). **[Step 1-3:
-  사전 진단]까지 안내가 끝나면, 사용자가 안 물어봐도 "다음은 Step 2
-  (공사) 단계입니다"처럼 존재를 짧게 짚어주고 계속 안내할지 물어보세요**
-  - 인허가 설명이 끝났다고 곧장 식품위생ᆞ사업자등록 등 창업 준비 트랙으로
-  건너뛰지 마세요. 단, 공통
-  원칙대로 사용자가 동의ᆞ요청할 때 실제 내용을 꺼내세요 - 짚어주는 것과
-  바로 전체 내용을 쏟아내는 건 다릅니다. **공사 단계로 넘어갈 때는 착공
-  얘기부터 바로 하지 말고, 건축사사무소를 이미 선정했는지부터 먼저
-  확인하세요** - 아직 안 정했다면 착공 전에 먼저 선정해야 한다고
-  짚어주고(인허가 신청 때 이미 건축사사무소를 통해 설계도서를 준비했다면
-  그 사무소에 감리ᆞ착공신고까지 이어서 의뢰하는 게 일반적이라는 것도
-  안내하세요), 인테리어ᆞ장비 설치도 "오픈 준비"가 아니라 이 공사 단계
-  안에서 함께 다루세요(시공의 일부이기 때문입니다).
+  물으면 → get_construction_guide 하나만 호출하세요(세부 지침은 도구
+  설명 참고 - 검색을 이미 대신 해주므로 search_regulations를 따로 부를
+  필요 없음).
 - 사업자등록을 어떻게ᆞ언제까지 하는지, 무슨 서류가 필요한지 물으면 →
-  get_business_registration_guide 하나만 호출하세요(내부적으로 이미
-  검색합니다). food_result가 이미 나온 사용자라면 검색 결과의
-  "허가ᆞ등록ᆞ신고증 사본"이 그 영업신고증이라는 걸 답변에서 연결해
-  설명하세요 - 간이/일반과세자 중 어느 쪽인지는 사용자 매출을 추정해서
-  단정하지 말고 기준만 안내하세요.
+  get_business_registration_guide 하나만 호출하세요(세부 지침은 도구
+  설명 참고).
 - 위생교육을 언제ᆞ몇 시간ᆞ어떻게 받아야 하는지 물으면 →
-  get_hygiene_education_guide 하나만 호출하세요(내부적으로 이미
-  검색합니다). 실제 교육 운영기관ᆞ비용처럼 검색 결과에 없는 세부사항은
-  지어내지 말고 "관할 보건소에 확인하라"고 안내하세요.
+  get_hygiene_education_guide 하나만 호출하세요(세부 지침은 도구
+  설명 참고).
 - 오픈 준비(직원등록ᆞ영업시작)를 물으면 → get_opening_checklist 하나만
-  호출하세요(직원등록 부분은 내부적으로 이미 검색합니다). **인테리어ᆞ
-  장비설치는 여기가 아니라 get_construction_guide(공사 단계)에서
-  다룹니다** - 사용자가 인테리어를 물으면 이 도구 대신 그쪽을 호출하세요.
-  영업시작 항목은 법령 근거가 없는 순수 실무 체크리스트이니 [출처]를
-  지어내 붙이지 마세요 - 직원등록(4대보험) 항목만 검색 결과에 실제로
-  있는 출처를 그대로 쓰세요.
+  호출하세요(세부 지침은 도구 설명 참고).
 - 용도지역을 모르는데 주소는 아는 경우 → lookup_land_zone
 - 건폐율ㆍ용적률 질문 → lookup_building_ratio_limits (세부 용도지역을
   모르면 계산하지 말고 직접 질문)
-- 용도변경ᆞ대수선ᆞ증축처럼 **기존 건물이 있는** 케이스에서 그 건물의 현재
-  용도ᆞ연면적ᆞ층수를 사용자가 아직 말 안 해서 모르면 → lookup_building_ledger
-  (주소, 번지 포함)로 채우세요. 신축(빈 땅)에는 대장이 없으니 쓰지 마세요.
-  **사용자가 현재 용도를 이미 말해서 판정이 끝났어도, 주소를 알거나 받으면
+- lookup_building_ledger 자체의 호출 조건(기존 건물 케이스에서만ᆞ신축엔 안 씀)은
+  도구 설명 참고. **사용자가 현재 용도를 이미 말해서 판정이 끝났어도, 주소를 알거나 받으면
   lookup_building_ledger로 건축물대장상 공식 용도를 조회해서 대조하세요** -
   일반인은 자기 건물의 공식 등록 용도를 모르거나 착각하는 경우가 흔합니다
   (예: 실제로는 "사무소"로 등록돼 있는데 본인은 "그냥 사무실 자리"로만
@@ -1140,13 +1117,70 @@ def _construction_guide_gap_violations(state: AgentState, last_text: str, messag
     ]
 
 
+# record_case_facts의 수치 필드 중 "정정" 감지 대상 - 문자열/불린 필드(land_zone,
+# renovation_scope 등)는 숫자 비교 대상이 아니라서 제외.
+_NUMERIC_FACT_FIELDS = ("size_sqm", "floors", "extension_size_sqm", "temporary_duration_years")
+_CORRECTION_KEYWORDS = ("아니", "정정", "다시 말하면", "아까")
+_NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _correction_omission_violations(state: AgentState, messages) -> list[str]:
+    """유저가 이미 기록된 수치를 정정하는 발화(예: "아까 85㎡라고 했는데 사실
+    100㎡야")를 했는데, 그 턴의 AI 응답이 record_case_facts를 다시 호출하지
+    않아 옛 값이 그대로 남는 경우를 잡는다.
+
+    merge_facts(agent.py 73행)는 record_case_facts가 재호출되기만 하면 필드
+    단위로 정확히 덮어써서 정정을 올바르게 처리한다 - 문제는 그 앞 단계다.
+    대화가 길어지면 LLM이 tool-calling 자체를 스킵하는 현상이 반복 관측됐는데
+    (docs/idea_notes.md 참고), 하필 정정 발화에서 이게 일어나면 옛 값이 그대로
+    남아 잘못된 신고/허가 판정으로 이어질 수 있다 - 다른 위반들(서술만 하고
+    도구 미호출)보다 오분류로 직결되는 위험이 커서 우선순위를 높게 본다
+    (2026-07-31 검토, 2026-08-01 구현). "아니ᆞ정정ᆞ다시 말하면ᆞ아까" 류
+    키워드 + 이미 기록된 값과 다른 숫자가 같이 나왔는지로 정정 발화를
+    감지한다. 정정할 기존 수치 자체가 없거나, 언급된 숫자가 전부 이미
+    기록된 값과 같으면(재확인일 뿐 정정이 아님) 위반으로 안 본다.
+    """
+    case_facts = state.get("case_facts") or {}
+    numeric_facts = {
+        f: case_facts[f] for f in _NUMERIC_FACT_FIELDS if case_facts.get(f) is not None
+    }
+    if not numeric_facts:
+        return []
+
+    last_human = None
+    tool_names_this_turn = set()
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage):
+            last_human = extract_text(m.content)
+            break
+        if isinstance(m, AIMessage):
+            for tc in (m.tool_calls or []):
+                tool_names_this_turn.add(tc["name"])
+    if not last_human or "record_case_facts" in tool_names_this_turn:
+        return []
+    if not any(kw in last_human for kw in _CORRECTION_KEYWORDS):
+        return []
+
+    mentioned_numbers = {float(n) for n in _NUMBER_PATTERN.findall(last_human)}
+    recorded_values = {float(v) for v in numeric_facts.values()}
+    if not (mentioned_numbers - recorded_values):
+        return []
+
+    return [
+        f"이번 메시지가 이전에 기록한 수치를 정정하는 것처럼 보이는데(기존 기록: "
+        f"{numeric_facts}) record_case_facts를 다시 호출하지 않았습니다. 옛 값이 "
+        "그대로 남으면 잘못된 판정으로 이어지니, 지금 바로 정정된 값으로 "
+        "record_case_facts를 호출한 뒤 답변을 마무리하세요."
+    ]
+
+
 def guard_node(state: AgentState) -> dict:
     """agent가 자유 텍스트로 답을 끝내려 할 때, 근거ᆞ판정ᆞ기록 없이 앞서나간
     답변을 한 번 걸러낸다. LLM 판단이 아니라 정규식+상태로 결정론적으로
     감지한다(classify_case와 같은 원칙 - 프롬프트 지시만으로는 못 막는다는 게
     2026-07-26 실사용 세션에서 재현됨).
 
-    막는 위반 여섯 가지:
+    막는 위반 일곱 가지:
     1. 허용된 단계 수([_max_allowed_stage])를 넘겨 [Step 1-N]을 안내 - 판정 전
        절차 안내를 아예 시도한 경우(허용치 0)와, 판정 후 한 턴에 여러 단계를
        몰아서 공개한 경우(사용자가 "1단계만" 이라고 명시해도 무시하고 전체
@@ -1168,6 +1202,11 @@ def guard_node(state: AgentState) -> dict:
        도구 호출 없이 텍스트로만 설명한 경우 - RAG 검색 없이 착공ᆞ감리
        절차를 서술하게 되는 실제 사례가 확인됨(_construction_guide_gap_violations
        참고, 2026-07-29).
+    7. 유저가 이미 기록된 수치를 정정하는 발화("아니ᆞ정정ᆞ다시 말하면ᆞ아까" +
+       기존 기록과 다른 숫자)를 했는데 record_case_facts가 재호출 안 된 경우 -
+       옛 값이 남아 잘못된 판정으로 직결될 수 있어 다른 위반들보다 오분류
+       리스크가 크다(_correction_omission_violations 참고, 2026-07-31 검토ᆞ
+       2026-08-01 구현).
 
     같은 사용자 턴 안에서 최대 1회만 재시도를 유도한다(무한 루프 방지) - 그
     이상 반복되면 프롬프트만으로는 못 막는 한계로 보고 그냥 통과시킨다.
@@ -1216,6 +1255,7 @@ def guard_node(state: AgentState) -> dict:
     violations.extend(_building_ledger_gap_violations(state, messages))
     violations.extend(_fire_signage_gap_violations(state, messages))
     violations.extend(_construction_guide_gap_violations(state, last_text, messages))
+    violations.extend(_correction_omission_violations(state, messages))
 
     if violations and _guard_retry_count(messages) < 1:
         logger.info("[guard] 위반 감지, 재시도 유도: %s", violations)
