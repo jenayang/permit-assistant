@@ -21,6 +21,10 @@ from src.agent import (
     _COLLECT_FIRE,
     _COLLECT_FOOD,
     _COLLECT_PERMIT,
+    _COLLECT_PERMIT_GUARD,
+    _COLLECT_PERMIT_LOOKUP,
+    _COLLECT_PERMIT_NEW_BUILD,
+    _COLLECT_PERMIT_USE_CHANGE,
     _COLLECT_PROGRESS,
     _COLLECT_SIGNAGE,
     _PROMPT_ACCURACY,
@@ -75,6 +79,11 @@ def test_full_prompt_contains_every_block():
     """SYSTEM_PROMPT(전체 조립본)에는 모든 블록이 들어있어야 한다 - 블록을
     새로 추가하고 전체 조립본에 넣는 걸 잊으면 여기서 걸린다."""
     for block in _DOMAIN_BLOCKS.values():
+        assert block in SYSTEM_PROMPT
+    for block in (
+        _COLLECT_PERMIT_GUARD, _COLLECT_PERMIT_NEW_BUILD,
+        _COLLECT_PERMIT_USE_CHANGE, _COLLECT_PERMIT_LOOKUP,
+    ):
         assert block in SYSTEM_PROMPT
     assert _ANSWER_PERMIT_STAGES in SYSTEM_PROMPT
 
@@ -147,6 +156,54 @@ def test_signage_only_conversation_drops_unrelated_blocks():
     assert "signage" in active
     assert "permit" not in active
     assert "food" not in active
+
+
+def test_act_type_specific_guardrails_are_gated():
+    """행위 유형별 가드레일은 그 유형일 때만 붙어야 한다 - 85㎡ 규칙은
+    증축ᆞ개축ᆞ재축(+신축 오적용 방지)에만, 용도변경 3필드ᆞ시설군 방향
+    규칙은 용도변경에만 의미가 있다."""
+    msg = "성수동에 가게 하려고요"
+
+    new_build = build_system_prompt(_state(msg, case_facts={"act_type": "신축"}))
+    assert _COLLECT_PERMIT_NEW_BUILD in new_build
+    assert _COLLECT_PERMIT_USE_CHANGE not in new_build
+
+    use_change = build_system_prompt(_state(msg, case_facts={"act_type": "용도변경"}))
+    assert _COLLECT_PERMIT_USE_CHANGE in use_change
+    assert _COLLECT_PERMIT_NEW_BUILD not in use_change
+
+    # 둘 다 무관한 유형에서는 양쪽 다 빠진다.
+    renovation = build_system_prompt(_state(msg, case_facts={"act_type": "대수선"}))
+    assert _COLLECT_PERMIT_NEW_BUILD not in renovation
+    assert _COLLECT_PERMIT_USE_CHANGE not in renovation
+
+
+def test_unknown_act_type_keeps_both_guardrails():
+    """act_type이 아직 없으면 무엇이 될지 모르므로 양쪽 가드레일을 다 붙여야
+    한다 - 여기서 빼면 그 턴에 바로 85㎡ 오적용이나 용도변경 3필드 누락이
+    나올 수 있다(켜두는 쪽이 안전)."""
+    prompt = build_system_prompt(_state("성수동에 가게 하려고요", case_facts={}))
+    assert _COLLECT_PERMIT_NEW_BUILD in prompt
+    assert _COLLECT_PERMIT_USE_CHANGE in prompt
+
+
+def test_land_zone_lookup_block_drops_once_known():
+    """용도지역을 이미 확보했으면 자동조회 전략 블록은 뺀다."""
+    msg = "성수동에 가게 하려고요"
+    assert _COLLECT_PERMIT_LOOKUP in build_system_prompt(_state(msg, case_facts={}))
+    assert _COLLECT_PERMIT_LOOKUP not in build_system_prompt(
+        _state(msg, case_facts={"land_zone": "기타"})
+    )
+
+
+def test_permit_core_blocks_always_accompany_permit():
+    """수집ᆞ판정금지 가드레일은 행위 유형과 무관하게 건축 블록과 함께 붙어야
+    한다 - 판정금지가 빠지면 LLM이 허가/신고를 직접 계산하는 걸 막을 수 없다."""
+    for act in (None, "신축", "용도변경", "대수선", "가설건축물"):
+        facts = {} if act is None else {"act_type": act}
+        prompt = build_system_prompt(_state("성수동에 가게 하려고요", case_facts=facts))
+        assert _COLLECT_PERMIT in prompt
+        assert _COLLECT_PERMIT_GUARD in prompt
 
 
 def test_permit_stages_block_follows_permit_block():

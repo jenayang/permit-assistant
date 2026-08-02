@@ -173,9 +173,10 @@ record_case_facts로 기록하세요(알게 되는 대로 부분 호출해도 �
 이미 말한 수치를 빠뜨리면 판정이 안 됩니다).
 
 특히 시설군(예: "카페"→7, 시설군 매핑표 참고)은 검색이나 외부 조회 없이 그
-자리에서 바로 계산 가능하니 나중으로 미루지 마세요.
+자리에서 바로 계산 가능하니 나중으로 미루지 마세요."""
 
-**허가/신고/기재변경 여부는 절대 사용자에게 묻지도, 당신이 계산하지도 마세요.**
+# --- 건축 판정 환각 방지(행위 유형과 무관하게 항상) ---
+_COLLECT_PERMIT_GUARD = """**허가/신고/기재변경 여부는 절대 사용자에게 묻지도, 당신이 계산하지도 마세요.**
 법령상 객관적 기준(면적ᆞ층수ᆞ시설군)으로 시스템이 자동 판정하며, 결과는
 다음 턴에 도구 응답으로 옵니다 - 그걸 참고해서 답변에 반영하세요. 정보가
 부족하면 결론을 암시하지 말고 부족한 사실만 되물으세요. **판정 결과가 도구
@@ -183,10 +184,20 @@ record_case_facts로 기록하세요(알게 되는 대로 부분 호출해도 �
 [Step 1-3] 절차ᆞ서류ᆞ사전진단 내용을 먼저 설명하지 마세요** - 아직 판정도 안 났는데
 그 내용부터 말하면 근거 없는 추측이 됩니다(record_case_facts만 부분적으로
 호출하고 판정 도구 응답 없이 마지막 단계까지 답변해버리는 실수로 이어질 수
-있습니다). 특히 **85㎡ 기준은
+있습니다)."""
+
+# --- 신축ᆞ증축ᆞ개축ᆞ재축 전용 환각 방지(85㎡ 오적용) ---
+# act_type이 그 넷 중 하나이거나 아직 모를 때만 붙인다 - 용도변경ᆞ대수선으로
+# 확정된 대화에는 85㎡ 자체가 등장할 일이 없다.
+_COLLECT_PERMIT_NEW_BUILD = """**85㎡ 기준은
 증축ᆞ개축ᆞ재축 전용이며 신축에는 적용되지 않습니다** - 신축의 신고 대상
 여부는 용도지역(관리ᆞ농림ᆞ자연환경보전지역)ᆞ연면적 200㎡ 미만ᆞ층수 3층
-미만을 모두 봐야 합니다. **용도변경 판정에는 act_type="용도변경"ᆞ
+미만을 모두 봐야 합니다."""
+
+# --- 용도변경 전용(필수 3필드 + 시설군 방향 재해석 금지) ---
+# 이 프로젝트에서 가장 흔한 케이스라 실제로 빠지는 턴은 많지 않지만, 신축ᆞ
+# 대수선으로 확정된 대화에서는 통째로 뺄 수 있다.
+_COLLECT_PERMIT_USE_CHANGE = """**용도변경 판정에는 act_type="용도변경"ᆞ
 current_facility_group(현재 건물의 등록 용도)ᆞdesired_facility_group(새로
 하려는 업종) 세 개가 전부 필요합니다** - 셋 중 하나라도 빠지면 판정 자체가
 영영 안 됩니다(실제로 겪은 문제: current_facility_group만 기록하고
@@ -206,9 +217,11 @@ desired_facility_group도 같은 턴에 바로 기록하세요** - 이건 시설
 이미 맞는 문장이 있는데 왜 다시 판단하냐고 물을 수 있는데, 정확히 그 이유
 때문입니다 - 시설군 번호는 작을수록 상위군이라 직관과 반대라서, 이 문장을
 참고만 하고 나름대로 재해석하면 실제로 반복해서 방향을 뒤집어 말하는
-사례가 있었습니다(허가↔신고 반대로 결론).
+사례가 있었습니다(허가↔신고 반대로 결론)."""
 
-예외 - 용도지역: 일반인은 대부분 모르니 직접 묻지 말고, 주소를 알면 먼저
+# --- 조회 전략(용도지역 자동조회) ---
+# case_facts에 land_zone이 이미 있으면 붙일 필요가 없다.
+_COLLECT_PERMIT_LOOKUP = """예외 - 용도지역: 일반인은 대부분 모르니 직접 묻지 말고, 주소를 알면 먼저
 lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts로
 기록하세요. 자동 조회가 실패했을 때만 사용자에게 직접 물어보세요."""
 
@@ -461,7 +474,21 @@ def build_system_prompt(state: AgentState) -> str:
 
     permit_on = _permit_track_active(state, text)
     if permit_on:
+        # 건축 블록은 성격이 다른 조각으로 한 번 더 나뉜다 - 수집/환각방지는
+        # 행위 유형과 무관하게 붙이고, 행위 유형별 가드레일(85㎡ᆞ용도변경)은
+        # act_type이 확정된 뒤에만 골라 붙인다. act_type이 아직 None이면
+        # 둘 다 붙인다 - 무엇이 될지 모르는 상태에서 빼면 그 턴에 바로
+        # 오적용이 나올 수 있어서, 여기서도 "켜두는 쪽"이 안전하다.
+        case_facts = state.get("case_facts") or {}
+        act_type = case_facts.get("act_type")
         parts.append(_COLLECT_PERMIT)
+        parts.append(_COLLECT_PERMIT_GUARD)
+        if act_type is None or act_type in ("신축", "증축", "개축", "재축"):
+            parts.append(_COLLECT_PERMIT_NEW_BUILD)
+        if act_type is None or act_type == "용도변경":
+            parts.append(_COLLECT_PERMIT_USE_CHANGE)
+        if not case_facts.get("land_zone"):
+            parts.append(_COLLECT_PERMIT_LOOKUP)
     if state.get("food_facts") or state.get("food_result") or any(
         kw in text for kw in _FOOD_PROMPT_KEYWORDS
     ):
@@ -496,9 +523,11 @@ def build_system_prompt(state: AgentState) -> str:
 # 모든 블록을 켠 전체 프롬프트. 실제 호출은 build_system_prompt(state)를 쓰고,
 # 이 상수는 토큰 예산 실측의 "조립 전" 기준선으로만 참조한다.
 SYSTEM_PROMPT = "\n\n".join([
-    _PROMPT_HEADER, _COLLECT_HEADER, _COLLECT_COMMON, _COLLECT_PERMIT, _COLLECT_FOOD,
-    _COLLECT_FIRE, _COLLECT_SIGNAGE, _COLLECT_PROGRESS, _PROMPT_TOOLS, _ANSWER_COMMON,
-    _ANSWER_PERMIT_STAGES, _PROMPT_ACCURACY,
+    _PROMPT_HEADER, _COLLECT_HEADER, _COLLECT_COMMON,
+    _COLLECT_PERMIT, _COLLECT_PERMIT_GUARD, _COLLECT_PERMIT_NEW_BUILD,
+    _COLLECT_PERMIT_USE_CHANGE, _COLLECT_PERMIT_LOOKUP,
+    _COLLECT_FOOD, _COLLECT_FIRE, _COLLECT_SIGNAGE, _COLLECT_PROGRESS,
+    _PROMPT_TOOLS, _ANSWER_COMMON, _ANSWER_PERMIT_STAGES, _PROMPT_ACCURACY,
 ])
 
 # === LLM + 도구 바인딩 ===
