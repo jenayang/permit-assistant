@@ -700,6 +700,59 @@ def _should_force_construction_guide(state: AgentState) -> bool:
     return any(kw in prior_text for kw in _STEP2_KEYWORDS)
 
 
+# 정의를 묻는 질문("건폐율이 뭐야")은 기록할 사실이 없어 강제 대상에서 뺀다.
+# 빼는 방향은 안전하다 - 강제를 안 하면 그냥 지금까지의 동작(모델 재량)으로
+# 돌아갈 뿐이다.
+_DEFINITION_QUESTION_MARKERS = ("뭐야", "뭔가요", "무엇", "정의", "뜻이", "차이가")
+
+
+def _forced_record_tool(state: AgentState) -> str | None:
+    """유저가 이번 턴에 어떤 도메인을 꺼냈는데 그 도메인 사실이 아직 하나도
+    기록되지 않았으면, 그 도메인의 record_* 도구를 tool_choice로 강제한다.
+
+    2026-08-02 실측으로 원인을 규명한 뒤 도입했다. LLM 1회 호출로 격리해서
+    측정한 결과(시행 3회, 전부 동일 = 결정론적):
+      - 운영과 동일한 15개 도구:        record_* 호출 0/3
+      - 관련 도구 3개만 노출:            signage 3/3, food 0/3
+      - tool_choice 강제:                둘 다 3/3
+    즉 ① 모델이 도구를 "필수"가 아니라 "권장"으로 다루고 ② 도구 수가 많을수록
+    선택이 흐려진다. 프롬프트로 "반드시 기록하라"고 아무리 적어도(실제로 여러 번
+    강화했다) 안 고쳐지던 이유다. 반면 API 레벨 강제는 100% 재현됐다 -
+    get_construction_guide 한 지점에만 좁게 쓰던 방식(_should_force_construction_guide)을
+    모든 도메인으로 일반화한 것.
+
+    강제 범위를 좁게 유지하는 세 조건:
+    1. facts가 완전히 비어 있을 때만 - 도메인당 대화 전체에서 사실상 첫 기록
+       한 번뿐이라 강제가 무한히 반복되지 않는다.
+    2. 이번 턴에 그 도구가 아직 안 불렸을 때만 - 강제했는데 모델이 전부 None으로
+       채워 보내면 facts가 여전히 비어 다음 호출에서 또 강제되는 무한 루프가
+       생긴다. 턴 안에서 1회로 제한해 끊는다.
+    3. 정의를 묻는 질문은 제외 - 기록할 사실 자체가 없다.
+    """
+    messages = state.get("messages") or []
+    if not messages or not isinstance(messages[-1], HumanMessage):
+        return None
+    text = extract_text(messages[-1].content)
+    if any(marker in text for marker in _DEFINITION_QUESTION_MARKERS):
+        return None
+
+    called_this_turn = set()
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage):
+            break
+        if isinstance(m, AIMessage):
+            called_this_turn.update(tc["name"] for tc in (m.tool_calls or []))
+
+    for config in DOMAIN_CONFIGS:
+        if state.get(config.facts_key):
+            continue
+        if config.record_tool in called_this_turn:
+            continue
+        if any(kw in text for kw in config.keywords):
+            return config.record_tool
+    return None
+
+
 # === 노드 정의 ===
 def agent_node(state: AgentState) -> dict:
     """LLM을 호출해서 다음 액션 결정.
@@ -735,7 +788,14 @@ def agent_node(state: AgentState) -> dict:
         messages.append(SystemMessage(content=directive))
     messages.extend(state["messages"])
 
-    force_tool = "get_construction_guide" if _should_force_construction_guide(state) else None
+    # 공사 안내 강제가 우선 - Step1→2 전환은 그 턴에 반드시 짚어야 하는 지점이라,
+    # 같은 턴에 기록 강제와 겹치면 전환 쪽을 먼저 처리하고 기록은 다음 턴에 맡긴다.
+    force_tool = (
+        "get_construction_guide" if _should_force_construction_guide(state)
+        else _forced_record_tool(state)
+    )
+    if force_tool:
+        logger.info("[agent] tool_choice 강제: %s", force_tool)
 
     if not _gemini_quota_exhausted:
         try:
@@ -841,6 +901,8 @@ class _DomainConfig:
     facts_key: str
     state_key: str | None         # 즉시 저장할 상태 키. None이면 저장 안 함(permit - finalize_node가 나중에 따로 처리)
     classify_fn: Callable[[dict], ClassificationOutput | None]
+    record_tool: str              # 이 도메인의 사실을 기록하는 도구 이름(tool_choice 강제 대상)
+    keywords: tuple[str, ...]     # 유저가 이 도메인을 꺼냈는지 판별할 키워드(프롬프트 블록 점등과 공유)
 
 
 def _classify_permit(facts: dict) -> ClassificationOutput | None:
@@ -909,10 +971,14 @@ def _classify_signage(facts: dict) -> ClassificationOutput | None:
 # 도메인을 추가할 땐 이 목록에 한 줄만 추가하면 된다 - classify_node/
 # route_after_tools 둘 다 이 목록만 보고 움직이므로 그래프 쪽은 더 안 고쳐도 됨.
 DOMAIN_CONFIGS: list[_DomainConfig] = [
-    _DomainConfig(facts_key="case_facts", state_key=None, classify_fn=_classify_permit),
-    _DomainConfig(facts_key="food_facts", state_key="food_result", classify_fn=_classify_food),
-    _DomainConfig(facts_key="fire_facts", state_key="fire_result", classify_fn=_classify_fire),
-    _DomainConfig(facts_key="signage_facts", state_key="signage_result", classify_fn=_classify_signage),
+    _DomainConfig(facts_key="case_facts", state_key=None, classify_fn=_classify_permit,
+                  record_tool="record_case_facts", keywords=_PERMIT_PROMPT_KEYWORDS),
+    _DomainConfig(facts_key="food_facts", state_key="food_result", classify_fn=_classify_food,
+                  record_tool="record_food_facts", keywords=_FOOD_PROMPT_KEYWORDS),
+    _DomainConfig(facts_key="fire_facts", state_key="fire_result", classify_fn=_classify_fire,
+                  record_tool="record_fire_facts", keywords=_FIRE_PROMPT_KEYWORDS),
+    _DomainConfig(facts_key="signage_facts", state_key="signage_result", classify_fn=_classify_signage,
+                  record_tool="record_signage_facts", keywords=_SIGNAGE_PROMPT_KEYWORDS),
 ]
 
 
