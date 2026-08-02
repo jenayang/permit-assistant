@@ -706,7 +706,44 @@ def _should_force_construction_guide(state: AgentState) -> bool:
 _DEFINITION_QUESTION_MARKERS = ("뭐야", "뭔가요", "무엇", "정의", "뜻이", "차이가")
 
 
-def _forced_record_tool(state: AgentState) -> str | None:
+@dataclass(frozen=True)
+class _ForcedToolDecision:
+    """이번 턴에 tool_choice로 무엇을 왜 강제했는지. 로그로 남겨서 나중에
+    "강제가 실제로 얼마나 자주 필요한지 / 강제 후 무엇이 추출됐는지"를 분석할
+    수 있게 한다 - 이 프로젝트는 실측으로 방향을 정해왔는데(4-9 트리밍 반증,
+    4-12 원인 규명), 정작 강제 자체에 대한 데이터는 없었다.
+
+    로그 포맷(grep 하기 쉽게 고정):
+      [FORCED_TOOL] domain=food tool=record_food_facts reason=no_facts trigger='카페'
+      [FORCED_TOOL_RESULT] tool=record_food_facts called=True args={'serves_food': True}
+    """
+    tool: str
+    domain: str
+    reason: str
+    trigger: str
+
+
+def _log_forced_result(decision: _ForcedToolDecision | None, response: AIMessage) -> None:
+    """강제한 도구가 실제로 불렸는지 + 어떤 값이 추출됐는지 남긴다.
+
+    called=False가 찍히면 tool_choice 강제조차 안 먹혔다는 뜻이라 즉시 조사 대상이고,
+    args가 비어 있으면 "호출은 됐지만 추출은 실패"라 다음 과제(추출 품질)의 입력이
+    된다 - 호출률과 추출 품질을 따로 볼 수 있게 일부러 두 값을 같이 찍는다.
+    """
+    if decision is None:
+        return
+    args = next(
+        (tc["args"] for tc in (getattr(response, "tool_calls", None) or [])
+         if tc["name"] == decision.tool),
+        None,
+    )
+    logger.info(
+        "[FORCED_TOOL_RESULT] tool=%s called=%s args=%r",
+        decision.tool, args is not None, args if args is not None else {},
+    )
+
+
+def _forced_record_tool(state: AgentState) -> _ForcedToolDecision | None:
     """유저가 이번 턴에 어떤 도메인을 꺼냈는데 그 도메인 사실이 아직 하나도
     기록되지 않았으면, 그 도메인의 record_* 도구를 tool_choice로 강제한다.
 
@@ -748,8 +785,14 @@ def _forced_record_tool(state: AgentState) -> str | None:
             continue
         if config.record_tool in called_this_turn:
             continue
-        if any(kw in text for kw in config.keywords):
-            return config.record_tool
+        trigger = next((kw for kw in config.keywords if kw in text), None)
+        if trigger is not None:
+            return _ForcedToolDecision(
+                tool=config.record_tool,
+                domain=config.domain,
+                reason="no_facts",
+                trigger=trigger,
+            )
     return None
 
 
@@ -790,17 +833,25 @@ def agent_node(state: AgentState) -> dict:
 
     # 공사 안내 강제가 우선 - Step1→2 전환은 그 턴에 반드시 짚어야 하는 지점이라,
     # 같은 턴에 기록 강제와 겹치면 전환 쪽을 먼저 처리하고 기록은 다음 턴에 맡긴다.
-    force_tool = (
-        "get_construction_guide" if _should_force_construction_guide(state)
-        else _forced_record_tool(state)
-    )
-    if force_tool:
-        logger.info("[agent] tool_choice 강제: %s", force_tool)
+    if _should_force_construction_guide(state):
+        decision = _ForcedToolDecision(
+            tool="get_construction_guide", domain="construction",
+            reason="step1_done_guide_unshown", trigger="(직전 AI가 Step 2 제안)",
+        )
+    else:
+        decision = _forced_record_tool(state)
+    force_tool = decision.tool if decision else None
+    if decision:
+        logger.info(
+            "[FORCED_TOOL] domain=%s tool=%s reason=%s trigger=%r",
+            decision.domain, decision.tool, decision.reason, decision.trigger,
+        )
 
     if not _gemini_quota_exhausted:
         try:
             bound = llm.bind_tools(TOOLS, tool_choice=force_tool) if force_tool else llm_with_tools
             response = bound.invoke(messages)
+            _log_forced_result(decision, response)
             return _agent_result(response)
         except Exception as exc:
             if not _is_quota_error(exc):
@@ -812,6 +863,7 @@ def agent_node(state: AgentState) -> dict:
             _gemini_quota_exhausted = True
 
     response = _get_cerebras_llm_with_tools(tool_choice=force_tool).invoke(messages)
+    _log_forced_result(decision, response)
     return _agent_result(response)
 
 
@@ -903,6 +955,7 @@ class _DomainConfig:
     classify_fn: Callable[[dict], ClassificationOutput | None]
     record_tool: str              # 이 도메인의 사실을 기록하는 도구 이름(tool_choice 강제 대상)
     keywords: tuple[str, ...]     # 유저가 이 도메인을 꺼냈는지 판별할 키워드(프롬프트 블록 점등과 공유)
+    domain: str                   # 로그ᆞ분석용 짧은 이름(facts_key에서 유도하면 case_facts→"case"처럼 어색해짐)
 
 
 def _classify_permit(facts: dict) -> ClassificationOutput | None:
@@ -972,13 +1025,17 @@ def _classify_signage(facts: dict) -> ClassificationOutput | None:
 # route_after_tools 둘 다 이 목록만 보고 움직이므로 그래프 쪽은 더 안 고쳐도 됨.
 DOMAIN_CONFIGS: list[_DomainConfig] = [
     _DomainConfig(facts_key="case_facts", state_key=None, classify_fn=_classify_permit,
-                  record_tool="record_case_facts", keywords=_PERMIT_PROMPT_KEYWORDS),
+                  record_tool="record_case_facts", keywords=_PERMIT_PROMPT_KEYWORDS,
+                  domain="permit"),
     _DomainConfig(facts_key="food_facts", state_key="food_result", classify_fn=_classify_food,
-                  record_tool="record_food_facts", keywords=_FOOD_PROMPT_KEYWORDS),
+                  record_tool="record_food_facts", keywords=_FOOD_PROMPT_KEYWORDS,
+                  domain="food"),
     _DomainConfig(facts_key="fire_facts", state_key="fire_result", classify_fn=_classify_fire,
-                  record_tool="record_fire_facts", keywords=_FIRE_PROMPT_KEYWORDS),
+                  record_tool="record_fire_facts", keywords=_FIRE_PROMPT_KEYWORDS,
+                  domain="fire"),
     _DomainConfig(facts_key="signage_facts", state_key="signage_result", classify_fn=_classify_signage,
-                  record_tool="record_signage_facts", keywords=_SIGNAGE_PROMPT_KEYWORDS),
+                  record_tool="record_signage_facts", keywords=_SIGNAGE_PROMPT_KEYWORDS,
+                  domain="signage"),
 ]
 
 
