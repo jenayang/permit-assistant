@@ -17,18 +17,48 @@ from pydantic import BaseModel, Field
 
 from src import config
 from src.pipeline import get_project_status, ingest, query, update_task_progress
-from src.retriever import count_documents
+from src.retriever import count_documents, find_unindexed_sources
 from src.agents.permit import PROCEDURE_TREE, PermitResult
 
 logger = logging.getLogger(__name__)
 
 
 # === Lifecycle: 앱 시작 시 초기화 ===
+def _warn_if_index_stale() -> None:
+    """data/에 있는데 아직 인덱싱 안 된 파일이 있으면 시작 시 경고한다.
+
+    인덱싱을 잊으면 검색이 에러를 내는 게 아니라 "가장 비슷한" 무관한 조문을
+    조용히 돌려줘서, 답변은 그럴듯한데 근거만 틀린 상태가 된다 - 눈치채기
+    가장 어려운 종류의 고장이라 시작할 때 눈에 띄게 알린다(2026-08-02에 실제로
+    법령 6종이 누락된 채 운영되고 있었다, retriever.find_unindexed_sources 참고).
+
+    경고만 하고 起動은 막지 않는다 - 일부 파일이 빠져도 나머지 기능은 정상이고,
+    이 환경처럼 hwp5html이 없어 .hwp를 못 읽는 경우까지 서버를 못 뜨게 하면
+    과한 조치다.
+    """
+    try:
+        missing = find_unindexed_sources()
+    except Exception as exc:  # DB가 아직 없을 수도 있음 - 점검 실패로 起動을 막지 않는다
+        logger.warning("인덱스 최신성 점검을 건너뜁니다: %s", exc)
+        return
+    if not missing:
+        return
+    logger.warning(
+        "인덱싱되지 않은 문서 %d건이 있습니다. 검색이 이 문서들을 못 찾아 "
+        "무관한 조항을 근거로 답변할 수 있습니다. `uv run python -m src.pipeline --ingest` "
+        "실행을 권장합니다:\n%s",
+        len(missing),
+        "\n".join(f"  - {s}" for s in missing[:10])
+        + (f"\n  ... 외 {len(missing) - 10}건" if len(missing) > 10 else ""),
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # lifespan - 앱 생명주기 관리
     """앱 시작 시 설정 검증."""
     config.setup_logging()  # 로깅 설정
     config.validate()       # 검증(API키 확인)
+    _warn_if_index_stale()
     logger.info("RAG API 시작 완료")
     yield
     logger.info("RAG API 종료")

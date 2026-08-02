@@ -241,3 +241,39 @@ def reset_collection() -> None:
         record_manager.delete_keys(keys)
         logger.info("레코드 매니저 해시 기록 %d개 삭제 완료", len(keys))
 
+
+
+# === 인덱스 최신성 점검 ===
+def indexed_sources() -> set[str]:
+    """벡터DB에 실제로 들어있는 source 값(예: "laws/건축법.pdf") 집합."""
+    result = get_vectorstore().get(include=["metadatas"])
+    return {m.get("source") for m in result["metadatas"] if m.get("source")}
+
+
+def find_unindexed_sources() -> list[str]:
+    """data/ 안에 있는데 아직 인덱싱되지 않은 파일의 source 경로 목록.
+
+    법령 PDF를 data/에 추가하고 재인덱싱을 잊으면 **조용히 틀린 답이 나간다** -
+    검색은 실패하지 않고 그냥 "가장 비슷한" 무관한 조문을 돌려주기 때문이다.
+    실제로 겪었다(2026-08-02): 부가가치세법ᆞ4대보험법 등 6종이 data/에는 있는데
+    DB엔 0청크였고, get_business_registration_guide(사업자등록)가 식품위생법
+    공유주방 조문을 24,546토큰이나 반환하고 있었다. 재인덱싱 후 그 가이드는
+    16,948토큰(-31%)으로 줄고 실제로 부가가치세법을 인용하기 시작했다.
+
+    답변이 그럴듯해 보여서 눈치채기 어려운 종류의 고장이라, 서버 시작 시
+    경고로 알린다(api.py lifespan). 인제스천이 실패하는 파일(예: hwp5html 미설치
+    환경의 .hwp)도 여기 잡히는데, 그건 실제로 근거가 빠진 상태가 맞으므로
+    알려주는 게 옳다.
+    """
+    from src.ingestion import discover_files
+
+    indexed = indexed_sources()
+    missing = []
+    for path in discover_files():
+        try:
+            source = str(path.relative_to(config.DATA_DIR))
+        except ValueError:
+            source = path.name
+        if source not in indexed:
+            missing.append(source)
+    return missing
