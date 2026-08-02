@@ -38,7 +38,13 @@ from dataclasses import dataclass
 from typing import Annotated, Callable
 
 from langchain_cerebras import ChatCerebras
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+    trim_messages,
+)
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -601,6 +607,72 @@ def estimate_tokens(messages) -> int:
     return total
 
 
+def _count_message_chars(messages) -> int:
+    """trim_messages에 넘길 토큰 카운터(메시지 분량만 - 도구 스키마 제외).
+
+    estimate_tokens와 달리 고정 오버헤드를 안 더한다 - trim_messages는 "메시지
+    목록이 예산에 맞는지"만 보므로, 고정분은 호출부에서 예산에서 미리 빼둔다.
+    """
+    total = 0
+    for m in messages:
+        total += len(extract_text(getattr(m, "content", "")))
+        for tc in getattr(m, "tool_calls", None) or []:
+            total += len(str(tc.get("args", "")))
+    return total
+
+
+def _fit_context(prefix: list, history: list, using_fallback: bool) -> list:
+    """한도에 가까우면 오래된 대화를 잘라낸 사본을 만든다. 평소엔 원본 그대로.
+
+    설계 선택 세 가지:
+    1. **예산 기준 트리거**(항상 자르지 않음) - 실제 대화는 한도의 2~3%라 평소엔
+       이 코드가 아예 안 켜진다. 예전에 "항상 최근 4턴만" 방식으로 넣었다가
+       효과를 증명 못 해 롤백한 적이 있는데(4-9), 그건 짧은 대화의 멀쩡한 맥락까지
+       매번 버리는 방식이었다. 여기서는 한도 근접이라는 명확한 이유가 있을 때만
+       동작하므로 위험 프로필이 다르다.
+    2. **LLM에 보내는 사본만 자르고 state["messages"]는 보존** - guard_node가
+       메시지 이력을 스캔해서 검색 여부(_has_grounding_search)ᆞ공사 안내 호출
+       여부(_construction_guide_shown)를 판정하기 때문이다. 원본을 지우면 "검색
+       안 했다"고 오판해 없는 위반을 만든다. 체크포인터에도 전체 이력이 남는다.
+    3. **직접 구현 대신 langchain의 trim_messages 사용** - 유효한 이력 형태
+       (HumanMessage로 시작)와 tool_call/ToolMessage 짝 맞추기를 알아서 처리한다.
+       짝이 깨지면 프로바이더가 400을 뱉는데, 그걸 직접 관리하면 버그가 나기 쉽다.
+
+    판정 결과ᆞ사실은 메시지가 아니라 별도 상태 채널(case_facts/permit_result 등)에
+    있고 _roadmap_status_summary가 매 턴 현황을 다시 주입하므로, 오래된 메시지를
+    빼도 "지금까지 뭐가 확정됐는지"는 그대로 전달된다 - 이 구조 덕분에 절삭이
+    일반 챗봇보다 안전하다.
+    """
+    limit = config.CEREBRAS_CONTEXT_LIMIT if using_fallback else config.GEMINI_CONTEXT_LIMIT
+    threshold = limit * config.CONTEXT_TRIM_RATIO
+    if estimate_tokens(prefix + history) <= threshold:
+        return history
+
+    # 예산 = 임계치 - (도구 스키마 + 매 턴 새로 만드는 시스템 메시지 + 출력 여유)
+    budget = int(
+        threshold - _TOOL_SCHEMA_CHARS - _count_message_chars(prefix) - config.MAX_OUTPUT_TOKENS
+    )
+    if budget <= 0:
+        logger.warning("[CONTEXT] 고정 오버헤드만으로 예산 초과 - 절삭 생략")
+        return history
+
+    trimmed = trim_messages(
+        history,
+        max_tokens=budget,
+        token_counter=_count_message_chars,
+        strategy="last",       # 최근 대화를 남기고 오래된 것부터 버린다
+        start_on="human",      # 유효한 이력 형태 유지
+        include_system=False,  # 시스템 메시지는 prefix로 따로 붙는다
+        allow_partial=False,   # 메시지를 반 토막 내지 않는다
+    )
+    logger.warning(
+        "[CONTEXT] 한도 근접으로 대화 이력 절삭: %d개 → %d개 (예산 %d) - "
+        "판정 결과는 상태에 보존되며 원본 이력도 그대로 남습니다",
+        len(history), len(trimmed), budget,
+    )
+    return trimmed
+
+
 def _log_context_usage(messages, using_fallback: bool) -> None:
     """이번 호출의 컨텍스트 사용량을 남긴다(차단하지 않음).
 
@@ -889,14 +961,17 @@ def agent_node(state: AgentState) -> dict:
     못했다. 상세는 docs/project_report.md 4-9 참고.
     """
     global _gemini_quota_exhausted
-    messages = [
+    # prefix는 매 턴 상태에서 새로 만드는 시스템 메시지라 절삭 대상이 아니다
+    # (여기에 로드맵 현황이 들어 있어서, 오래된 대화를 잘라도 "지금까지 뭐가
+    # 확정됐는지"는 그대로 전달된다).
+    prefix = [
         SystemMessage(content=build_system_prompt(state)),
         SystemMessage(content=_roadmap_status_summary(state)),
     ]
     directive = permit_phase_directive(state)
     if directive:
-        messages.append(SystemMessage(content=directive))
-    messages.extend(state["messages"])
+        prefix.append(SystemMessage(content=directive))
+    messages = prefix + _fit_context(prefix, list(state["messages"]), _gemini_quota_exhausted)
 
     # 공사 안내 강제가 우선 - Step1→2 전환은 그 턴에 반드시 짚어야 하는 지점이라,
     # 같은 턴에 기록 강제와 겹치면 전환 쪽을 먼저 처리하고 기록은 다음 턴에 맡긴다.

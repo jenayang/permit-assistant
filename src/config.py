@@ -101,8 +101,12 @@ MAX_OUTPUT_TOKENS = 2048
 GEMINI_CONTEXT_LIMIT = 1_048_576
 CEREBRAS_CONTEXT_LIMIT = 131_072
 # 이 비율을 넘으면 경고 로그를 남긴다(차단은 안 함). 실제로 얼마나 자주 위험
-# 구간에 가는지 데이터를 쌓아, 트리밍ᆞ요약 도입 여부를 실측으로 판단하기 위함.
+# 구간에 가는지 데이터를 쌓아, 요약 도입 여부를 실측으로 판단하기 위함.
 CONTEXT_WARN_RATIO = 0.75
+# 이 비율을 넘으면 LLM에 보내는 사본에서만 오래된 대화를 잘라낸다(상태 원본은
+# 보존). 평소 대화는 한도의 2~3%라 이 코드는 아예 안 켜진다 - "항상 최근 N턴만"
+# 방식과 달리 짧은 대화의 멀쩡한 맥락을 버리지 않기 위해 예산 기준으로 둔다.
+CONTEXT_TRIM_RATIO = 0.8
 TEMPERATURE = 0  # 100% 사실 기반
 # gemini-2.5 계열은 내부 reasoning("thinking")도 MAX_OUTPUT_TOKENS를 소비함.
 # 0으로 비활성화하지 않으면 예산이 작을 때 thinking만 하다 답변이 빈 문자열로 끝남.
