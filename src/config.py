@@ -93,6 +93,16 @@ DISTANCE_METRIC = "cosine"
 
 # === 생성 ===
 MAX_OUTPUT_TOKENS = 2048
+
+# === 컨텍스트 한도 ===
+# 공식 스펙(2026-07-31 확인). 폴백 모델이 주 모델보다 8배 좁아서, 같은 대화가
+# Gemini에선 여유롭고 Cerebras에선 넘칠 수 있다 - 하필 폴백이 걸리는 조건이
+# "Gemini 할당량을 다 쓴 활성 사용자"라 대화를 많이 한 사람일수록 위험하다.
+GEMINI_CONTEXT_LIMIT = 1_048_576
+CEREBRAS_CONTEXT_LIMIT = 131_072
+# 이 비율을 넘으면 경고 로그를 남긴다(차단은 안 함). 실제로 얼마나 자주 위험
+# 구간에 가는지 데이터를 쌓아, 트리밍ᆞ요약 도입 여부를 실측으로 판단하기 위함.
+CONTEXT_WARN_RATIO = 0.75
 TEMPERATURE = 0  # 100% 사실 기반
 # gemini-2.5 계열은 내부 reasoning("thinking")도 MAX_OUTPUT_TOKENS를 소비함.
 # 0으로 비활성화하지 않으면 예산이 작을 때 thinking만 하다 답변이 빈 문자열로 끝남.

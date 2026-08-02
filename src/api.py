@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from src import config
 from src.pipeline import get_project_status, ingest, query, update_task_progress
+from src.agent import ContextOverflowError
 from src.retriever import count_documents, find_unindexed_sources
 from src.agents.permit import PROCEDURE_TREE, PermitResult
 
@@ -193,6 +194,17 @@ def query_endpoint(req: QueryRequest) -> QueryResponse:
 
     except ValueError as e: # 400 클라이언트 잘못(빈 질문 등)
         raise HTTPException(status_code=400, detail=str(e))
+    except ContextOverflowError as e:
+        # 프로바이더 원본 에러(영문 스택)를 그대로 노출하면 사용자가 무엇을
+        # 해야 할지 알 수 없다. 지금까지의 판정 결과는 이미 상태에 남아 있으니
+        # 새 대화로 이어가면 처음부터 다시 할 필요가 없다는 점을 안내한다.
+        logger.error("컨텍스트 한도 초과: %s", e)
+        raise HTTPException(
+            status_code=413,
+            detail="대화가 너무 길어져 한 번에 처리할 수 있는 분량을 넘었습니다. "
+                   "새 대화를 시작해 주세요 - 지금까지 확인된 판정 결과는 "
+                   "로드맵에 저장되어 있습니다.",
+        )
     except Exception as e:  # 500 서버 잘못(LLM호출 실패 등)
         logger.error("질의 실패: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"답변 생성 실패: {e}")

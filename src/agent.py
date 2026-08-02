@@ -29,6 +29,7 @@ classify/finalize/guard는 모두 LLM이 아니라 그래프가 강제로 실행
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
@@ -554,6 +555,72 @@ def _is_quota_error(exc: Exception) -> bool:
     return "RESOURCE_EXHAUSTED" in msg or "429" in msg
 
 
+class ContextOverflowError(RuntimeError):
+    """컨텍스트 한도 초과로 LLM 호출이 실패한 경우.
+
+    프로바이더 원본 에러를 그대로 500으로 흘리면 사용자에겐 의미 없는 영문
+    스택이 노출되고, 무엇을 해야 할지도 알 수 없다. 이 타입으로 감싸서
+    api.py가 "새 대화를 시작하라"는 행동 가능한 안내로 바꾼다.
+    """
+
+
+_CONTEXT_ERROR_MARKERS = (
+    "context length", "context_length", "maximum context", "too many tokens",
+    "token limit", "input is too long", "request too large", "reduce the length",
+)
+
+
+def _is_context_overflow_error(exc: Exception) -> bool:
+    """컨텍스트 한도 초과 에러인지 판별. 프로바이더마다 문구가 달라 부분
+    문자열로 넓게 잡는다 - 잘못 잡아도 결과는 "더 친절한 안내"라 안전한 방향."""
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _CONTEXT_ERROR_MARKERS)
+
+
+# 도구 스키마(설명+args)는 매 호출 전송되지만 messages에는 없어서 따로 더한다.
+# 모듈 로드 시 1회만 계산.
+_TOOL_SCHEMA_CHARS = sum(
+    len(t.description or "") + len(json.dumps(t.args, ensure_ascii=False)) for t in TOOLS
+)
+
+
+def estimate_tokens(messages) -> int:
+    """LLM에 나가는 컨텍스트 크기 추정치(토큰).
+
+    한국어 법령ᆞ대화 텍스트를 실측하니 cl100k 기준 1.02 문자/토큰으로 꽤
+    일정해서, 문자 수를 그대로 토큰 수로 본다(약 2% 과대추정 - 가드 입장에선
+    안전한 방향). tiktoken을 안 쓰는 이유는 두 가지다: 직접 선언한 의존성이
+    아니라 전이 의존성이고, cl100k는 Gemini/Gemma의 토크나이저가 아니라
+    어차피 근사치라 정밀도를 위해 의존성을 늘릴 이유가 없다.
+    """
+    total = _TOOL_SCHEMA_CHARS
+    for m in messages:
+        total += len(extract_text(getattr(m, "content", "")))
+        for tc in getattr(m, "tool_calls", None) or []:
+            total += len(str(tc.get("args", "")))
+    return total
+
+
+def _log_context_usage(messages, using_fallback: bool) -> None:
+    """이번 호출의 컨텍스트 사용량을 남긴다(차단하지 않음).
+
+    grep 하기 쉬운 고정 포맷:
+      [CONTEXT] model=cerebras est=95,120 limit=131,072 pct=73%
+    실제로 얼마나 자주 위험 구간에 가는지 데이터가 쌓여야 트리밍ᆞ요약 같은
+    큰 설계를 도입할지 실측으로 판단할 수 있다 - 2026-08-02 시점 추정으로는
+    로드맵 완주 대화가 한도의 70%라 아직 근거가 약하다고 보고 도입을 미뤘다.
+    """
+    est = estimate_tokens(messages)
+    limit = config.CEREBRAS_CONTEXT_LIMIT if using_fallback else config.GEMINI_CONTEXT_LIMIT
+    ratio = est / limit
+    line = "[CONTEXT] model=%s est=%d limit=%d pct=%d%%"
+    args = ("cerebras" if using_fallback else "gemini", est, limit, round(ratio * 100))
+    if ratio >= config.CONTEXT_WARN_RATIO:
+        logger.warning(line + " - 한도 근접", *args)
+    else:
+        logger.info(line, *args)
+
+
 def _get_cerebras_llm_with_tools(tool_choice: str | None = None):
     """tool_choice가 없으면(평소 경로) 모듈 전역 싱글턴을 재사용한다. 특정
     도구를 강제할 때(tool_choice 지정)는 그때만 쓰는 상황이라 캐싱하지 않고
@@ -848,12 +915,15 @@ def agent_node(state: AgentState) -> dict:
         )
 
     if not _gemini_quota_exhausted:
+        _log_context_usage(messages, using_fallback=False)
         try:
             bound = llm.bind_tools(TOOLS, tool_choice=force_tool) if force_tool else llm_with_tools
             response = bound.invoke(messages)
             _log_forced_result(decision, response)
             return _agent_result(response)
         except Exception as exc:
+            if _is_context_overflow_error(exc):
+                raise ContextOverflowError(str(exc)) from exc
             if not _is_quota_error(exc):
                 raise
             logger.warning(
@@ -862,7 +932,13 @@ def agent_node(state: AgentState) -> dict:
             )
             _gemini_quota_exhausted = True
 
-    response = _get_cerebras_llm_with_tools(tool_choice=force_tool).invoke(messages)
+    _log_context_usage(messages, using_fallback=True)
+    try:
+        response = _get_cerebras_llm_with_tools(tool_choice=force_tool).invoke(messages)
+    except Exception as exc:
+        if _is_context_overflow_error(exc):
+            raise ContextOverflowError(str(exc)) from exc
+        raise
     _log_forced_result(decision, response)
     return _agent_result(response)
 
