@@ -894,8 +894,44 @@ def _agent_result(response: AIMessage) -> dict:
     for tc in getattr(response, "tool_calls", None) or []:
         state_key = _FACT_TOOL_TO_STATE_KEY.get(tc["name"])
         if state_key is not None:
-            updates.setdefault(state_key, {}).update(tc["args"])
+            updates.setdefault(state_key, {}).update(_coerce_tool_args(tc["name"], tc["args"]))
     return {"messages": [response], **updates}
+
+
+_TOOL_ARGS_SCHEMA = {t.name: t.args_schema for t in TOOLS}
+
+
+def _coerce_tool_args(tool_name: str, args: dict) -> dict:
+    """LLM이 보낸 raw args를 그 도구의 pydantic 스키마로 통과시켜 타입을 맞춘다.
+
+    ToolNode가 도구를 **실행**할 때는 이 검증을 거치지만, 여기서는 tc["args"]를
+    날것으로 읽어 상태에 넣기 때문에 그 변환을 우회하고 있었다. 모델마다 JSON
+    직렬화가 달라서 실제로 문제가 됐다(2026-08-02 실측):
+
+        Gemini : {'floors': 3,   'current_facility_group': 8}    ← int
+        Gemma4 : {'floors': '3', 'current_facility_group': '8'}  ← 문자열
+
+    Gemma4는 값을 틀린 게 아니라(사무실→8, 카페→7 매핑까지 전부 정확) 타입만
+    문자열로 보냈다. 그런데 그게 그대로 상태에 들어가면 classify_case에서
+    `facts["floors"] < 3`이 **TypeError로 크래시**한다(신축ᆞ대수선 경로).
+    용도변경은 시설군이 1~9 한 자리라 문자열 비교가 우연히 숫자 순서와 같아
+    "동작하는 것처럼" 보였는데, 이것도 운이지 설계가 아니다.
+
+    프롬프트로 "숫자로 보내라"고 지시하는 것보다 여기서 강제 변환하는 게 맞다 -
+    모델ᆞ프로바이더가 바뀌어도 유효하고, 스키마라는 이미 있는 단일 진실을
+    재사용하기 때문이다. 검증 실패 시엔 원본을 그대로 두어 기존 동작을 유지한다
+    (여기서 예외를 던지면 대화 자체가 끊긴다).
+    """
+    schema = _TOOL_ARGS_SCHEMA.get(tool_name)
+    if schema is None or not args:
+        return args
+    try:
+        validated = schema.model_validate(args).model_dump()
+    except Exception as exc:  # ValidationError 등 - 원본 유지가 더 안전
+        logger.warning("[coerce] %s args 검증 실패, 원본 사용: %s", tool_name, exc)
+        return args
+    # 원래 보낸 키만 남긴다 - model_dump()는 안 보낸 필드도 None으로 채워 돌려준다.
+    return {k: validated[k] for k in args if k in validated}
 
 
 def _auto_search_messages(query: str) -> list:
