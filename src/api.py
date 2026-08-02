@@ -45,9 +45,10 @@ def _warn_if_index_stale() -> None:
     if not missing:
         return
     logger.warning(
-        "인덱싱되지 않은 문서 %d건이 있습니다. 검색이 이 문서들을 못 찾아 "
-        "무관한 조항을 근거로 답변할 수 있습니다. `uv run python -m src.pipeline --ingest` "
-        "실행을 권장합니다:\n%s",
+        "인덱싱되지 않은 문서 %d건이 있습니다. 아직 인제스천을 안 돌렸다면 "
+        "`uv run python -m src.pipeline --ingest`를 실행하세요 - 그래도 남는 파일은 "
+        "추출할 본문이 없는 서식ᆞ이미지일 수 있고, 그 경우는 검색에서 빠지는 게 "
+        "정상입니다(로그의 '→ 0 청크' 확인):\n%s",
         len(missing),
         "\n".join(f"  - {s}" for s in missing[:10])
         + (f"\n  ... 외 {len(missing) - 10}건" if len(missing) > 10 else ""),
