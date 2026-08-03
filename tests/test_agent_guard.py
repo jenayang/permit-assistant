@@ -12,10 +12,40 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.agent import (
     _STAGE_DOMAIN,
+    _derive_ledger_facility_group,
     _should_force_construction_guide,
     guard_node,
     permit_phase_directive,
 )
+
+
+def _ledger_msg(content: str) -> ToolMessage:
+    return ToolMessage(content=content, tool_call_id="x", name="lookup_building_ledger")
+
+
+def test_derive_ledger_facility_group_maps_use_name():
+    """건축물대장 조회 성공 + current_facility_group 미기록이면 주용도를
+    시설군으로 자동 변환한다(guard 재시도 없이 코드가 채움)."""
+    st = {"messages": [HumanMessage(content="q"), _ledger_msg("조회 결과:\n- 주용도: 제1종근린생활시설")],
+          "case_facts": {}}
+    assert _derive_ledger_facility_group(st) == 7
+
+
+def test_derive_ledger_skips_when_already_recorded():
+    st = {"messages": [HumanMessage(content="q"), _ledger_msg("- 주용도: 업무시설")],
+          "case_facts": {"current_facility_group": 8}}
+    assert _derive_ledger_facility_group(st) is None
+
+
+def test_derive_ledger_none_when_lookup_failed():
+    st = {"messages": [HumanMessage(content="q"), _ledger_msg("등록된 건축물대장이 없습니다")],
+          "case_facts": {}}
+    assert _derive_ledger_facility_group(st) is None
+
+
+def test_derive_ledger_none_when_no_lookup():
+    st = {"messages": [HumanMessage(content="q")], "case_facts": {}}
+    assert _derive_ledger_facility_group(st) is None
 
 # permit_synthesis가 채워져 있어야 [Step 1-2]/[Step 1-3] 언급이 synthesis-gap
 # 위반(guard_node 위반 3번)에 안 걸린다 - 이 파일의 테스트는 disclosed_stage

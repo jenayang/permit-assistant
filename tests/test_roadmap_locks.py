@@ -47,3 +47,20 @@ def test_staff_registration_hires_staff_false_bypasses_lock(roadmap_lock_results
 def test_opening_locked_until_all_step3_items_done(roadmap_lock_results):
     assert roadmap_lock_results["opened: 5개 중 1개(위생교육)만 빠져도 잠김"]
     assert roadmap_lock_results["opened: 5개 전부 충족되면 해제"]
+
+
+def test_architect_badge_reflects_requires_architect(roadmap_lock_results):
+    # 건축법 제23조 건축사 대행 배지: 백엔드 requires_architect 값이 Step 1의
+    # architect 필드로 그대로 전달되는지(true=대행/false=직접/null=배지없음).
+    assert roadmap_lock_results["architect: true면 Step1 architect=true(대행 배지 표시)"]
+    assert roadmap_lock_results["architect: false면 배지 미표시(필드만 false)"]
+    assert roadmap_lock_results["architect: null이면 배지 없음"]
+
+
+def test_not_applicable_items_are_closed(roadmap_lock_results):
+    # 대화로 필요 없다고 확인된 항목은 notApplicable(✕)로 닫힌다.
+    assert roadmap_lock_results["na: 소방시설 대상 없음(빈 배열)이면 해당없음"]
+    assert roadmap_lock_results["na: 간판 신고 불필요면 해당없음"]
+    assert roadmap_lock_results["na: 소방시설 있으면 해당없음 아님"]
+    assert roadmap_lock_results["na: 식품위생 신고대상제외면 해당없음"]
+    assert roadmap_lock_results["na: 직원 없음이면 직원 등록 해당없음"]

@@ -20,13 +20,13 @@ const endMarker = "\n    ];\n";
 const endIdx = html.indexOf(endMarker, startIdx) + endMarker.length;
 const block = html.slice(startIdx, endIdx);
 
-function buildSteps({ latestFoodResult, latestFireResult, latestSignageResult, taskProgress, actType, step1Substeps, latestPermitResult, caseTypeResult }) {
+function buildSteps({ latestFoodResult, latestFireResult, latestSignageResult, taskProgress, actType, step1Substeps, latestPermitResult, caseTypeResult, requiresArchitect = null }) {
   const fn = new Function(
     "latestFoodResult", "latestFireResult", "latestSignageResult", "taskProgress",
-    "actType", "step1Substeps", "latestPermitResult", "caseTypeResult",
+    "actType", "step1Substeps", "latestPermitResult", "caseTypeResult", "requiresArchitect",
     block + "\nreturn steps;"
   );
-  return fn(latestFoodResult, latestFireResult, latestSignageResult, taskProgress, actType, step1Substeps, latestPermitResult, caseTypeResult);
+  return fn(latestFoodResult, latestFireResult, latestSignageResult, taskProgress, actType, step1Substeps, latestPermitResult, caseTypeResult, requiresArchitect);
 }
 
 // renderRoadmap()의 실제 분기(sub.field가 있으면 locked&&!done일 때만 잠금
@@ -34,6 +34,7 @@ function buildSteps({ latestFoodResult, latestFireResult, latestSignageResult, t
 // 1119 참고.
 function isVisuallyLocked(sub) {
   if (sub.info) return false;
+  if (sub.notApplicable) return false;  // 해당없음(✕)이 잠금보다 우선 - 실제 렌더와 동일
   if (sub.field) return !!sub.locked && !sub.done;
   return !!sub.locked;
 }
@@ -112,6 +113,32 @@ function check(label, passed) {
     taskProgress: { business_registration: true, hygiene_education: true },
   });
   check("opened: 5개 전부 충족되면 해제", !isVisuallyLocked(findSub(steps, "Step 4 · 오픈 준비", "영업 시작")));
+}
+
+// 건축사 대행 배지(Step 1) - requiresArchitect 값이 Step 1의 architect 필드로
+// 그대로 반영되는지. 배지는 true(건축사 필수)일 때만 렌더하고 false(개인 직접
+// 가능)ᆞnull은 배지를 표시하지 않는다(false는 채팅 안내로 대체).
+{
+  const step1 = (ra) => buildSteps({ ...commonArgs, latestFoodResult: null, latestFireResult: [], latestSignageResult: null, taskProgress: {}, requiresArchitect: ra }).find((s) => s.title === "Step 1 · 건축 인허가");
+  check("architect: true면 Step1 architect=true(대행 배지 표시)", step1(true).architect === true);
+  check("architect: false면 배지 미표시(필드만 false)", step1(false).architect === false);
+  check("architect: null이면 배지 없음", step1(null).architect === null || step1(null).architect === undefined);
+}
+
+// 해당없음(✕) - 대화로 필요 없다고 확인된 항목은 notApplicable로 닫힌다.
+{
+  let steps = buildSteps({ ...commonArgs, latestFoodResult: null, latestFireResult: [], latestSignageResult: null, taskProgress: {} });
+  check("na: 소방시설 대상 없음(빈 배열)이면 해당없음", !!findSub(steps, "Step 3 · 창업 행정", "소방시설").notApplicable);
+
+  steps = buildSteps({ ...commonArgs, latestFoodResult: null, latestFireResult: ["소화기구"], latestSignageResult: "허가ᆞ신고 불필요", taskProgress: {} });
+  check("na: 간판 신고 불필요면 해당없음", !!findSub(steps, "Step 3 · 창업 행정", "간판").notApplicable);
+  check("na: 소방시설 있으면 해당없음 아님", !findSub(steps, "Step 3 · 창업 행정", "소방시설").notApplicable);
+
+  steps = buildSteps({ ...commonArgs, latestFoodResult: "신고대상제외", latestFireResult: ["소화기구"], latestSignageResult: null, taskProgress: {} });
+  check("na: 식품위생 신고대상제외면 해당없음", !!findSub(steps, "Step 3 · 창업 행정", "식품위생").notApplicable);
+
+  steps = buildSteps({ ...commonArgs, latestFoodResult: null, latestFireResult: [], latestSignageResult: null, taskProgress: { hires_staff: false } });
+  check("na: 직원 없음이면 직원 등록 해당없음", !!findSub(steps, "Step 4 · 오픈 준비", "직원 등록").notApplicable);
 }
 
 process.stdout.write(JSON.stringify(results));

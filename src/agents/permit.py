@@ -171,6 +171,26 @@ FACILITY_GROUPS = {
 }
 
 
+def facility_group_from_use_name(use_name: str) -> int | None:
+    """건축물대장 주용도코드명(예: "제1종근린생활시설")을 시설군 번호(1~9)로
+    매핑. 못 찾으면 None.
+
+    FACILITY_GROUPS의 세부용도 목록과 대조하되 공백을 무시한다 - 대장은
+    "제1종근린생활시설"(붙여씀), 표는 "제1종 근린생활시설"(띄어씀)이라 그대로는
+    안 맞는다. 항목의 괄호 앞부분(핵심어)이 주용도명에 포함되면 그 시설군으로
+    본다(단방향 포함만 - "제2종근린생활시설"이 group5의 "제2종 근린생활시설 중
+    다중생활시설"에 역포함돼 오분류되는 걸 막기 위함)."""
+    if not use_name:
+        return None
+    norm = use_name.replace(" ", "")
+    for num, (_group_name, items) in FACILITY_GROUPS.items():
+        for item in items:
+            core = item.split("(")[0].replace(" ", "")  # "업무시설(사무실 등)" → "업무시설"
+            if core and core in norm:
+                return num
+    return None
+
+
 def _missing_fields(act_type: str, facts: dict) -> list[str]:
     return [f for f in REQUIRED_FIELDS.get(act_type, []) if facts.get(f) is None]
 
@@ -236,6 +256,76 @@ def classify_case(facts: dict) -> str | None:
         if facts["temporary_duration_years"] <= temp["신고_존치기간_이하_년"] and not facts["temporary_is_concrete"]:
             return "가설건축물신고"
         return "가설건축물허가"
+
+    return None
+
+
+def requires_licensed_architect(facts: dict) -> bool | None:
+    """이 케이스가 건축사 설계 의무 대상인지 판정. 정보 부족하면 None.
+
+    건축법 제23조1항: 건축허가(제11조)ᆞ건축신고(제14조) 대상 건축물의 설계는
+    원칙적으로 건축사만 할 수 있으나 다음은 예외 -
+      1호. 바닥면적 합계 85㎡ 미만 증축ᆞ개축ᆞ재축
+      2호. 연면적 200㎡ 미만이고 층수 3층 미만인 대수선
+    용도변경은 제19조6항이 별도로 규정 - "허가 대상(상위군 이동)이면서 용도변경
+    부분 바닥면적 500㎡ 이상"인 경우에만 제23조를 준용한다.
+
+    반환값:
+      True  = 건축사사무소 설계가 필요(대행 대상)
+      False = 개인이 직접 설계ᆞ진행 가능(제23조 예외이거나 제23조 비대상 행위)
+      None  = 판정에 필요한 사실 부족
+
+    주의: 제23조1항3호("그 밖에 대통령령으로 정하는 건축물")와 제23조4항
+    (표준설계도서)은 시행령ᆞ국토부 고시가 있어야 확정되는데 현재 인덱스에 없어
+    반영하지 않았다 - 그래서 "예외에 더 걸려 실제로는 건축사 불필요"인 케이스를
+    True로 볼 여지가 남는다(안전한 방향의 과대판정). 또 용도변경의 바닥면적은
+    facts에 별도 필드가 없어 size_sqm을 대용으로 쓴다 - "용도변경 부분"이 아니라
+    건물 연면적일 수 있어 경계(500㎡) 부근에서 부정확할 수 있다.
+    """
+    act_type = facts.get("act_type")
+    if act_type is None:
+        return None
+    thresholds = get_thresholds()
+
+    if act_type == "신축":
+        return True  # 제23조 예외 목록에 신축 없음 - 규모 무관 건축사 필요
+
+    if act_type in ("증축", "개축", "재축"):
+        ext = facts.get("extension_size_sqm")
+        if ext is None:
+            return None
+        # 제23조1항1호: 85㎡ 미만이면 예외(건축사 불필요), 이상이면 필요
+        return ext >= thresholds["증축개축재축_신고_상한_바닥면적_sqm"]
+
+    if act_type == "이전":
+        return True  # 건축허가 대상, 제23조 예외 없음
+
+    if act_type == "대수선":
+        if not facts.get("renovation_scope"):
+            return False  # 대수선 아님(인허가불필요) - 제23조 비대상
+        size, floors = facts.get("size_sqm"), facts.get("floors")
+        if size is None or floors is None:
+            return None
+        renov = thresholds["대수선_신고"]
+        # 제23조1항2호: 200㎡ 미만 & 3층 미만이면 예외(건축사 불필요)
+        return not (size < renov["연면적_미만_sqm"] and floors < renov["층수_미만"])
+
+    if act_type == "용도변경":
+        cur, dst = facts.get("current_facility_group"), facts.get("desired_facility_group")
+        if cur is None or dst is None:
+            return None
+        if dst >= cur:
+            return False  # 신고 대상(하위군)ᆞ기재변경(동일군) - 제23조 준용 안 됨
+        # 허가 대상(상위군): 제19조6항 - 바닥면적 500㎡ 이상만 제23조 준용
+        area = facts.get("size_sqm")
+        if area is None:
+            return None
+        return area >= thresholds["용도변경_건축사설계준용_상한_바닥면적_sqm"]
+
+    if act_type in ("일반수선", "가설건축물"):
+        # 일반수선은 허가ᆞ신고 대상 행위가 아니고, 가설건축물은 제20조 별도라
+        # 둘 다 제23조(제11조ᆞ제14조 대상) 설계 의무 대상이 아니다.
+        return False
 
     return None
 
@@ -410,6 +500,31 @@ def _act_type_reason(result_type: str, facts: dict) -> str:
     return ""
 
 
+# 설계도서(평면도 등)가 실제로 필요한 판정 결과 - 이 경우에만 건축사 의무ᆞ실무
+# 도움 안내가 의미 있다(인허가불필요ᆞ기재변경 등엔 도면 부담이 없어 제외).
+_RESULTS_NEEDING_DESIGN_DOCS = frozenset({
+    "건축신고", "건축허가", "용도변경신고", "용도변경허가",
+})
+
+
+def _architect_note(result_type: str, facts: dict) -> str:
+    """도구 응답에 실어보낼 건축사 설계 의무 안내(결정론적). LLM은 이 문장을
+    새로 판단하지 않고 그대로 전달만 한다 - 판정은 코드, 설명은 LLM 원칙.
+    설계도서가 필요없는 결과이거나 정보가 부족하면 빈 문자열."""
+    if result_type not in _RESULTS_NEEDING_DESIGN_DOCS:
+        return ""
+    verdict = requires_licensed_architect(facts)
+    if verdict is None:
+        return ""
+    if verdict:
+        return " 설계도서는 건축법 제23조에 따라 건축사사무소에서 작성해야 합니다(건축사 설계 의무 대상)."
+    return (
+        " 건축사 설계 의무 대상은 아니어서 법적으로는 개인이 직접 진행할 수 있으나, "
+        "평면도 등 설계도서 준비가 필요해 실무에서는 인테리어 업체나 행정사의 도움을 "
+        "받는 경우가 많습니다."
+    )
+
+
 def procedure_stage_message(result_type: str, node_id: str, facts: dict | None = None) -> str:
     """(result_type, node_id)에 해당하는 안내 문구를 만든다.
 
@@ -426,14 +541,15 @@ def procedure_stage_message(result_type: str, node_id: str, facts: dict | None =
         return f"'{node_id}'는 {result_type} 트리에 없는 노드입니다."
 
     reason = _facility_group_reason(result_type, facts or {}) or _act_type_reason(result_type, facts or {})
+    architect = _architect_note(result_type, facts or {})
     node = tree["nodes"][node_id]
     if node["type"] == "branch":
         options = ", ".join(node["options"].keys())
         return (
             f'현재 절차 결과: {result_type}{reason}. 다음을 사용자에게 물어보세요: '
-            f'"{node["question"]}" (선택지: {options})'
+            f'"{node["question"]}" (선택지: {options}){architect}'
         )
-    return f"현재 절차 결과: {result_type}{reason} - {node['label']}."
+    return f"현재 절차 결과: {result_type}{reason} - {node['label']}.{architect}"
 
 
 def generate_mermaid(tree: dict = PROCEDURE_TREE) -> str:

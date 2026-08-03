@@ -304,6 +304,20 @@
     background: var(--surface-2);
     color: var(--text-muted);
   }
+  /* 건축사 대행 여부 배지 - 대행 필요(needed)와 개인 직접 가능(diy)을 색으로 구분 */
+  .roadmap-architect-badge {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    padding: 1px 6px;
+    border-radius: 999px;
+    margin-left: 4px;
+  }
+  .roadmap-architect-badge.needed { background: #fde8e8; color: #b42318; }
+  @media (prefers-color-scheme: dark) {
+    .roadmap-architect-badge.needed { background: #3a1a1a; color: #ff9a8f; }
+  }
   .roadmap-step-chevron {
     margin-left: auto;
     font-size: 9px;
@@ -407,6 +421,14 @@
     opacity: 0.55;
     cursor: help;
   }
+  /* 해당없음(✕) - 대화로 필요 없다고 확인된 항목. 취소선+흐림으로 "닫힌" 느낌 */
+  .roadmap-chip.na, .roadmap-substep.na {
+    opacity: 0.5;
+    text-decoration: line-through;
+    text-decoration-color: var(--text-muted);
+    cursor: help;
+  }
+  .roadmap-substep.na .roadmap-substep-icon { text-decoration: none; }
   .roadmap-step-note {
     margin: 4px 0 0;
     font-size: 10.5px;
@@ -657,6 +679,7 @@
   let latestFireResult = null; // /query 응답의 fire_result(필요 소방시설 목록, 배열)를 그대로 보관
   let latestSignageResult = null; // /query 응답의 signage_result(간판ᆞ옥외광고물 허가/신고 판정)를 그대로 보관
   let taskProgress = {}; // /query 응답의 task_progress(사용자가 실제로 완료했다고 밝힌 항목)를 그대로 보관
+  let requiresArchitect = null; // project_status.requires_architect(건축법 제23조 건축사 설계 의무 대상 여부). true=대행 필요, false=개인 직접 가능, null=정보부족. 백엔드 규칙 엔진 계산값을 그대로 보관(프론트에서 재계산 안 함)
   // case_facts엔 주소가 없다(record_case_facts 파라미터에 address가 없음) -
   // lookup_building_ledger/lookup_land_zone 호출 인자에서 가장 최근 주소를
   // 뽑아 프론트에서만 따로 들고 있는다(제목 아래 상황 태그 표시용,
@@ -716,7 +739,7 @@
   // 참고용 추정치로만 다룬다. 시간 폭으로 딱 떨어지지 않는 항목(소방시설
   // 확인 등)은 아예 표시하지 않는다.
   const NEXT_ACTION_DURATIONS = {
-    "필요 서류 준비": "3~7일",
+    "신청서 제출": "3~7일",
     "사전 진단 확인": "3~7일",
     "착공신고": "1~3일",
     "공사(시공)": "2~6주",
@@ -788,7 +811,7 @@
     const docs = latestPermitResult?.required_documents || [];
     const stage2Items = docs.length
       ? docs.map(d => ({ text: d, done: true }))
-      : [{ text: "필수 서류 확인 중", done: false }];
+      : [{ text: "신청서 제출 안내 대기 중", done: false }];
 
     const diag = latestPermitResult?.pre_diagnosis_items || [];
     const stage3Items = diag.length
@@ -875,18 +898,20 @@
     // 아무것도 확인 안 된 채로 통째로 체크되는 회귀 버그가 있었다(2026-07-27).
     // 그래서 실제 항목 목록은 info(참고용, 체크 여부 없음)로만 보여주고,
     // 완료 여부는 사용자가 직접 확인한 task_progress 체크박스 하나로만 반영한다.
+    // 판정이 "인허가불필요"면 신청서 제출ᆞ사전 진단 자체가 불필요하다 - ✕로 닫는다.
+    const permitNotNeeded = (latestPermitResult?.permit_type || caseTypeResult) === "인허가불필요";
     const step1Substeps = [{ text: "허가ᆞ신고 대상 확인", done: permitStage >= 2, tags: factInfoLines }];
     if (docs.length) {
       docs.forEach((d) => step1Substeps.push({ text: `📄 ${d}`, info: true }));
-      step1Substeps.push({ text: "서류 준비 완료", done: !!taskProgress.documents_prepared, field: "documents_prepared" });
+      step1Substeps.push({ text: "신청서 제출", done: !!taskProgress.documents_prepared, field: "documents_prepared" });
     } else {
-      step1Substeps.push({ text: "필요 서류", done: false });
+      step1Substeps.push({ text: "신청서 제출", done: false, notApplicable: permitNotNeeded, naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다" });
     }
     if (diag.length) {
       diag.forEach((d) => step1Substeps.push({ text: `🔍 ${d}`, info: true }));
       step1Substeps.push({ text: "사전 진단 확인 완료", done: !!taskProgress.pre_diagnosis_checked, field: "pre_diagnosis_checked" });
     } else {
-      step1Substeps.push({ text: "사전 진단", done: false });
+      step1Substeps.push({ text: "사전 진단", done: false, notApplicable: permitNotNeeded, naReason: "인허가 대상이 아니라 사전 진단이 필요 없습니다" });
     }
 
     // Step 4 "영업 시작" 잠금 기준 - Step3(창업 행정) 5개 항목이 전부
@@ -914,6 +939,10 @@
         // 가 아직 없을 때는 그 값을 대신 보여준다 - 판정 결과를 최대한 빨리
         // Step1 안에서 확인할 수 있게(예전엔 이 값도 별도 "결과" 태그로 중복 표시).
         note: latestPermitResult ? `판정: ${latestPermitResult.permit_type}` : (caseTypeResult ? `판정: ${caseTypeResult}` : null),
+        // 건축법 제23조: 이 케이스가 건축사사무소 설계 의무 대상인지(백엔드
+        // requires_licensed_architect 계산값). true=대행 필요, false=개인 직접
+        // 가능. null(정보부족)이면 배지를 아예 안 보여준다.
+        architect: requiresArchitect,
       },
       {
         title: "Step 2 · 공사",
@@ -948,6 +977,10 @@
           {
             text: latestFoodResult ? `식품위생: ${latestFoodResult}` : "식품위생 영업신고",
             done: latestFoodResult != null,
+            // 대화로 "식품위생법 비대상"이 확정되면(해당없음ᆞ완제품 소매 신고대상제외)
+            // 신고 자체가 필요 없으니 ✕로 닫는다.
+            notApplicable: latestFoodResult === "해당없음" || latestFoodResult === "신고대상제외",
+            naReason: "식품위생법상 별도 영업신고 대상이 아닙니다",
             locked: !taskProgress.use_approval,
             lockReason: "사용승인 완료 후 신고 가능",
           },
@@ -957,12 +990,18 @@
           {
             text: latestFireResult && latestFireResult.length ? `소방시설: ${latestFireResult.join("ᆞ")}` : "소방시설",
             done: latestFireResult != null,
+            // 연면적 기준상 설치할 소방시설이 없으면(빈 배열) ✕로 닫는다.
+            notApplicable: Array.isArray(latestFireResult) && latestFireResult.length === 0,
+            naReason: "연면적 기준상 설치 대상 소방시설이 없습니다",
             locked: !taskProgress.construction,
             lockReason: "공사(시공) 완료 후 설치ᆞ확인 가능",
           },
           {
             text: latestSignageResult ? `간판: ${latestSignageResult}` : "간판ᆞ옥외광고물",
             done: latestSignageResult != null,
+            // 허가ᆞ신고가 필요 없는 간판이면 ✕로 닫는다.
+            notApplicable: latestSignageResult != null && latestSignageResult.includes("불필요"),
+            naReason: "허가ᆞ신고가 필요 없는 간판입니다",
             locked: !taskProgress.construction,
             lockReason: "공사(시공) 완료 후 설치 가능",
           },
@@ -996,8 +1035,11 @@
           // 확인). hires_staff=false(직원 없음)로 이미 done인 경우는 기존
           // 잠금 분기(sub.locked && !sub.done)가 자동으로 잠그지 않는다.
           {
-            text: taskProgress.hires_staff === false ? "직원 등록: 해당없음(직원 없음)" : "직원 등록",
+            text: "직원 등록(4대보험 가입)",
             done: !!taskProgress.staff_registration || taskProgress.hires_staff === false,
+            // 직원을 안 두면(1인ᆞ가족 운영) 4대보험 가입 대상이 아니라 ✕로 닫는다.
+            notApplicable: taskProgress.hires_staff === false,
+            naReason: "직원을 두지 않아 4대보험 가입 대상이 아닙니다",
             field: "staff_registration",
             locked: !taskProgress.business_registration,
             lockReason: "사업자등록 완료 후 진행 가능",
@@ -1105,7 +1147,13 @@
       const head = document.createElement("div");
       head.className = "roadmap-step-head";
       const parallelBadge = step.parallel ? `<span class="roadmap-parallel-badge">병렬 가능</span>` : "";
-      head.innerHTML = `<span>${step.title}</span>${parallelBadge}<span class="roadmap-step-chevron">${isExpanded ? "▾" : "▸"}</span>`;
+      // 건축사 대행 배지(Step 1) - 건축사 설계가 필수인 경우(true)에만 표시한다.
+      // "개인 직접 가능"(false)은 채팅 안내에서 실무 뉘앙스와 함께 설명하므로
+      // UI 배지로 중복 표기하지 않는다. null(정보부족)도 배지 없음.
+      const architectBadge = step.architect === true
+        ? `<span class="roadmap-architect-badge needed" title="건축법 제23조: 건축사 설계 의무 대상">🏛 건축사사무소 대행</span>`
+        : "";
+      head.innerHTML = `<span>${step.title}</span>${parallelBadge}${architectBadge}<span class="roadmap-step-chevron">${isExpanded ? "▾" : "▸"}</span>`;
       head.addEventListener("click", () => {
         if (expandedSteps.has(idx)) expandedSteps.delete(idx);
         else expandedSteps.add(idx);
@@ -1121,6 +1169,19 @@
       step.substeps.forEach((sub) => {
         const li = document.createElement(step.parallel ? "span" : "li");
         const chipOrSubstep = step.parallel ? "roadmap-chip" : "roadmap-substep";
+        if (sub.notApplicable) {
+          // 대화로 "이 항목은 이 사례에 필요 없음"이 확인된 경우(예: 소방시설
+          // 대상 없음ᆞ간판 신고 불필요ᆞ식품위생 비대상ᆞ직원 없음). 체크박스ᆞ
+          // 잠금보다 우선해서 ✕로 닫아 표시한다 - 사용자가 굳이 신경 쓸 필요가
+          // 없는 항목임을 분명히 한다. done 값(진행률 계산용)은 그대로 두고
+          // 렌더만 덮어쓴다.
+          li.className = `${chipOrSubstep} na`;
+          li.title = sub.naReason || "이 사례에는 해당하지 않습니다";
+          const naIcon = step.parallel ? "" : `<span class="roadmap-substep-icon">✕</span>`;
+          li.innerHTML = `${naIcon}<span>${sub.text}</span>`;
+          list.appendChild(li);
+          return;
+        }
         if (sub.info) {
           // 참고용 목록(실제 서류ᆞ사전진단 항목명) - 완료 개념이 없으니
           // 체크/미체크 아이콘 없이 그대로 표시만 한다.
@@ -1252,6 +1313,10 @@
     if (savedTaskProgress) {
       try { taskProgress = JSON.parse(savedTaskProgress); } catch (err) { taskProgress = {}; }
     }
+    const savedRequiresArchitect = localStorage.getItem("permit_assistant_requires_architect");
+    if (savedRequiresArchitect) {
+      try { requiresArchitect = JSON.parse(savedRequiresArchitect); } catch (err) { requiresArchitect = null; }
+    }
     lastAddress = localStorage.getItem("permit_assistant_address");
 
     renderRoadmap();
@@ -1265,8 +1330,10 @@
     latestFireResult = null;
     latestSignageResult = null;
     taskProgress = {};
+    requiresArchitect = null;
     lastAddress = null;
     localStorage.removeItem("permit_assistant_address");
+    localStorage.removeItem("permit_assistant_requires_architect");
     expandedSteps = null;
     lastCurrentIdx = null;
     autoOpenedParallelSteps = null;
@@ -1283,7 +1350,10 @@
       const res = await fetch(`${API_BASE}/project-status?user_id=${encodeURIComponent(userId)}`);
       if (!res.ok) return;
       const status = await res.json();
+      requiresArchitect = status.requires_architect ?? null;
+      localStorage.setItem("permit_assistant_requires_architect", JSON.stringify(requiresArchitect));
       renderNextAction(status);
+      renderRoadmap();
       if (status.progress > 0) {
         addMessage("bot", status.summary);
       }
@@ -1481,6 +1551,12 @@
         taskProgress = data.task_progress;
         localStorage.setItem("permit_assistant_task_progress", JSON.stringify(taskProgress));
         renderRoadmap();
+      }
+      // 건축사 대행 여부(건축법 제23조) - 백엔드 규칙 엔진 계산값을 그대로 보관.
+      // case_facts처럼 새로고침 후에도 배지가 유지되도록 localStorage에 저장한다.
+      if (data.project_status) {
+        requiresArchitect = data.project_status.requires_architect ?? null;
+        localStorage.setItem("permit_assistant_requires_architect", JSON.stringify(requiresArchitect));
       }
       renderRoadmap();
       renderNextAction(data.project_status);

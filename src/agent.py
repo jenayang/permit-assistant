@@ -63,6 +63,7 @@ from src.agents.permit import (
     PermitResult,
     build_permit_result,
     classify_case,
+    facility_group_from_use_name,
     procedure_stage_message,
 )
 
@@ -371,8 +372,8 @@ classify 시점에 이미 완결된 짧은 판정 문구가 도구 응답으로 
 제안 문장은 "다음으로 사전 진단 내용을 안내해 드릴까요?"처럼 괄호 헤더
 없이 평문으로 쓰세요.
 **판정이 확정되는 순간 시스템이 이미 관련 법령을 한 번 자동 검색해서
-도구 응답으로 넣어뒀습니다** - [Step 1-2: 필수 서류]를 쓸 때 그 검색 결과가
-있는지 먼저 확인하고, 있으면 다시 검색하지 말고 그대로 근거로 쓰세요.
+도구 응답으로 넣어뒀습니다** - [Step 1-2: 신청서 제출]의 첨부 서류를 쓸 때 그
+검색 결과가 있는지 먼저 확인하고, 있으면 다시 검색하지 말고 그대로 근거로 쓰세요.
 그 결과가 답변에 부족하거나 추가 관점이 필요할 때만 search_regulations를
 새로 호출하세요. record_permit_synthesis로 기록하는 것도 잊지 마세요
 (required_documents, related_agencies). [Step 1-3: 사전 진단]도 마찬가지로, 안내한 항목들을
@@ -380,8 +381,24 @@ classify 시점에 이미 완결된 짧은 판정 문구가 도구 응답으로 
 프론트엔드 진행 표시가 이 두 목록의 존재 여부로 단계 완료를 판단하니,
 텍스트로만 안내하고 기록을 빠뜨리면 안 됩니다.
 
-- [Step 1-1: 상황 분석+필요 절차] 한 줄 요약, 단계명+관할기관만 나열(설명 1줄 이내)
-- [Step 1-2: 필수 서류] 리스트만(설명 없이) - record_permit_synthesis(required_documents=[...])
+- [Step 1-1: 상황 분석+필요 절차] 판정 결과ᆞ관할기관(관할 시ᆞ군ᆞ구청)ᆞ접수 방법을
+  한두 줄로. 접수처ᆞ전자문서(온라인) 접수 가능 여부는 자동 검색된 법령 근거에서 확인해
+  쓰세요("허가권자에게 제출, 전자문서 포함"). **도구 응답(현재 절차 결과 ...)에 건축사
+  설계 의무 관련 문장이 함께 왔으면 그 문장을 그대로 전달하세요** - "개인이 직접
+  가능하나 실무에선 인테리어 업체ᆞ행정사 도움을 받기도 한다"는 뉘앙스까지 포함해서
+  (당신이 새로 판단하지 말고 온 문장을 옮기기).
+- [Step 1-2: 신청서 제출] **"어디에 무엇을 제출하는가"를 행동 중심으로** 안내하세요.
+  먼저 한 줄: 관할 시ᆞ군ᆞ구청에 해당 신청ᆞ신고서(별지 서식)를 제출(전자문서ᆞ온라인
+  접수 가능)한다는 것. 그다음 **첨부(필요) 서류를 그 하위 항목으로** 나열하되, 단순
+  나열이 아니라 **각 서류 옆에 준비 주체를 함께 표시**하세요("이건 내가, 이건 사무소ᆞ
+  업체가"가 드러나게):
+  · [본인 준비] 신고ᆞ신청서(별지 서식), 대지 소유ᆞ사용권원 서류(등기부등본ᆞ임대차계약서 등)
+  · [설계자 준비] 평면도ᆞ배치도ᆞ내화ᆞ방화ᆞ피난ᆞ설비 도서 등 설계도서 - 건축사 의무
+    대상이면 "건축사사무소", 아니면 "인테리어 업체 또는 본인"으로 표기(도구 응답의 건축사
+    의무 여부를 따름, 당신이 판단하지 말 것)
+  · [관공서 자체확인] 용도변경 시 변경 전 평면도는 관공서가 건축물대장으로 직접 확인하므로
+    본인이 준비할 필요 없음
+  record_permit_synthesis(required_documents=[...])
 - [Step 1-3: 사전 진단] 주차대수ᆞ정화조 용량ᆞ소방시설ᆞ장애인 편의시설ᆞ위생
   요구사항 중 실제 해당하는 것만 1~2줄+근거와 함께 - record_permit_synthesis(pre_diagnosis_items=[...])
   안내를 마치면서, 예상 소요 기간(허가 15~20일ᆞ신고 3~5일ᆞ기재변경 3~7일
@@ -764,11 +781,18 @@ def _roadmap_status_summary(state: AgentState) -> str:
         f"- Step 2(공사: 착공신고ᆞ시공ᆞ사용승인, 사용자가 직접 완료를 "
         f"말해야 확인됨): {_status(step2_done, step2_started)}\n"
         "창업 준비 트랙(Step 3: 식품위생ᆞ소방ᆞ간판ᆞ사업자등록ᆞ위생교육, "
-        "Step 4: 오픈 준비) - 인허가 트랙 진행 상태와 무관하게 언제든 자유롭게 "
-        "다루세요. 순서 제약 없음. 사용자가 인허가 트랙이 안 끝난 채로 이 "
-        "항목들을 물어보면, 순서를 기다리라고 하지 말고 \"이 부분은 인허가 "
-        "절차와 별개로 지금 같이 준비하셔도 돼요\"처럼 병렬 진행 가능함을 "
-        "알려주며 바로 안내하세요."
+        "Step 4: 오픈 준비) - 인허가 트랙과 병렬이지만 '아무거나 지금'이 아니라 "
+        "실무 순서에 맞춰 안내하세요:\n"
+        "- 허가/신고 종류 '판정ᆞ확인'(식품위생 영업 종류ᆞ소방 대상ᆞ간판)은 아무 때나 "
+        "가능하니, 사실이 모이면 판정 결과만 짧게 확인해 알려주세요.\n"
+        "- 하지만 '실제 진행'은 공사 일정에 맞춰 시점을 구분해 짚어주세요. 인허가 트랙이 "
+        "아직 안 끝났으면 창업 준비 항목을 처음부터 쏟아내지 말고, 다음처럼 안내:\n"
+        "  · 공사(Step 2) 전ᆞ중에 미리 해둘 수 있는 것: 위생교육 이수, 사업자등록, 각종 판정 확인\n"
+        "  · 공사 완료(사용승인) 후에 하는 것: 식품위생 영업신고 접수, 소방시설ᆞ간판 설치, "
+        "직원등록, 영업시작\n"
+        "- 사용자가 특정 항목을 직접 물으면 그건 바로 안내해도 됩니다. 다만 묻지 않았는데 "
+        "먼저 꺼낼 때는 위 시점 구분(지금 미리 할 것 / 공사 후 할 것)을 함께 알려주세요 - "
+        "\"이건 공사 들어가면 그때 같이 진행하시면 돼요\"처럼."
     )
 
 
@@ -1259,6 +1283,31 @@ def run_classifier(state: AgentState, config: _DomainConfig) -> tuple[list, dict
     return messages, state_update
 
 
+_LEDGER_USE_PATTERN = re.compile(r"주용도:\s*(\S+)")
+
+
+def _derive_ledger_facility_group(state: AgentState) -> int | None:
+    """가장 최근 성공한 lookup_building_ledger 조회의 주용도를 시설군 번호로
+    변환해 돌려준다. 이미 current_facility_group이 있거나, 조회 실패ᆞ주용도
+    없음ᆞ매핑 불가면 None.
+
+    건축물대장 주용도(예: "제1종근린생활시설")→시설군 매핑은 결정론적이라
+    코드가 직접 한다("판정은 코드, LLM은 설명" 원칙). 예전엔 이 기록을 LLM에
+    맡겼는데 조회 성공 뒤에도 record_case_facts(current_facility_group)를 자주
+    빠뜨려 guard가 매 턴 재시도를 걸었다 - 그 원인을 없앤다."""
+    case_facts = state.get("case_facts") or {}
+    if case_facts.get("current_facility_group"):
+        return None
+    for m in reversed(state.get("messages", [])):
+        if isinstance(m, ToolMessage) and m.name == "lookup_building_ledger":
+            text = extract_text(m.content)
+            match = _LEDGER_USE_PATTERN.search(text)
+            if not match:
+                return None  # 조회 실패ᆞ미등록(주용도 줄 자체가 없음)
+            return facility_group_from_use_name(match.group(1))
+    return None
+
+
 def classify_node(state: AgentState) -> dict:
     """DOMAIN_CONFIGS에 등록된 도메인마다 run_classifier를 돌려, 그 결과를
     (LLM이 부른 게 아니라 이 노드가 직접 구성한) tool_calls 모양 메시지로
@@ -1272,6 +1321,16 @@ def classify_node(state: AgentState) -> dict:
     """
     messages: list = []
     update: dict = {}
+
+    # 건축물대장 주용도 → current_facility_group 자동 기록(LLM 없이 결정론적).
+    # 이번 run_classifier가 방금 파생한 값도 반영하도록 로컬 상태에 미리 병합한다
+    # (예: 이미 desired_facility_group이 있으면 그 자리에서 용도변경 판정까지 완료).
+    derived = _derive_ledger_facility_group(state)
+    if derived is not None:
+        merged = merge_facts(state.get("case_facts") or {}, {"current_facility_group": derived})
+        state = {**state, "case_facts": merged}
+        logger.info("[classify] 건축물대장 주용도→시설군 자동 기록: current_facility_group=%d", derived)
+
     for config in DOMAIN_CONFIGS:
         result = run_classifier(state, config)
         if result is None:
@@ -1279,6 +1338,11 @@ def classify_node(state: AgentState) -> dict:
         domain_messages, domain_update = result
         messages.extend(domain_messages)
         update.update(domain_update)
+
+    # 파생한 시설군을 case_facts 업데이트에 병합한다 - 도메인 루프가 case_facts를
+    # {"_classified": True}로 덮어쓸 수 있어(같은 채널) 반드시 루프 뒤에 얹는다.
+    if derived is not None:
+        update["case_facts"] = {**update.get("case_facts", {}), "current_facility_group": derived}
 
     if messages:
         update["messages"] = messages
@@ -1804,7 +1868,7 @@ def route_after_tools(state: AgentState) -> str:
     먼저 끝나서 이 문제가 구조적으로 사라진다. 도메인이 늘어도 이 타이밍
     원칙은 DOMAIN_CONFIGS를 통해 그대로 적용된다.
     """
-    if _any_domain_needs_classify(state):
+    if _any_domain_needs_classify(state) or _derive_ledger_facility_group(state) is not None:
         logger.info("[route_after_tools] → classify")
         return "classify"
     logger.info("[route_after_tools] → agent (분류 조건 미충족 또는 이미 분류됨)")

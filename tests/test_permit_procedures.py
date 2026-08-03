@@ -14,9 +14,11 @@ from __future__ import annotations
 from src.agents.permit import (
     PermitResult,
     _act_type_reason,
+    _architect_note,
     _facility_group_reason,
     _walk_procedures,
     build_permit_result,
+    procedure_stage_message,
 )
 
 
@@ -186,3 +188,32 @@ def test_reason_dispatch_prefers_facility_group_then_falls_back():
     facts_new_build = {"act_type": "신축", "land_zone": "기타", "size_sqm": 50, "floors": 1}
     assert _facility_group_reason("건축허가", facts_new_build) == ""
     assert _act_type_reason("건축허가", facts_new_build) != ""
+
+
+# --- _architect_note (건축사 의무 안내를 도구 응답에 실어보냄) ----------------
+
+def test_architect_note_needed_for_new_build():
+    # 신축은 규모 무관 건축사 의무 → "건축사사무소" 안내
+    note = _architect_note("건축허가", {"act_type": "신축"})
+    assert "건축사사무소" in note and "제23조" in note
+
+
+def test_architect_note_diy_with_practice_nuance():
+    # 소규모 증축(85㎡ 미만)은 건축사 예외 → "개인 직접 가능 + 실무 도움" 뉘앙스
+    note = _architect_note("건축신고", {"act_type": "증축", "extension_size_sqm": 30})
+    assert "개인이 직접" in note and ("인테리어" in note or "행정사" in note)
+
+
+def test_architect_note_empty_for_non_design_results():
+    # 설계도서가 필요없는 결과(인허가불필요ᆞ기재변경)엔 안내를 붙이지 않는다
+    assert _architect_note("인허가불필요", {"act_type": "일반수선"}) == ""
+    assert _architect_note("건축물대장기재변경", {"act_type": "용도변경",
+                            "current_facility_group": 7, "desired_facility_group": 7}) == ""
+
+
+def test_procedure_stage_message_includes_architect_note():
+    # procedure_stage_message가 건축사 안내를 실제 문구에 이어붙이는지
+    from src.agents.permit import PROCEDURE_TREE
+    root = PROCEDURE_TREE["건축허가"]["root"]
+    msg = procedure_stage_message("건축허가", root, {"act_type": "신축"})
+    assert "건축사사무소" in msg

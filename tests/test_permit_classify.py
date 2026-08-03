@@ -16,7 +16,11 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.permit import classify_case
+from src.agents.permit import (
+    classify_case,
+    facility_group_from_use_name,
+    requires_licensed_architect,
+)
 
 # (설명, case_facts, 기대 결과) - docs/test_scenarios.md Part A 표의 순서ᆞ
 # 번호를 그대로 따른다.
@@ -131,3 +135,57 @@ CASES = [
 @pytest.mark.parametrize("facts,expected", [(c[1], c[2]) for c in CASES], ids=[c[0] for c in CASES])
 def test_classify_case_boundary_table(facts, expected):
     assert classify_case(facts) == expected
+
+
+# --- requires_licensed_architect (건축법 제23조ᆞ제19조6항) -----------------
+# True=건축사 필요(대행), False=개인 직접 가능, None=정보 부족.
+ARCHITECT_CASES = [
+    # 신축: 규모 무관 항상 필요
+    ("신축_소규모여도_필요", {"act_type": "신축"}, True),
+    # 증축ᆞ개축ᆞ재축: 85㎡ 경계
+    ("증축_84_예외", {"act_type": "증축", "extension_size_sqm": 84}, False),
+    ("증축_85_필요", {"act_type": "증축", "extension_size_sqm": 85}, True),
+    ("재축_면적미상_미판정", {"act_type": "재축"}, None),
+    # 대수선: renovation_scope + 200㎡/3층 경계
+    ("대수선_비대수선_불필요", {"act_type": "대수선", "renovation_scope": False}, False),
+    ("대수선_소규모_예외", {"act_type": "대수선", "renovation_scope": True, "size_sqm": 199, "floors": 2}, False),
+    ("대수선_200_필요", {"act_type": "대수선", "renovation_scope": True, "size_sqm": 200, "floors": 2}, True),
+    ("대수선_3층_필요", {"act_type": "대수선", "renovation_scope": True, "size_sqm": 100, "floors": 3}, True),
+    ("대수선_규모미상_미판정", {"act_type": "대수선", "renovation_scope": True}, None),
+    # 용도변경: 신고ᆞ기재변경은 불필요, 허가는 500㎡ 경계
+    ("용변_신고_불필요", {"act_type": "용도변경", "current_facility_group": 7, "desired_facility_group": 8}, False),
+    ("용변_기재변경_불필요", {"act_type": "용도변경", "current_facility_group": 7, "desired_facility_group": 7}, False),
+    ("용변_허가_499_예외", {"act_type": "용도변경", "current_facility_group": 8, "desired_facility_group": 7, "size_sqm": 499}, False),
+    ("용변_허가_500_필요", {"act_type": "용도변경", "current_facility_group": 8, "desired_facility_group": 7, "size_sqm": 500}, True),
+    ("용변_허가_면적미상_미판정", {"act_type": "용도변경", "current_facility_group": 8, "desired_facility_group": 7}, None),
+    # 이전: 건축허가라 필요
+    ("이전_필요", {"act_type": "이전"}, True),
+    # 제23조 비대상 행위
+    ("일반수선_불필요", {"act_type": "일반수선"}, False),
+    ("가설건축물_불필요", {"act_type": "가설건축물"}, False),
+    # act_type 자체가 없으면 미판정
+    ("act_type없음_미판정", {}, None),
+]
+
+
+@pytest.mark.parametrize(
+    "facts,expected", [(c[1], c[2]) for c in ARCHITECT_CASES], ids=[c[0] for c in ARCHITECT_CASES]
+)
+def test_requires_licensed_architect(facts, expected):
+    assert requires_licensed_architect(facts) is expected
+
+
+# --- facility_group_from_use_name (건축물대장 주용도 → 시설군) ----------------
+@pytest.mark.parametrize("use_name,expected", [
+    ("제1종근린생활시설", 7),
+    ("제2종근린생활시설", 7),  # group5의 "제2종 근린생활시설 중 다중생활시설"에 역포함되면 안 됨
+    ("업무시설", 8),
+    ("단독주택", 8),
+    ("판매시설", 5),
+    ("의료시설", 6),
+    ("공장", 2),
+    ("정보없음", None),
+    ("", None),
+])
+def test_facility_group_from_use_name(use_name, expected):
+    assert facility_group_from_use_name(use_name) == expected

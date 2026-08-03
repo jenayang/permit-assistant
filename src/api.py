@@ -116,6 +116,9 @@ class ProjectStatusResponse(BaseModel):
     construction_track: TrackStatus
     startup_track: TrackStatus
     summary: str
+    # 건축사 설계 의무 대상 여부(건축법 제23조). True=대행 필요, False=개인 직접
+    # 가능, None=정보 부족. compute_project_status()가 규칙 엔진 결과를 그대로 실음.
+    requires_architect: Optional[bool] = None
 
 
 class TaskProgressUpdateRequest(BaseModel):
