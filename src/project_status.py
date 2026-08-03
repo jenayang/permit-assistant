@@ -50,7 +50,7 @@ def _step_substeps(state: dict) -> list[list[tuple[str, bool]]]:
         [
             ("허가ᆞ신고 대상 판정", bool(permit_result)),
             ("사전 검토", bool(tp.get("pre_diagnosis_checked"))),
-            ("서류 준비", bool(tp.get("documents_prepared"))),
+            ("설계ᆞ서류 준비", bool(tp.get("documents_prepared"))),
             ("신청ᆞ접수", bool(tp.get("application_submitted"))),
         ],
         [

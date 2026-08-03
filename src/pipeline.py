@@ -20,7 +20,9 @@ from langchain_core.messages import AIMessage
 from langchain_core.messages import ToolMessage
 
 from src import config
-from src.agent import GROUNDING_TOOL_NAMES, extract_text, graph
+from src.agent import extract_text
+from src.graph import graph
+from src.guard import GROUNDING_TOOL_NAMES
 from src.agents.roadmap_progress import TASK_PROGRESS_FIELDS
 from src.ingestion import ingest_all
 from src.project_status import compute_project_status

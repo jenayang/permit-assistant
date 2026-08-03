@@ -7,8 +7,10 @@
 
 | 문서 | 역할 | 언제 보나 |
 |---|---|---|
+| [`../CLAUDE.md`](../CLAUDE.md) | **작업 규칙**(커밋ᆞ실측ᆞ판정 원칙 등), 참조만 | 어떻게 일할지 확인할 때 |
+| [`../MEMORY.md`](../MEMORY.md) | **의사결정ᆞ패턴ᆞ인사이트**를 토픽별로(세컨드 브레인), `memory/*.md`로 상세 링크 | 프로젝트를 새로 파악할 때ᆞ비슷한 문제 재검토 전 |
 | [`phase1_roadmap.md`](phase1_roadmap.md) | **현재 상태 + 다음 할 일 (단일 진실)** | 뭘 할지 정할 때 |
-| [`project_report.md`](project_report.md) | **왜 그렇게 만들었는지** — blocker별 딥다이브ᆞ실측ᆞ선택 이유 | 기존 결정의 배경이 궁금할 때 |
+| [`project_report.md`](project_report.md) | **왜 그렇게 만들었는지** — blocker별 딥다이브ᆞ실측ᆞ선택 이유(원본 증거) | 숫자ᆞ전체 서사가 필요할 때 |
 | `dev_log_YYYY-MM-DD.md` | 그날 세션의 스냅샷(시점 기록, 이후 갱신 안 함) | 특정 날짜에 무슨 일이 있었는지 |
 | [`idea_notes.md`](idea_notes.md) | 외부 자료 리뷰에서 나온 아이디어(대부분 미착수) | 새 레포ᆞ자료를 검토할 때 |
 | [`use_cases.md`](use_cases.md) / [`test_scenarios.md`](test_scenarios.md) | 사용자 사례ᆞ판정 시나리오 | 규칙 엔진을 고칠 때 |

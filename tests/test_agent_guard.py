@@ -109,7 +109,7 @@ def test_sequential_walkthrough_then_construction_transition():
     state["task_progress"] = {"pre_diagnosis_checked": True}
     assert "[Step 1-3]까지만" in permit_phase_directive(state)
 
-    state["messages"].append(AIMessage(content="[Step 1-3: 서류 준비] 건축ᆞ대지 현황도"))
+    state["messages"].append(AIMessage(content="[Step 1-3: 설계ᆞ서류 준비] 건축ᆞ대지 현황도"))
     state = _apply(state, guard_node(state))
     assert _disclosed(state) == 3
 
