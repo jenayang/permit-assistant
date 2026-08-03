@@ -21,7 +21,6 @@ import sqlite3
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.store.memory import InMemoryStore
 
 from src import config
 from src.agent import AgentState, agent_node, finalize_node, tool_node
@@ -32,11 +31,8 @@ from src.routing import route_after_agent, route_after_guard, route_after_tools
 
 
 def build_graph():
-    """ReAct 에이전트 그래프 구성.
-
-    - checkpointer: 대화 이력 (user_id 기준)
-    - store: 사용자 정보 저장소 (user_id 기준?, long-term)
-    """
+    """ReAct 에이전트 그래프 구성. checkpointer가 user_id(=thread_id)별 대화
+    이력을 SQLite에 남긴다."""
     builder = StateGraph(AgentState)
 
     builder.add_node("agent", agent_node)
@@ -45,6 +41,10 @@ def build_graph():
     builder.add_node("guard", guard_node)
     builder.add_node("finalize", finalize_node)
 
+    # path_map(3번째 인자)은 생략하면 안 된다 - 없으면 LangGraph가 분기 대상을
+    # 정적으로 알 수 없어 get_graph()가 조건부 엣지를 전부 잃고 "agent → END"
+    # 하나로 뭉갠다(2026-08-03 실측). 런타임 라우팅은 되지만 그래프 구조 조회ᆞ
+    # 시각화가 망가진다.
     builder.add_edge(START, "agent")
     builder.add_conditional_edges(
         "agent",
@@ -92,22 +92,8 @@ def build_graph():
     serde = JsonPlusSerializer(allowed_msgpack_modules=[PermitResult])
     checkpointer = SqliteSaver(conn, serde=serde)  # short-term memory (영구 저장)
     checkpointer.setup()
-    store = InMemoryStore()         # long-term memory (미사용 - 그대로 둠)
-    return builder.compile(checkpointer=checkpointer, store=store)
+    return builder.compile(checkpointer=checkpointer)
 
 
 # === 컴파일된 그래프 (모듈 로드 시 1회) ===
 graph = build_graph()
-
-
-# === Store 접근 헬퍼 (외부에서 저장/조회 가능하도록) ===
-def get_store():
-    """그래프에 연결된 store 반환.
-
-    사용 예:
-        from src.graph import get_store
-        store = get_store()
-        store.put(("user", "jena"), "language", {"value": "ko"})
-        result = store.get(("user", "jena"), "language")
-    """
-    return graph.store

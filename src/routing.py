@@ -22,18 +22,6 @@ from src.agent import AgentState
 logger = logging.getLogger(__name__)
 
 
-def _any_domain_needs_classify(state: AgentState) -> bool:
-    """DOMAIN_CONFIGS에 등록된 도메인 중 하나라도 "아직 미분류 + 지금 분류
-    가능"이면 True. run_classifier와 판정 조건은 같지만 메시지를 실제로
-    만들지는 않는 가벼운 버전 - route_after_tools는 갈 곳만 결정하면 되고
-    실제 처리는 classify_node가 한다."""
-    for config in DOMAIN_CONFIGS:
-        facts = state.get(config.facts_key, {})
-        if not facts.get("_classified") and config.classify_fn(facts) is not None:
-            return True
-    return False
-
-
 def route_after_tools(state: AgentState) -> str:
     """tools 실행 직후: 등록된 도메인 중 하나라도 방금 완성됐으면(각각
     record_case_facts/record_food_facts/record_fire_facts로 채워짐) agent로
@@ -47,7 +35,15 @@ def route_after_tools(state: AgentState) -> str:
     먼저 끝나서 이 문제가 구조적으로 사라진다. 도메인이 늘어도 이 타이밍
     원칙은 DOMAIN_CONFIGS를 통해 그대로 적용된다.
     """
-    if _any_domain_needs_classify(state) or _derive_ledger_facility_group(state) is not None:
+    # "아직 미분류 + 지금 분류 가능"한 도메인이 하나라도 있으면 classify로.
+    # run_classifier와 판정 조건은 같지만 메시지는 만들지 않는다 - 여긴 갈 곳만
+    # 정하고 실제 처리는 classify_node가 한다.
+    needs_classify = any(
+        not state.get(c.facts_key, {}).get("_classified")
+        and c.classify_fn(state.get(c.facts_key, {})) is not None
+        for c in DOMAIN_CONFIGS
+    )
+    if needs_classify or _derive_ledger_facility_group(state) is not None:
         logger.info("[route_after_tools] → classify")
         return "classify"
     logger.info("[route_after_tools] → agent (분류 조건 미충족 또는 이미 분류됨)")

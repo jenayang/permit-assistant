@@ -40,7 +40,7 @@
    사실만(법령 용어를 그대로 필드명으로 쓰지 말 것, 예:
    `manufactures_or_cooks`는 되지만 `sells_ready_made_only`처럼 법령 요건과
    어긋나는 이름은 오판정으로 이어짐 — 실제 사례 있음).
-4. `src/classify/classifier.py`의 `DOMAIN_CONFIGS`에 `_DomainConfig` 항목
+4. `src/classify.py`의 `DOMAIN_CONFIGS`에 `_DomainConfig` 항목
    추가(facts_key, state_key, classify_fn, record_tool, keywords, domain) —
    그래프 배선은 건드릴 필요 없음.
 5. `tests/test_<domain>_classify.py`에 경계값 회귀 테스트 작성(모든 분기ᆞ

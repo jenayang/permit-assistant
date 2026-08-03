@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from src.agent import DOMAIN_CONFIGS, _forced_record_tool
+from src.agent import _forced_record_tool
+from src.classify import DOMAIN_CONFIGS
 
 
 def _state(*messages, **facts) -> dict:

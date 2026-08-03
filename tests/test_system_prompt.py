@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from src.agent import (
+from src.prompts import (
     _ANSWER_PERMIT_STAGES,
     _COLLECT_COMMON,
     _COLLECT_FIRE,

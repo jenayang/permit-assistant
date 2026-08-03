@@ -31,41 +31,23 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-import sqlite3
-import uuid
 from dataclasses import dataclass
-from typing import Annotated, Callable
+from typing import Annotated
 
 from langchain_cerebras import ChatCerebras
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
     SystemMessage,
-    ToolMessage,
     trim_messages,
 )
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.store.memory import InMemoryStore
-from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.graph import MessagesState
 from langgraph.prebuilt import ToolNode
 
 from src import config
 from src.agents import TOOLS
-from src.agents.fire_safety import classify_fire_safety, fire_safety_message
-from src.agents.food_safety import NO_REPORT_RESULTS, classify_food_business, food_business_message
-from src.rag.regulation import search_regulations
-from src.agents.signage import classify_signage, signage_message
-from src.agents.permit import (
-    PROCEDURE_TREE,
-    PermitResult,
-    build_permit_result,
-    classify_case,
-    facility_group_from_use_name,
-    procedure_stage_message,
-)
+from src.agents.permit import PermitResult, build_permit_result
 
 logger = logging.getLogger(__name__)
 
@@ -140,31 +122,7 @@ class AgentState(MessagesState):
 
 
 # === 시스템 프롬프트(src/prompts.py로 분리, Phase 1) ===
-from src.prompts import (  # noqa: E402
-    SYSTEM_PROMPT,
-    _ANSWER_COMMON,
-    _ANSWER_PERMIT_STAGES,
-    _COLLECT_COMMON,
-    _COLLECT_FIRE,
-    _COLLECT_FOOD,
-    _COLLECT_HEADER,
-    _COLLECT_PERMIT,
-    _COLLECT_PERMIT_GUARD,
-    _COLLECT_PERMIT_LOOKUP,
-    _COLLECT_PERMIT_NEW_BUILD,
-    _COLLECT_PERMIT_USE_CHANGE,
-    _COLLECT_PROGRESS,
-    _COLLECT_SIGNAGE,
-    _FIRE_PROMPT_KEYWORDS,
-    _FOOD_PROMPT_KEYWORDS,
-    _PERMIT_PROMPT_KEYWORDS,
-    _PROGRESS_PROMPT_KEYWORDS,
-    _PROMPT_ACCURACY,
-    _PROMPT_HEADER,
-    _PROMPT_TOOLS,
-    _SIGNAGE_PROMPT_KEYWORDS,
-    build_system_prompt,
-)
+from src.prompts import build_system_prompt  # noqa: E402
 from src.message_utils import extract_text  # noqa: E402
 
 # === LLM + 도구 바인딩 ===
@@ -350,15 +308,11 @@ def _get_cerebras_llm_with_tools(tool_choice: str | None = None):
 
 # === 로드맵 단계 추적(src/roadmap.py) + 답변 신뢰성 검증(src/guard.py) 분리(Phase 4) ===
 from src.roadmap import (  # noqa: E402
-    _STAGE_DOMAIN,
     _roadmap_status_summary,
     _should_force_construction_guide,
     permit_phase_directive,
 )
-from src.guard import (  # noqa: E402
-    _CITATION_PATTERN,
-    guard_node,
-)
+from src.guard import _CITATION_PATTERN  # noqa: E402
 
 
 # 정의를 묻는 질문("건폐율이 뭐야")은 기록할 사실이 없어 강제 대상에서 뺀다.
@@ -607,16 +561,8 @@ def _coerce_tool_args(tool_name: str, args: dict) -> dict:
     return {k: validated[k] for k in args if k in validated}
 
 
-# === 판정 분류 파이프라인(src/classify/classifier.py로 분리, Phase 3) ===
-from src.classify import (  # noqa: E402
-    DOMAIN_CONFIGS,
-    ClassificationOutput,
-    _DomainConfig,
-    _derive_ledger_facility_group,
-    classify_node,
-)
-
-
+# === 판정 분류 파이프라인(src/classify.py로 분리, Phase 3) ===
+from src.classify import DOMAIN_CONFIGS  # noqa: E402
 
 
 def finalize_node(state: AgentState) -> dict:
@@ -687,6 +633,6 @@ tool_node = ToolNode(tools=TOOLS)   # tool 콜 받아서 실제 함수 실행
 
 
 # === 그래프 조립(src/graph.py로 분리, Phase 2) ===
-# build_graph()/graph/get_store()는 agent_node 등 이 파일의 거의 모든 조각을
-# 가져다 배선하므로, 반대 방향(이 파일이 src.graph를 import)은 순환참조가 된다.
-# 필요하면 from src.graph import build_graph, graph, get_store로 가져올 것.
+# build_graph()/graph는 agent_node 등 이 파일의 거의 모든 조각을 가져다
+# 배선하므로, 반대 방향(이 파일이 src.graph를 import)은 순환참조가 된다.
+# 필요하면 from src.graph import build_graph, graph로 가져올 것.
