@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from src import config
 from src.pipeline import get_project_status, ingest, query, update_task_progress
 from src.agent import ContextOverflowError
-from src.retriever import count_documents, find_unindexed_sources
+from src.rag.retriever import count_documents, find_unindexed_sources
 from src.agents.permit import PROCEDURE_TREE, PermitResult
 
 logger = logging.getLogger(__name__)

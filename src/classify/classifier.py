@@ -27,7 +27,7 @@ from src.agents.permit import (
     facility_group_from_use_name,
     procedure_stage_message,
 )
-from src.agents.regulation import search_regulations
+from src.rag.regulation import search_regulations
 from src.agents.signage import classify_signage, signage_message
 from src.message_utils import extract_text
 from src.prompts import (

@@ -56,7 +56,7 @@ from src import config
 from src.agents import TOOLS
 from src.agents.fire_safety import classify_fire_safety, fire_safety_message
 from src.agents.food_safety import NO_REPORT_RESULTS, classify_food_business, food_business_message
-from src.agents.regulation import search_regulations
+from src.rag.regulation import search_regulations
 from src.agents.signage import classify_signage, signage_message
 from src.agents.permit import (
     PROCEDURE_TREE,
@@ -607,7 +607,7 @@ def _coerce_tool_args(tool_name: str, args: dict) -> dict:
     return {k: validated[k] for k in args if k in validated}
 
 
-# === 판정 분류 파이프라인(src/classify_pipeline.py로 분리, Phase 3) ===
+# === 판정 분류 파이프라인(src/classify/classifier.py로 분리, Phase 3) ===
 from src.classify import (  # noqa: E402
     DOMAIN_CONFIGS,
     ClassificationOutput,

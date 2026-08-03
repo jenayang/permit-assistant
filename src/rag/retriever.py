@@ -265,7 +265,7 @@ def find_unindexed_sources() -> list[str]:
     환경의 .hwp)도 여기 잡히는데, 그건 실제로 근거가 빠진 상태가 맞으므로
     알려주는 게 옳다.
     """
-    from src.ingestion import discover_files
+    from src.rag.ingestion import discover_files
 
     indexed = indexed_sources()
     missing = []

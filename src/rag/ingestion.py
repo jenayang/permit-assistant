@@ -18,8 +18,8 @@ from langchain_community.document_loaders import PyMuPDFLoader, TextLoader, Unst
 from langchain_text_splitters import RecursiveCharacterTextSplitter 
 
 from src import config
-from src.law_chunker import is_law_document, split_law_documents
-from src.retriever import get_max_chunk_tokens, get_tokenizer
+from src.rag.law_chunker import is_law_document, split_law_documents
+from src.rag.retriever import get_max_chunk_tokens, get_tokenizer
 
 logger = logging.getLogger(__name__)  # "src.ingestion" 이름으로 로거 생성
 

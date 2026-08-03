@@ -13,14 +13,15 @@ from pathlib import Path
 
 import pytest
 
-from src import config, retriever
+from src import config
+from src.rag import retriever
 
 
 @pytest.fixture
 def fake_data(monkeypatch):
     """discover_files/indexed_sources를 주입 가능하게 만든다."""
     def setup(files: list[str], indexed: set[str]):
-        import src.ingestion as ingestion
+        import src.rag.ingestion as ingestion
         monkeypatch.setattr(
             ingestion, "discover_files",
             lambda *a, **k: [config.DATA_DIR / f for f in files],

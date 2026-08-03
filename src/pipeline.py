@@ -24,10 +24,10 @@ from src.agent import extract_text
 from src.graph import graph
 from src.guard import GROUNDING_TOOL_NAMES
 from src.agents.roadmap_progress import TASK_PROGRESS_FIELDS
-from src.ingestion import ingest_all
+from src.rag.ingestion import ingest_all
 from src.project_status import compute_project_status
-from src.retriever import index_documents, count_documents, reset_collection
-from src import parent_store
+from src.rag.retriever import index_documents, count_documents, reset_collection
+from src.rag import parent_store
 
 logger = logging.getLogger(__name__)
 

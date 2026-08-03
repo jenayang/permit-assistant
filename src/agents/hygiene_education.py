@@ -16,7 +16,7 @@ import logging
 
 from langchain_core.tools import tool
 
-from src.agents.regulation import search_regulations
+from src.rag.regulation import search_regulations
 
 logger = logging.getLogger(__name__)
 

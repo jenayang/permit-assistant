@@ -12,7 +12,7 @@ from pathlib import Path
 
 from langchain_core.documents import Document
 
-from src import ingestion
+from src.rag import ingestion
 
 
 def _doc(text: str) -> Document:

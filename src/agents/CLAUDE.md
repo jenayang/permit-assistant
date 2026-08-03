@@ -11,11 +11,13 @@
   순수 함수를 가진다.
 - **RAG 안내 도구**: `construction.py` · `business_registration.py` ·
   `hygiene_education.py` · `opening_checklist.py`. 법령 근거가 있으면
-  `search_regulations`로 검색, 없으면(순수 실무 체크리스트) 정적 텍스트.
-  전환 기준: `MEMORY.md` → static-vs-rag-content.
+  `src/rag/regulation.py`의 `search_regulations`로 검색, 없으면(순수 실무
+  체크리스트) 정적 텍스트. 전환 기준: `MEMORY.md` → static-vs-rag-content.
+  (검색 도구 본체 `regulation.py`는 이 폴더가 아니라 `src/rag/`에 있다 —
+  판정 규칙이 아니라 RAG 파이프라인 진입점이라 그쪽으로 옮겼다.)
 - **조회 도구**: `site.py`(용도지역ᆞ건축물대장 등 외부 API).
-- **공용**: `legal_data.py`(YAML 임계값 로더) · `regulation.py`(검색 도구
-  본체) · `roadmap_progress.py`(task_progress 기록).
+- **공용**: `legal_data.py`(YAML 임계값 로더) · `roadmap_progress.py`
+  (task_progress 기록).
 
 ## classify_fn 계약 (모든 판정 함수가 지켜야 함)
 
@@ -38,9 +40,9 @@
    사실만(법령 용어를 그대로 필드명으로 쓰지 말 것, 예:
    `manufactures_or_cooks`는 되지만 `sells_ready_made_only`처럼 법령 요건과
    어긋나는 이름은 오판정으로 이어짐 — 실제 사례 있음).
-4. `agent.py`의 `DOMAIN_CONFIGS`에 `_DomainConfig` 항목 추가(facts_key,
-   state_key, classify_fn, record_tool, keywords, domain) — 그래프 배선은
-   건드릴 필요 없음.
+4. `src/classify/classifier.py`의 `DOMAIN_CONFIGS`에 `_DomainConfig` 항목
+   추가(facts_key, state_key, classify_fn, record_tool, keywords, domain) —
+   그래프 배선은 건드릴 필요 없음.
 5. `tests/test_<domain>_classify.py`에 경계값 회귀 테스트 작성(모든 분기ᆞ
    None 케이스 포함). 유닛 테스트는 LLM 호출 없이 결정론적으로 실행돼야 함.
 6. Gold Set(`tests/fixtures/extraction_gold_set.py`)에 새 필드 추출 케이스

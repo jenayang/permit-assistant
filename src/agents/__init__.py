@@ -35,7 +35,7 @@ from src.agents.permit import (
     record_case_facts,
     record_permit_synthesis,
 )
-from src.agents.regulation import search_by_term, search_regulations
+from src.rag.regulation import search_by_term, search_regulations
 from src.agents.roadmap_progress import record_task_progress
 from src.agents.signage import classify_signage, record_signage_facts, signage_message
 from src.agents.site import lookup_building_ledger, lookup_building_ratio_limits, lookup_land_zone
