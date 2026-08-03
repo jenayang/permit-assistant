@@ -643,10 +643,10 @@ def record_permit_synthesis(
       이전에 기록한 값 위에 누적됩니다.
     - 아직 검색을 안 해서 모르면, 먼저 search_regulations/search_by_term으로
       근거를 확보한 뒤에 호출하세요 - 추측해서 채우지 마세요.
-    - pre_diagnosis_items: [3단계: 사전 진단]에서 안내한 항목(예: "주차대수
+    - pre_diagnosis_items: [Step 1-2: 사전 검토]에서 안내한 항목(예: "주차대수
       기준 확인", "정화조 용량 확인")을 답변과 동일한 문구로 기록하세요 -
-      프론트엔드가 이 목록의 존재 여부로 3단계 완료를 판단합니다(빈 목록이면
-      아직 3단계 진행 중으로 취급됨).
+      프론트엔드가 이 목록의 존재 여부로 해당 단계 완료를 판단합니다(빈
+      목록이면 아직 진행 중으로 취급됨).
     """
     logger.info("[도구] record_permit_synthesis(%r)", {
         k: v for k, v in locals().items() if v is not None

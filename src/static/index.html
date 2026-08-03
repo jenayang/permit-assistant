@@ -739,8 +739,9 @@
   // 참고용 추정치로만 다룬다. 시간 폭으로 딱 떨어지지 않는 항목(소방시설
   // 확인 등)은 아예 표시하지 않는다.
   const NEXT_ACTION_DURATIONS = {
-    "신청서 제출": "3~7일",
-    "사전 진단 확인": "3~7일",
+    "사전 검토": "3~7일",
+    "서류 준비": "1~2주",
+    "신청ᆞ접수": "3~7일",
     "착공신고": "1~3일",
     "공사(시공)": "2~6주",
     "사용승인": "7일 이내",
@@ -808,21 +809,21 @@
 
     const stage1Items = [{ text: "허가ᆞ신고ᆞ기재변경 여부 판정", done: classified }];
 
-    const docs = latestPermitResult?.required_documents || [];
-    const stage2Items = docs.length
-      ? docs.map(d => ({ text: d, done: true }))
-      : [{ text: "신청서 제출 안내 대기 중", done: false }];
-
     const diag = latestPermitResult?.pre_diagnosis_items || [];
-    const stage3Items = diag.length
+    const stage2Items = diag.length
       ? diag.map(d => ({ text: d, done: true }))
-      : [{ text: "사전 진단 확인 중", done: false }];
+      : [{ text: "사전 검토 확인 중", done: false }];
+
+    const docs = latestPermitResult?.required_documents || [];
+    const stage3Items = docs.length
+      ? docs.map(d => ({ text: d, done: true }))
+      : [{ text: "서류 준비 안내 대기 중", done: false }];
 
     return [
       { items: stage0Items, done: classified },
       { items: stage1Items, done: classified },
-      { items: stage2Items, done: docs.length > 0 },
-      { items: stage3Items, done: diag.length > 0 },
+      { items: stage2Items, done: diag.length > 0 },
+      { items: stage3Items, done: docs.length > 0 },
     ];
   }
 
@@ -891,28 +892,39 @@
       factInfoLines.push(`시설군 ${caseFacts.current_facility_group}→${caseFacts.desired_facility_group}`);
     }
 
-    // Step 1의 서류ᆞ사전진단은 판정이 나오면 실제 항목명을 그대로 보여준다
+    // Step 1의 사전진단ᆞ서류는 판정이 나오면 실제 항목명을 그대로 보여준다
     // (예전 고도계가 보여주던 상세 정보 - 요약 라벨로 뭉개면 정보 손실).
-    // 단, 항목이 "나열됐다"는 것과 "완료됐다"는 것은 다르다 - AI가 서류ᆞ
-    // 사전진단 항목을 설명만 했는데 전부 done:true로 표시돼 Step1이 실제로는
+    // 단, 항목이 "나열됐다"는 것과 "완료됐다"는 것은 다르다 - AI가 사전진단ᆞ
+    // 서류 항목을 설명만 했는데 전부 done:true로 표시돼 Step1이 실제로는
     // 아무것도 확인 안 된 채로 통째로 체크되는 회귀 버그가 있었다(2026-07-27).
     // 그래서 실제 항목 목록은 info(참고용, 체크 여부 없음)로만 보여주고,
     // 완료 여부는 사용자가 직접 확인한 task_progress 체크박스 하나로만 반영한다.
-    // 판정이 "인허가불필요"면 신청서 제출ᆞ사전 진단 자체가 불필요하다 - ✕로 닫는다.
+    // 판정이 "인허가불필요"면 사전 검토ᆞ서류 준비ᆞ신청 접수 자체가 불필요하다
+    // - ✕로 닫는다. (2026-08-03: 실제 업무 순서(사전검토→서류준비→신청접수)를
+    // 반영해 재배치 - 사전진단 결과가 설계도서에 반영돼야 하므로 서류 준비보다
+    // 먼저다. "신청서 제출"에 뭉쳐 있던 서류 준비ᆞ접수 행위도 별도 항목으로
+    // 분리했다.)
     const permitNotNeeded = (latestPermitResult?.permit_type || caseTypeResult) === "인허가불필요";
     const step1Substeps = [{ text: "허가ᆞ신고 대상 확인", done: permitStage >= 2, tags: factInfoLines }];
-    if (docs.length) {
-      docs.forEach((d) => step1Substeps.push({ text: `📄 ${d}`, info: true }));
-      step1Substeps.push({ text: "신청서 제출", done: !!taskProgress.documents_prepared, field: "documents_prepared" });
-    } else {
-      step1Substeps.push({ text: "신청서 제출", done: false, notApplicable: permitNotNeeded, naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다" });
-    }
     if (diag.length) {
       diag.forEach((d) => step1Substeps.push({ text: `🔍 ${d}`, info: true }));
-      step1Substeps.push({ text: "사전 진단 확인 완료", done: !!taskProgress.pre_diagnosis_checked, field: "pre_diagnosis_checked" });
+      step1Substeps.push({ text: "사전 검토 확인 완료", done: !!taskProgress.pre_diagnosis_checked, field: "pre_diagnosis_checked" });
     } else {
-      step1Substeps.push({ text: "사전 진단", done: false, notApplicable: permitNotNeeded, naReason: "인허가 대상이 아니라 사전 진단이 필요 없습니다" });
+      step1Substeps.push({ text: "사전 검토", done: false, notApplicable: permitNotNeeded, naReason: "인허가 대상이 아니라 사전 검토가 필요 없습니다" });
     }
+    if (docs.length) {
+      docs.forEach((d) => step1Substeps.push({ text: `📄 ${d}`, info: true }));
+      step1Substeps.push({ text: "서류 준비", done: !!taskProgress.documents_prepared, field: "documents_prepared" });
+    } else {
+      step1Substeps.push({ text: "서류 준비", done: false, notApplicable: permitNotNeeded, naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다" });
+    }
+    step1Substeps.push({
+      text: "신청ᆞ접수",
+      done: !!taskProgress.application_submitted,
+      field: "application_submitted",
+      notApplicable: permitNotNeeded,
+      naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다",
+    });
 
     // Step 4 "영업 시작" 잠금 기준 - Step3(창업 행정) 5개 항목이 전부
     // done이어야 실제 영업 개시가 가능하다(2026-07-28). 각 항목의 done

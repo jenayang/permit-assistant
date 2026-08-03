@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # 있는 필드만 갱신하도록 api.py가 검증할 때 재사용한다. 여기 하나만 고치면
 # 도구ᆞAPI 양쪽에 다 반영되도록 단일 소스로 둔다.
 TASK_PROGRESS_FIELDS: list[str] = [
-    "documents_prepared", "pre_diagnosis_checked",
+    "pre_diagnosis_checked", "documents_prepared", "application_submitted",
     "construction_notice", "construction", "use_approval",
     "business_registration", "hygiene_education",
     "interior_equipment", "staff_registration", "opened",
@@ -40,8 +40,9 @@ TASK_PROGRESS_FIELDS: list[str] = [
 
 @tool
 def record_task_progress(
-    documents_prepared: bool | None = None,
     pre_diagnosis_checked: bool | None = None,
+    documents_prepared: bool | None = None,
+    application_submitted: bool | None = None,
     construction_notice: bool | None = None,
     construction: bool | None = None,
     use_approval: bool | None = None,
@@ -61,10 +62,12 @@ def record_task_progress(
     - 이 항목들은 실제 세상에서 벌어지는 일(착공ᆞ사업자등록ᆞ영업개시 등)이라
       AI가 스스로 판단하거나 안내를 보여줬다는 이유로 완료 처리하면 안
       됩니다 - 반드시 사용자가 직접 완료를 말해준 경우에만 기록하세요.
-      **특히 documents_prepared/pre_diagnosis_checked는 record_permit_synthesis로
-      서류ᆞ사전진단 항목을 "설명"한 것과 다릅니다** - 설명은 안내일 뿐이고,
-      사용자가 "서류 다 준비했어요"/"사전 진단 항목 확인했어요ᆞ문제없어요"처럼
-      직접 확인해줬을 때만 기록하세요.
+      **특히 pre_diagnosis_checked/documents_prepared는 record_permit_synthesis로
+      사전진단ᆞ서류 항목을 "설명"한 것과 다릅니다** - 설명은 안내일 뿐이고,
+      사용자가 "사전 진단 항목 확인했어요ᆞ문제없어요"/"서류 다 준비했어요"처럼
+      직접 확인해줬을 때만 기록하세요. application_submitted도 마찬가지로
+      [Step 1-4] 안내를 받았다는 것과 무관하게, 사용자가 "접수했어요"/
+      "신청서 냈어요"처럼 실제 접수를 직접 말해줬을 때만 기록하세요.
     - 이번 턴에 새로 알게 된 항목만 채우고 나머지는 생략(None)하세요. 여러
       턴에 걸쳐 나눠서 호출해도 이전에 기록한 값 위에 누적됩니다.
     - False로 기록할 필요는 거의 없습니다(언급이 없으면 자동으로 미완료
@@ -77,8 +80,9 @@ def record_task_progress(
       채용하겠다고 하면 hires_staff=True로 다시 바꾸세요.
 
     Args:
-        documents_prepared: 건축 인허가 필수 서류 준비를 완료했는지
         pre_diagnosis_checked: 사전 진단 항목(주차ᆞ정화조ᆞ소방시설 등) 확인을 완료했는지
+        documents_prepared: 건축 인허가 필수 서류 준비를 완료했는지
+        application_submitted: 관할 구청에 신청서ᆞ신고서 접수를 완료했는지
         construction_notice: 착공신고를 완료했는지
         construction: 착공ᆞ시공을 완료했는지(또는 진행 중이라고 밝혔는지)
         use_approval: 사용승인을 받았는지

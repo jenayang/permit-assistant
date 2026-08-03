@@ -49,8 +49,9 @@ def _step_substeps(state: dict) -> list[list[tuple[str, bool]]]:
         [("행위 유형 확인", bool(case_facts.get("act_type")))],
         [
             ("허가ᆞ신고 대상 판정", bool(permit_result)),
-            ("신청서 제출", bool(tp.get("documents_prepared"))),
-            ("사전 진단 확인", bool(tp.get("pre_diagnosis_checked"))),
+            ("사전 검토", bool(tp.get("pre_diagnosis_checked"))),
+            ("서류 준비", bool(tp.get("documents_prepared"))),
+            ("신청ᆞ접수", bool(tp.get("application_submitted"))),
         ],
         [
             ("착공신고", bool(tp.get("construction_notice"))),

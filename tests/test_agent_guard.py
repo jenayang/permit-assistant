@@ -85,30 +85,51 @@ def test_permit_phase_directive_none_before_classification():
 
 
 def test_sequential_walkthrough_then_construction_transition():
-    """Step1-1→1-2→1-3 순서로 진행하고, 다 끝나면 Step2(공사) 전환 넛지가
-    나오고, get_construction_guide 호출 후엔 더 이상 넛지가 안 나온다."""
+    """Step1-1→1-2→1-3→1-4 순서로 진행하고, 다 끝나면 Step2(공사) 전환 넛지가
+    나오고, get_construction_guide 호출 후엔 더 이상 넛지가 안 나온다.
+
+    2026-08-03: 1-2(사전검토)→1-3, 1-3(서류준비)→1-4 전환에도 완료 확인 게이트가
+    생겼다 - 확인 전엔 다음 단계로 못 넘어가고, task_progress로 완료를 기록해야
+    다음 단계 안내가 나온다(기존에 있던 1-4→Step2 게이트와 동일한 패턴)."""
     state = _base_state()
 
     assert "[Step 1-1]까지만" in permit_phase_directive(state)
 
-    state["messages"].append(AIMessage(content="[Step 1-1: 상황 분석+필요 절차] 신고 대상입니다."))
+    state["messages"].append(AIMessage(content="[Step 1-1: 대상 판정] 신고 대상입니다."))
     state = _apply(state, guard_node(state))
     assert _disclosed(state) == 1
     assert "[Step 1-2]까지만" in permit_phase_directive(state)
 
-    state["messages"].append(AIMessage(content="[Step 1-2: 필수 서류] 건축ᆞ대지 현황도"))
+    state["messages"].append(AIMessage(content="[Step 1-2: 사전 검토] 주차대수 확인 필요"))
     state = _apply(state, guard_node(state))
     assert _disclosed(state) == 2
+
+    directive = permit_phase_directive(state)
+    assert "사전 검토 항목은 확인해 보셨어요" in directive, "사전검토 완료 확인 전엔 1-3으로 넘어가면 안 된다"
+    state["task_progress"] = {"pre_diagnosis_checked": True}
     assert "[Step 1-3]까지만" in permit_phase_directive(state)
 
-    state["messages"].append(
-        AIMessage(content="[Step 1-3: 사전 진단] 주차대수 확인 필요. 예상 소요 기간은 신고 기준 3~5일입니다.")
-    )
+    state["messages"].append(AIMessage(content="[Step 1-3: 서류 준비] 건축ᆞ대지 현황도"))
     state = _apply(state, guard_node(state))
     assert _disclosed(state) == 3
 
     directive = permit_phase_directive(state)
-    assert "Step 2(공사) 안내를 시작하지 않았습니다" in directive
+    assert "서류 준비는 다 되셨어요" in directive, "서류준비 완료 확인 전엔 1-4로 넘어가면 안 된다"
+    state["task_progress"] = {**state["task_progress"], "documents_prepared": True}
+    assert "[Step 1-4]까지만" in permit_phase_directive(state)
+
+    state["messages"].append(
+        AIMessage(content="[Step 1-4: 신청ᆞ접수] 관할 구청에 접수합니다. 예상 소요 기간은 신고 기준 3~5일입니다.")
+    )
+    state = _apply(state, guard_node(state))
+    assert _disclosed(state) == 4
+
+    directive = permit_phase_directive(state)
+    assert "신청서 접수는 다 하셨어요" in directive, "신청ᆞ접수 확인 전엔 Step 2를 곧장 안내하면 안 된다"
+
+    state["task_progress"] = {"application_submitted": True}
+    directive = permit_phase_directive(state)
+    assert "신청ᆞ접수도 확인됐습니다" in directive
 
     call_id = "c1"
     state["messages"].append(
@@ -127,9 +148,12 @@ def test_sequential_walkthrough_then_construction_transition():
 def test_revisit_lowers_stage_instead_of_skipping():
     """회귀 테스트(세션 f377454d) - Step1-3까지 간 뒤 Step1-2를 다시 물으면
     disclosed_stage가 2로 내려가고, 이어가면 Step1-4로 건너뛰지 않고
-    Step1-3부터 다시 진행된다."""
+    Step1-3부터 다시 진행된다. 이 테스트는 disclosed_stage 되짚기 로직만
+    보는 것이라, 완료 확인 게이트(2026-08-03)가 끼어들지 않도록 미리
+    완료된 것으로 둔다."""
     state = _base_state()
     state["disclosed_stage"] = {"case_facts": 3}
+    state["task_progress"] = {"pre_diagnosis_checked": True, "documents_prepared": True}
     state["messages"] = [
         HumanMessage(content="서류 다시 알려줘"),
         AIMessage(content="[Step 1-2: 필수 서류] 다시 설명드릴게요."),
@@ -147,17 +171,18 @@ def test_revisit_lowers_stage_instead_of_skipping():
     assert _disclosed(state) == 3
 
 
-def test_step1_4_marker_no_longer_recognized():
-    """2026-07-28에 Step1을 4단계에서 3단계로 줄였다 - 옛 [Step 1-4] 헤더가
-    실수로 다시 등장해도 더 이상 마커로 인식되면 안 된다."""
+def test_step1_5_marker_not_recognized():
+    """2026-08-03에 Step1을 3단계에서 4단계로 다시 늘렸다(대상판정ᆞ사전검토ᆞ
+    서류준비ᆞ신청접수) - 상한을 벗어난 [Step 1-5] 같은 헤더는 마커로 인식되면
+    안 된다."""
     state = _base_state()
-    state["disclosed_stage"] = {"case_facts": 3}
+    state["disclosed_stage"] = {"case_facts": 4}
     state["messages"] = [
         HumanMessage(content="더 자세히"),
-        AIMessage(content="[Step 1-4: 예상 소요 기간] 3~5일 정도입니다."),
+        AIMessage(content="[Step 1-5: 예상 소요 기간] 3~5일 정도입니다."),
     ]
     state = _apply(state, guard_node(state))
-    assert _disclosed(state) == 3
+    assert _disclosed(state) == 4
 
 
 def test_unrelated_answer_does_not_touch_disclosed_stage():
@@ -179,7 +204,8 @@ def test_construction_guide_gap_triggers_retry():
     그 지시를 무시하고 "Step 2(공사)" 내용을 도구 호출 없이 텍스트로만
     설명하면 재시도를 유도해야 한다(RAG 검색 없이 절차를 지어내는 걸 막음)."""
     state = _base_state()
-    state["disclosed_stage"] = {_STAGE_DOMAIN: 3}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 4}
+    state["task_progress"] = {"application_submitted": True}
     state["messages"] = [
         HumanMessage(content="공사는 어떻게 진행돼?"),
         AIMessage(content="다음은 Step 2(공사) 단계입니다. 착공신고를 먼저 진행하셔야 해요."),
@@ -190,12 +216,32 @@ def test_construction_guide_gap_triggers_retry():
     assert "get_construction_guide" in guard_msgs[0].content
 
 
+def test_construction_guide_gap_ignored_before_application_submitted():
+    """2026-08-03 회귀 - Step1-4까지 다 끝났어도 신청ᆞ접수(application_submitted)가
+    아직 확인 안 됐으면, permit_phase_directive가 실제로 지시하는 건 "Step 2
+    안내"가 아니라 "접수 확인 질문"이라 이 위반 체크 자체가 적용 대상이 아니다.
+    적용 대상으로 잘못 잡으면 "도구를 호출하라"고 유도해 접수 확인 없이
+    바로 Step2로 넘어가게 만드는 실패가 실측으로 확인됐다(스모크 테스트,
+    세션 f4081a6a)."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 4}
+    state["messages"] = [
+        HumanMessage(content="공사는 어떻게 진행돼?"),
+        AIMessage(content="다음은 Step 2(공사) 단계입니다. 착공신고를 먼저 진행하셔야 해요."),
+    ]
+    update = guard_node(state)
+    assert not any(
+        isinstance(m, ToolMessage) and m.name == "_answer_guard" for m in update.get("messages", [])
+    )
+
+
 def test_construction_guide_called_suppresses_gap_violation():
     """get_construction_guide를 실제로 호출한 뒤라면(같은 턴이든 이전 턴이든)
     Step 2 내용을 언급해도 더 이상 걸리지 않아야 한다 - 정상 경로까지
     막으면 안 됨."""
     state = _base_state()
-    state["disclosed_stage"] = {_STAGE_DOMAIN: 3}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 4}
+    state["task_progress"] = {"application_submitted": True}
     call_id = "c1"
     state["messages"] = [
         HumanMessage(content="공사는 어떻게 진행돼?"),
@@ -213,7 +259,8 @@ def test_construction_guide_gap_ignores_unrelated_topics():
     """Step2 관련 키워드가 아예 없는(다른 도메인) 답변은 이 체크가 무시해야
     한다 - Step2를 아직 안 물었는데 강제로 끼워넣으면 과잉 개입이 된다."""
     state = _base_state()
-    state["disclosed_stage"] = {_STAGE_DOMAIN: 3}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 4}
+    state["task_progress"] = {"application_submitted": True}
     state["messages"] = [
         HumanMessage(content="간판은 신고 대상인가요?"),
         AIMessage(content="네, 벽면이용간판은 신고 대상입니다."),
@@ -228,7 +275,8 @@ def test_force_construction_guide_when_ai_just_proposed_step2():
     """AI가 방금 "Step 2(공사 단계)" 안내를 제안했고 사용자가 그에 응답하는
     턴이면 tool_choice 강제 대상이다 - 세션 5db53ccb의 실패 패턴 그대로."""
     state = _base_state()
-    state["disclosed_stage"] = {_STAGE_DOMAIN: 3}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 4}
+    state["task_progress"] = {"application_submitted": True}
     state["messages"] = [
         HumanMessage(content="서류ᆞ사전진단 다 끝냈어."),
         AIMessage(content="완료하셨군요! 다음은 Step 2(공사 단계)입니다. 안내해 드릴까요?"),
@@ -237,10 +285,26 @@ def test_force_construction_guide_when_ai_just_proposed_step2():
     assert _should_force_construction_guide(state) is True
 
 
+def test_no_force_before_application_submitted_even_if_ai_proposed_step2():
+    """2026-08-03 회귀 - Step1-4까지 disclosed=4여도 신청ᆞ접수 확인이 아직
+    안 됐으면, AI가 스스로 "Step 2(공사 단계)"를 언급했더라도 강제 호출
+    대상이 아니다 - 강제해버리면 접수 확인 없이 곧장 Step2로 넘어가는
+    실패가 실측으로 확인됐다(스모크 테스트, 세션 f4081a6a)."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 4}
+    state["messages"] = [
+        HumanMessage(content="서류ᆞ사전진단 다 끝냈어."),
+        AIMessage(content="완료하셨군요! 다음은 Step 2(공사 단계)입니다. 안내해 드릴까요?"),
+        HumanMessage(content="응 알려줘"),
+    ]
+    assert _should_force_construction_guide(state) is False
+
+
 def test_no_force_when_construction_guide_already_shown():
     """이미 한 번 호출됐으면(플래그 세팅됨) 더 강제할 필요 없다."""
     state = _base_state()
-    state["disclosed_stage"] = {_STAGE_DOMAIN: 3, "construction_guide": 1}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 4, "construction_guide": 1}
+    state["task_progress"] = {"application_submitted": True}
     state["messages"] = [
         HumanMessage(content="공사는 어떻게 진행돼?"),
         AIMessage(content="다음은 Step 2(공사 단계)입니다. 안내해 드릴까요?"),
@@ -250,7 +314,7 @@ def test_no_force_when_construction_guide_already_shown():
 
 
 def test_no_force_when_step1_not_finished():
-    """Step 1이 아직 안 끝났으면(disclosed<3) 강제 대상이 아니다."""
+    """Step 1이 아직 안 끝났으면(disclosed<4) 강제 대상이 아니다."""
     state = _base_state()
     state["disclosed_stage"] = {_STAGE_DOMAIN: 1}
     state["messages"] = [
@@ -266,7 +330,8 @@ def test_no_force_on_unrelated_topic_even_if_step1_done():
     였다면, 사용자가 뭘 답하든 강제하면 안 된다 - 무관한 질문까지 공사
     안내로 강제 전환되는 부작용을 막는 게 이 함수의 핵심 존재 이유."""
     state = _base_state()
-    state["disclosed_stage"] = {_STAGE_DOMAIN: 3}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 4}
+    state["task_progress"] = {"application_submitted": True}
     state["messages"] = [
         HumanMessage(content="간판은 신고 대상인가요?"),
         AIMessage(content="네, 벽면이용간판은 신고 대상입니다."),
@@ -280,7 +345,8 @@ def test_no_force_when_last_message_is_not_human():
     이번 판단 대상이 아니다 - agent_node가 다음 LLM 호출 전에 판단하는
     시점 자체가 아직 아님."""
     state = _base_state()
-    state["disclosed_stage"] = {_STAGE_DOMAIN: 3}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 4}
+    state["task_progress"] = {"application_submitted": True}
     state["messages"] = [
         HumanMessage(content="응 알려줘"),
         AIMessage(content="다음은 Step 2(공사 단계)입니다. 안내해 드릴까요?"),

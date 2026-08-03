@@ -49,7 +49,7 @@ def test_construction_track_fully_done_has_no_current_step():
         "case_facts": {"act_type": "신축"},
         "permit_result": {"permit_type": "건축신고"},
         "task_progress": {
-            "documents_prepared": True, "pre_diagnosis_checked": True,
+            "pre_diagnosis_checked": True, "documents_prepared": True, "application_submitted": True,
             "construction_notice": True, "construction": True, "use_approval": True,
         },
     }
@@ -70,7 +70,7 @@ def test_all_steps_done_reaches_full_progress_and_celebration_summary():
         "fire_result": [],
         "signage_result": "허가ᆞ신고 불필요",
         "task_progress": {
-            "documents_prepared": True, "pre_diagnosis_checked": True,
+            "pre_diagnosis_checked": True, "documents_prepared": True, "application_submitted": True,
             "construction_notice": True, "construction": True, "use_approval": True,
             "business_registration": True, "hygiene_education": True,
             "interior_equipment": True, "staff_registration": True, "opened": True,
@@ -103,7 +103,7 @@ def test_hires_staff_false_counts_staff_registration_as_done():
 
 
 def test_progress_percentage_rounds_to_nearest_integer():
-    # 총 15개 하위 항목 중 8개 완료 -> 8/15*100 = 53.33... -> 반올림 53
+    # 총 16개 하위 항목 중 9개 완료 -> 9/16*100 = 56.25 -> 반올림 56
     state = {
         "case_facts": {"act_type": "신축"},
         "permit_result": {"permit_type": "건축신고"},
@@ -111,9 +111,9 @@ def test_progress_percentage_rounds_to_nearest_integer():
         "fire_result": [],
         "signage_result": "허가ᆞ신고 불필요",
         "task_progress": {
-            "documents_prepared": True, "pre_diagnosis_checked": True,
+            "pre_diagnosis_checked": True, "documents_prepared": True, "application_submitted": True,
             "construction_notice": True,
         },
     }
     result = compute_project_status(state)
-    assert result["progress"] == 53
+    assert result["progress"] == 56
