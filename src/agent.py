@@ -55,7 +55,7 @@ from langgraph.prebuilt import ToolNode
 from src import config
 from src.agents import TOOLS
 from src.agents.fire_safety import classify_fire_safety, fire_safety_message
-from src.agents.food_safety import classify_food_business, food_business_message
+from src.agents.food_safety import NO_REPORT_RESULTS, classify_food_business, food_business_message
 from src.agents.regulation import search_regulations
 from src.agents.signage import classify_signage, signage_message
 from src.agents.permit import (
@@ -233,15 +233,19 @@ lookup_land_zone으로 자동 조회해서 성공 시 바로 record_case_facts�
 기록하세요. 자동 조회가 실패했을 때만 사용자에게 직접 물어보세요."""
 
 # --- 식품위생(food) 수집 규칙 ---
-_COLLECT_FOOD = """카페ᆞ식당처럼 음식류를 조리ᆞ판매하는 업종이면, 식품위생법상 어떤 영업신고
-대상인지 판단하는 데 필요한 사실(조리ᆞ판매 여부ᆞ완제품만 파는지ᆞ베이커리
-위주인지ᆞ주류 판매 여부)도 파악되는 대로 record_food_facts로 기록하세요.
-사무실ᆞ미용실처럼 식품위생법과 무관한 업종이 명백하면 serves_food=False만
-기록해도 됩니다. **휴게음식점/일반음식점 같은 영업 종류 자체는 절대 묻거나
-당신이 판단하지 마세요** - 식품위생법 시행령 제21조 기준으로 시스템이 자동
-판정합니다. 대신 사용자가 실제로 답할 수 있는 사실만 물어보되, **그 질문이
-어떤 결과를 가르는 기준인지 짧게 함께 알려주세요** (예: "주류도 함께
-판매하시나요? 음주 허용 여부에 따라 휴게음식점/일반음식점 신고가 달라져서요")."""
+_COLLECT_FOOD = """카페ᆞ식당처럼 음식ᆞ식품을 다루는 업종이면, 식품위생법상 어떤 영업신고
+대상인지 판단하는 데 필요한 사실(직접 조리ᆞ제조 여부ᆞ베이커리 위주인지ᆞ주류
+판매 여부, 그리고 조리ᆞ제조 없이 완제품만 되파는 경우엔 영업장 면적)도 파악되는
+대로 record_food_facts로 기록하세요. 사무실ᆞ미용실처럼 식품위생법과 무관한
+업종이 명백하면 serves_food=False만 기록해도 됩니다. **직접 조리ᆞ제조 없이 이미
+완성된 완제품만 되파는 경우**(예: 캔 음료ᆞ포장 과자만 진열)는
+manufactures_or_cooks=False로 기록하고 영업장 면적(store_area_sqm)도 물어보세요 -
+면적 300㎡ 기준으로 기타식품판매업 신고 대상인지 아닌지가 갈립니다.
+**휴게음식점/일반음식점 같은 영업 종류 자체는 절대 묻거나 당신이 판단하지
+마세요** - 식품위생법 시행령 제21조 기준으로 시스템이 자동 판정합니다. 대신
+사용자가 실제로 답할 수 있는 사실만 물어보되, **그 질문이 어떤 결과를 가르는
+기준인지 짧게 함께 알려주세요** (예: "주류도 함께 판매하시나요? 음주 허용 여부에
+따라 휴게음식점/일반음식점 신고가 달라져서요")."""
 
 # --- 소방시설(fire) 수집 규칙 ---
 _COLLECT_FIRE = """카페ᆞ음식점처럼 식품접객업이면 소방시설 설치 대상도 함께 판정하세요.
@@ -1172,7 +1176,7 @@ def _classify_food(facts: dict) -> ClassificationOutput | None:
         tool_name="set_food_business_type",
         tool_args={"business_type": business_type},
         tool_message=food_business_message(business_type),
-        rag_query=None if business_type == "해당없음" else f"{business_type} 영업신고 절차 및 필요 서류",
+        rag_query=None if business_type in NO_REPORT_RESULTS else f"{business_type} 영업신고 절차 및 필요 서류",
     )
 
 

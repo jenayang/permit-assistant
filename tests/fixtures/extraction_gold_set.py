@@ -59,18 +59,18 @@ GOLD_SET: list[tuple[str, str, dict]] = [
      {"serves_food": True, "serves_alcohol": True}),
     ("food", "커피만 팔고 주류는 취급 안 합니다.",
      {"serves_food": True, "serves_alcohol": False}),
-    # sells_ready_made_only는 표현을 바꿔가며 4건 둔다. 2026-08-02 측정에서 이
-    # 필드만 Gemini가 못 뽑았는데(Gemma4는 뽑음), 1건짜리 표본으론 그 모델의
-    # 일반적 약점인지 이 문장 특유의 문제인지 갈리지 않는다. 없으면 판정이
-    # None에 머물러 식품 영업 종류가 영영 안 나오는 필드라 중요도가 높다.
+    # manufactures_or_cooks(직접 조리ᆞ제조 여부)는 표현을 바꿔가며 여러 건 둔다.
+    # "완제품만 되팔기"(=False)는 영업장 면적과 함께 봐야 판정이 갈려서(300㎡
+    # 기준 기타식품판매업/신고대상제외), 면적을 함께 말한 발화도 하나 둔다.
+    # 없으면 판정이 None에 머물러 식품 영업 종류가 영영 안 나오는 필드라 중요도가 높다.
     ("food", "조리는 안 하고 완제품 포장식품만 판매할 거예요.",
-     {"serves_food": True, "sells_ready_made_only": True}),
+     {"serves_food": True, "manufactures_or_cooks": False}),
     ("food", "만들지는 않고 이미 완성된 제품만 그대로 팔 예정입니다.",
-     {"serves_food": True, "sells_ready_made_only": True}),
-    ("food", "포장된 샌드위치를 떼다가 그대로 판매만 합니다.",
-     {"serves_food": True, "sells_ready_made_only": True}),
+     {"serves_food": True, "manufactures_or_cooks": False}),
+    ("food", "포장된 샌드위치를 떼다가 그대로 판매만 하는 40제곱미터 가게예요.",
+     {"serves_food": True, "manufactures_or_cooks": False, "store_area_sqm": 40}),
     ("food", "즉석에서 조리해서 팔 거예요, 완제품 판매는 아닙니다.",
-     {"serves_food": True, "sells_ready_made_only": False}),
+     {"serves_food": True, "manufactures_or_cooks": True}),
     ("food", "음식은 안 팔고 옷만 파는 매장입니다.", {"serves_food": False}),
     ("food", "빵도 직접 굽고 술은 안 팔아요.",
      {"serves_food": True, "primarily_bakery": True, "serves_alcohol": False}),
