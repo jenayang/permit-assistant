@@ -78,7 +78,7 @@
     color: var(--text-muted);
     margin-top: 4px;
   }
-  #newChatBtn {
+  #newChatBtn, #intakeLink {
     border: 1px solid var(--border);
     background: var(--panel);
     color: var(--text-muted);
@@ -86,8 +86,10 @@
     border-radius: 6px;
     font-size: 12px;
     cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
   }
-  #newChatBtn:hover { background: var(--bg); }
+  #newChatBtn:hover, #intakeLink:hover { background: var(--bg); }
 
   .main-grid {
     flex: 1;
@@ -640,6 +642,7 @@
     </div>
     <div class="header-right">
       <div class="sub" id="userIdLabel"></div>
+      <a id="intakeLink" href="/ui/intake.html">📝 로드맵 만들기</a>
       <button id="newChatBtn" type="button">새 대화</button>
     </div>
   </header>

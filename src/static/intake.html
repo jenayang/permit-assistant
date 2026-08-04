@@ -20,168 +20,114 @@
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #17181c; --panel: #1d1f24; --border: #2c2f36; --text: #e6e7ea;
-      --text-muted: #9aa0aa; --bot-bubble: #262931; --surface-2: #26282f;
+      --text-muted: #9aa0aa; --surface-2: #26282f;
       --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 18px rgba(0,0,0,.35);
     }
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; background: var(--bg); color: var(--text); }
-  .layout { max-width: 760px; margin: 0 auto; padding: 24px 20px 60px; }
+  .layout { max-width: 560px; margin: 0 auto; padding: 24px 20px 60px; }
   h1 { font-size: 18px; margin: 0 0 4px; }
   .sub { color: var(--text-muted); font-size: 13px; margin-bottom: 20px; }
-  fieldset { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow); padding: 16px 18px; margin-bottom: 16px; }
-  legend { font-weight: 600; padding: 0 6px; }
-  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
-  .field label { font-size: 13px; color: var(--text-muted); }
-  .field input, .field select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 14px; }
-  .row { display: flex; gap: 12px; }
-  .row .field { flex: 1; }
-  .addr-row { display: flex; gap: 8px; }
-  .addr-row input { flex: 1; }
-  button { cursor: pointer; border: none; border-radius: 6px; font-size: 14px; }
-  #submitBtn { background: var(--accent); color: var(--accent-text); padding: 12px 20px; width: 100%; font-weight: 600; }
-  #submitBtn:disabled { opacity: .6; cursor: default; }
-  .addr-row button { background: var(--surface-2); color: var(--text); padding: 0 14px; }
-  #result { display: none; margin-top: 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow); padding: 16px 18px; }
+  .step { display: none; }
+  .step.active { display: block; }
+  .card { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow); padding: 20px; margin-bottom: 16px; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; }
+  .field label { font-size: 14px; font-weight: 600; }
+  .field input, .field select { padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 14px; }
+  .toggle { display: flex; gap: 8px; }
+  .toggle button { flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 14px; cursor: pointer; }
+  .toggle button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .primary-btn { cursor: pointer; border: none; border-radius: 6px; font-size: 14px; background: var(--accent); color: var(--accent-text); padding: 12px 20px; width: 100%; font-weight: 600; }
+  .primary-btn:disabled { opacity: .6; cursor: default; }
+  #lookupStatus { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+  .food-block { display: none; }
+  .food-block.active { display: block; }
+  #result { display: none; }
   #result h2 { font-size: 15px; margin: 0 0 10px; }
   #result dl { margin: 0; }
   #result dt { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
   #result dd { margin: 2px 0 0; font-size: 14px; }
   #resultLink { display: inline-block; margin-top: 14px; background: var(--accent); color: var(--accent-text); padding: 10px 16px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600; }
-  #addrStatus { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
   #formError { color: var(--error); font-size: 13px; margin-top: 8px; display: none; }
 </style>
 </head>
 <body>
 <div class="layout">
   <h1>로드맵 만들기</h1>
-  <div class="sub">아는 항목만 채워도 됩니다 - 비워두면 나중에 채팅으로 이어서 물어봅니다.</div>
+  <div class="sub" id="stepHint">어떤 업종을 창업하시나요?</div>
 
-  <fieldset>
-    <legend>주소 (선택)</legend>
-    <div class="addr-row">
-      <input id="address" placeholder="예: 서울특별시 강남구 테헤란로 123">
-      <button id="addrBtn" type="button">주소로 자동조회</button>
-    </div>
-    <div id="addrStatus"></div>
-  </fieldset>
-
-  <fieldset>
-    <legend>건축 (인허가 판정)</legend>
-    <div class="field">
-      <label for="act_type">행위 유형</label>
-      <select id="act_type">
-        <option value="">모름</option>
-        <option>신축</option><option>증축</option><option>개축</option>
-        <option>재축</option><option>이전</option><option>대수선</option>
-        <option>용도변경</option><option>일반수선</option><option>가설건축물</option>
-      </select>
-    </div>
-    <div class="row">
-      <div class="field"><label for="size_sqm">연면적(㎡)</label><input id="size_sqm" type="number" step="0.1"></div>
-      <div class="field"><label for="floors">층수</label><input id="floors" type="number" step="1"></div>
-    </div>
-    <div class="field">
-      <label for="extension_size_sqm">증축ᆞ개축ᆞ재축 대상 부분 면적(㎡)</label>
-      <input id="extension_size_sqm" type="number" step="0.1">
-    </div>
-    <div class="field">
-      <label for="land_zone">용도지역 (주소 자동조회로 채워질 수 있음)</label>
-      <select id="land_zone">
-        <option value="">모름</option>
-        <option>관리지역</option><option>농림지역</option>
-        <option>자연환경보전지역</option><option>기타</option>
-      </select>
-    </div>
-    <div class="field">
-      <label for="renovation_scope">대수선 대상 여부(내력벽ᆞ기둥ᆞ보 등 변경)</label>
-      <select id="renovation_scope"><option value="">모름</option><option value="true">예</option><option value="false">아니오</option></select>
-    </div>
-    <div class="row">
+  <div class="step active" id="step1">
+    <div class="card">
       <div class="field">
-        <label for="current_facility_group">기존 시설군 (주소 자동조회로 채워질 수 있음)</label>
-        <select id="current_facility_group"></select>
+        <label for="bizType">업종</label>
+        <select id="bizType">
+          <option value="카페">카페</option>
+          <option value="음식점">음식점</option>
+          <option value="사무실">사무실</option>
+          <option value="기타">기타</option>
+        </select>
       </div>
       <div class="field">
-        <label for="desired_facility_group">희망 시설군(용도변경 시)</label>
-        <select id="desired_facility_group"></select>
+        <label for="address">창업하고자 하는 주소</label>
+        <input id="address" placeholder="예: 서울특별시 강남구 테헤란로 123">
+        <div id="lookupStatus"></div>
       </div>
     </div>
-    <div class="field">
-      <label for="ownership">소유 형태</label>
-      <select id="ownership"><option value="">모름</option><option>소유자</option><option>임차인</option></select>
-    </div>
-  </fieldset>
+    <button class="primary-btn" id="nextBtn" type="button">다음</button>
+  </div>
 
-  <fieldset>
-    <legend>식품위생 (영업 종류 판정)</legend>
-    <div class="field">
-      <label for="serves_food">음식ᆞ식품을 취급하는 업종인가요?</label>
-      <select id="serves_food"><option value="">모름</option><option value="true">예</option><option value="false">아니오</option></select>
-    </div>
-    <div class="field">
-      <label for="manufactures_or_cooks">매장에서 직접 조리ᆞ제조ᆞ가공하나요? (완제품만 되팔면 아니오)</label>
-      <select id="manufactures_or_cooks"><option value="">모름</option><option value="true">예</option><option value="false">아니오</option></select>
-    </div>
-    <div class="field">
-      <label for="primarily_bakery">주로 빵ᆞ과자를 만들어 파는 제과점인가요?</label>
-      <select id="primarily_bakery"><option value="">모름</option><option value="true">예</option><option value="false">아니오</option></select>
-    </div>
-    <div class="field">
-      <label for="serves_alcohol">주류를 판매하나요?</label>
-      <select id="serves_alcohol"><option value="">모름</option><option value="true">예</option><option value="false">아니오</option></select>
-    </div>
-    <div class="field">
-      <label for="store_area_sqm">영업장 면적(㎡)</label>
-      <input id="store_area_sqm" type="number" step="0.1">
-    </div>
-  </fieldset>
+  <div class="step" id="step2">
+    <div class="card">
+      <div class="field">
+        <label>기존 건물을 구조공사 없이 그대로 쓰시나요?</label>
+        <div class="toggle" data-key="sameBuilding">
+          <button type="button" data-value="true">예</button>
+          <button type="button" data-value="false">아니오</button>
+        </div>
+      </div>
 
-  <fieldset>
-    <legend>소방시설</legend>
-    <div class="field">
-      <label for="is_large_store_tenant">대규모점포(백화점ᆞ쇼핑센터 등)에 입점하나요?</label>
-      <select id="is_large_store_tenant"><option value="">모름</option><option value="true">예</option><option value="false">아니오</option></select>
-    </div>
-    <div class="sub">연면적은 위 건축 섹션의 연면적을 그대로 씁니다.</div>
-  </fieldset>
+      <div class="field" id="bizTypeUnknownField" style="display:none;">
+        <label>음식ᆞ식품을 취급하는 업종인가요?</label>
+        <div class="toggle" data-key="serves_food">
+          <button type="button" data-value="true">예</button>
+          <button type="button" data-value="false">아니오</button>
+        </div>
+      </div>
 
-  <fieldset>
-    <legend>간판ᆞ옥외광고물</legend>
-    <div class="field">
-      <label for="sign_type">간판 종류</label>
-      <select id="sign_type">
-        <option value="">해당 없음</option>
-        <option>벽면이용간판</option><option>돌출간판</option>
-        <option>지주이용간판</option><option>입간판</option><option>현수막</option>
-      </select>
+      <div class="food-block" id="foodBlock">
+        <div class="field">
+          <label>매장에서 직접 조리ᆞ제조ᆞ가공하시나요?</label>
+          <div class="toggle" data-key="manufactures_or_cooks">
+            <button type="button" data-value="true">예</button>
+            <button type="button" data-value="false">아니오</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>주로 빵ᆞ과자를 만들어 파는 제과점인가요?</label>
+          <div class="toggle" data-key="primarily_bakery">
+            <button type="button" data-value="true">예</button>
+            <button type="button" data-value="false">아니오</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>주류를 판매하시나요?</label>
+          <div class="toggle" data-key="serves_alcohol">
+            <button type="button" data-value="true">예</button>
+            <button type="button" data-value="false">아니오</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="store_area_sqm">영업장 면적(㎡)</label>
+          <input id="store_area_sqm" type="number" step="0.1">
+        </div>
+      </div>
     </div>
-    <div class="row">
-      <div class="field"><label for="length_m">간판 한 변 길이(m, 벽면이용)</label><input id="length_m" type="number" step="0.1"></div>
-      <div class="field"><label for="floor">설치 층수(벽면이용)</label><input id="floor" type="number" step="1"></div>
-    </div>
-    <div class="row">
-      <div class="field"><label for="area_sqm">간판 면적(㎡, 벽면ᆞ돌출)</label><input id="area_sqm" type="number" step="0.1"></div>
-      <div class="field"><label for="height_m">지면~윗부분 높이(m, 돌출ᆞ지주)</label><input id="height_m" type="number" step="0.1"></div>
-    </div>
-    <div class="field">
-      <label for="is_third_party_ad">타사 광고인가요? (본인 업소 광고면 아니오, 벽면이용)</label>
-      <select id="is_third_party_ad"><option value="">모름</option><option value="true">예</option><option value="false">아니오</option></select>
-    </div>
-    <div class="field">
-      <label for="is_medical_or_salon_sign">의료기관ᆞ약국ᆞ이용ᆞ미용업소 표지등인가요? (돌출)</label>
-      <select id="is_medical_or_salon_sign"><option value="">모름</option><option value="true">예</option><option value="false">아니오</option></select>
-    </div>
-    <div class="field">
-      <label for="display_facility_area_sqm">게시시설 면적(㎡, 현수막)</label>
-      <input id="display_facility_area_sqm" type="number" step="0.1">
-    </div>
-  </fieldset>
+    <button class="primary-btn" id="submitBtn" type="button">판정하기</button>
+    <div id="formError"></div>
+  </div>
 
-  <button id="submitBtn" type="button">판정하기</button>
-  <div id="formError"></div>
-
-  <div id="result">
+  <div class="card" id="result">
     <h2>판정 결과</h2>
     <dl id="resultBody"></dl>
     <a id="resultLink" href="/ui/">로드맵으로 이동 →</a>
@@ -202,56 +148,81 @@
     return id;
   }
 
-  const FACILITY_GROUPS = {
-    1: "1. 자동차 관련 시설군", 2: "2. 산업 등 시설군", 3: "3. 전기통신시설군",
-    4: "4. 문화집회시설군", 5: "5. 영업시설군", 6: "6. 교육 및 복지시설군",
-    7: "7. 근린생활시설군", 8: "8. 주거업무시설군", 9: "9. 그 밖의 시설군",
-  };
-  for (const id of ["current_facility_group", "desired_facility_group"]) {
-    const sel = document.getElementById(id);
-    sel.innerHTML = '<option value="">모름</option>' +
-      Object.entries(FACILITY_GROUPS).map(([n, label]) => `<option value="${n}">${label}</option>`).join("");
-  }
+  // 업종 → 희망 시설군(FACILITY_GROUPS, permit.py). 법령 해석이 필요 없는
+  // 명확한 매핑만 넣는다 - 카페ᆞ음식점은 "제2종근린생활시설 중 대부분"이라고
+  // FACILITY_GROUPS 주석에 이미 명시돼 있고, 사무실은 "업무시설"로 명확하다.
+  // 소매점처럼 면적ᆞ업태에 따라 시설군이 갈리는 애매한 업종은 넣지 않는다
+  // (여기 없는 업종=기타는 건축 인허가 판정을 채팅으로 넘긴다).
+  const FACILITY_GROUP_BY_BIZTYPE = { "카페": 7, "음식점": 7, "사무실": 8 };
+  const FOOD_BIZTYPES = new Set(["카페", "음식점"]);
 
-  function numOrNull(id) {
-    const v = document.getElementById(id).value;
-    return v === "" ? null : Number(v);
-  }
-  function strOrNull(id) {
-    const v = document.getElementById(id).value;
-    return v === "" ? null : v;
-  }
-  function boolOrNull(id) {
-    const v = document.getElementById(id).value;
-    return v === "" ? null : v === "true";
-  }
-  function dropNulls(obj) {
-    const out = {};
-    for (const [k, v] of Object.entries(obj)) if (v !== null) out[k] = v;
-    return out;
-  }
+  const answers = {}; // 토글 버튼 선택값 저장 (key -> true/false)
+  let lookupCaseFacts = {}; // 1단계 주소 자동조회로 받은 case_facts(land_zone/current_facility_group)
 
-  document.getElementById("addrBtn").addEventListener("click", async () => {
-    const address = document.getElementById("address").value.trim();
-    const statusEl = document.getElementById("addrStatus");
-    if (!address) { statusEl.textContent = "주소를 입력하세요."; return; }
-    statusEl.textContent = "조회 중...";
-    try {
-      const res = await fetch(`${API_BASE}/facts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: getUserId(), address }),
+  document.querySelectorAll(".toggle").forEach((group) => {
+    const key = group.dataset.key;
+    group.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        group.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        answers[key] = btn.dataset.value === "true";
       });
-      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
-      const data = await res.json();
-      if (data.case_facts.land_zone) document.getElementById("land_zone").value = data.case_facts.land_zone;
-      if (data.case_facts.current_facility_group) document.getElementById("current_facility_group").value = data.case_facts.current_facility_group;
-      statusEl.textContent = (data.case_facts.land_zone || data.case_facts.current_facility_group)
-        ? "자동조회로 일부 항목이 채워졌습니다."
-        : "자동조회 결과가 없습니다 - 직접 입력해 주세요.";
-    } catch (e) {
-      statusEl.textContent = `조회 실패: ${e.message}`;
+    });
+  });
+
+  document.getElementById("nextBtn").addEventListener("click", async () => {
+    const bizType = document.getElementById("bizType").value;
+    const address = document.getElementById("address").value.trim();
+    const statusEl = document.getElementById("lookupStatus");
+    const nextBtn = document.getElementById("nextBtn");
+
+    if (address) {
+      nextBtn.disabled = true;
+      statusEl.textContent = "주소 조회 중...";
+      try {
+        const res = await fetch(`${API_BASE}/facts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: getUserId(), address }),
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+        const data = await res.json();
+        lookupCaseFacts = data.case_facts || {};
+        statusEl.textContent = lookupCaseFacts.current_facility_group
+          ? "주소 조회 완료 - 기존 건축물 정보를 확인했습니다."
+          : "자동조회 결과가 없습니다 - 계속 진행해도 됩니다.";
+      } catch (e) {
+        statusEl.textContent = `주소 조회 실패(계속 진행 가능): ${e.message}`;
+      } finally {
+        nextBtn.disabled = false;
+      }
     }
+
+    // 업종에 따라 2단계에서 보여줄 항목을 정한다.
+    const foodBlock = document.getElementById("foodBlock");
+    const bizTypeUnknownField = document.getElementById("bizTypeUnknownField");
+    if (FOOD_BIZTYPES.has(bizType)) {
+      foodBlock.classList.add("active");
+      bizTypeUnknownField.style.display = "none";
+    } else if (bizType === "기타") {
+      bizTypeUnknownField.style.display = "";
+      foodBlock.classList.remove("active");
+      // "기타" 업종은 음식 취급 여부를 직접 물어본 뒤 그 답에 따라 식품 세부
+      // 질문을 보여준다.
+      document.querySelector('.toggle[data-key="serves_food"]').querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          foodBlock.classList.toggle("active", btn.dataset.value === "true");
+        });
+      });
+    } else {
+      // 사무실 등 비식품 업종 - 식품 질문 자체를 생략(자동으로 serves_food=false).
+      foodBlock.classList.remove("active");
+      bizTypeUnknownField.style.display = "none";
+    }
+
+    document.getElementById("step1").classList.remove("active");
+    document.getElementById("step2").classList.add("active");
+    document.getElementById("stepHint").textContent = "몇 가지만 더 알려주세요.";
   });
 
   document.getElementById("submitBtn").addEventListener("click", async () => {
@@ -261,46 +232,35 @@
     btn.disabled = true;
     btn.textContent = "판정 중...";
 
-    const case_facts = dropNulls({
-      act_type: strOrNull("act_type"),
-      size_sqm: numOrNull("size_sqm"),
-      floors: numOrNull("floors"),
-      extension_size_sqm: numOrNull("extension_size_sqm"),
-      land_zone: strOrNull("land_zone"),
-      renovation_scope: boolOrNull("renovation_scope"),
-      current_facility_group: numOrNull("current_facility_group"),
-      desired_facility_group: numOrNull("desired_facility_group"),
-      ownership: strOrNull("ownership"),
-    });
-    const food_facts = dropNulls({
-      serves_food: boolOrNull("serves_food"),
-      manufactures_or_cooks: boolOrNull("manufactures_or_cooks"),
-      primarily_bakery: boolOrNull("primarily_bakery"),
-      serves_alcohol: boolOrNull("serves_alcohol"),
-      store_area_sqm: numOrNull("store_area_sqm"),
-    });
-    const fire_facts = dropNulls({
-      size_sqm: numOrNull("size_sqm"),
-      is_large_store_tenant: boolOrNull("is_large_store_tenant"),
-    });
-    const signage_facts = dropNulls({
-      sign_type: strOrNull("sign_type"),
-      length_m: numOrNull("length_m"),
-      floor: numOrNull("floor"),
-      is_third_party_ad: boolOrNull("is_third_party_ad"),
-      area_sqm: numOrNull("area_sqm"),
-      height_m: numOrNull("height_m"),
-      is_medical_or_salon_sign: boolOrNull("is_medical_or_salon_sign"),
-      display_facility_area_sqm: numOrNull("display_facility_area_sqm"),
-    });
-
+    const bizType = document.getElementById("bizType").value;
     const body = { user_id: getUserId() };
-    const address = document.getElementById("address").value.trim();
-    if (address) body.address = address;
-    if (Object.keys(case_facts).length) body.case_facts = case_facts;
-    if (Object.keys(food_facts).length) body.food_facts = food_facts;
-    if (Object.keys(fire_facts).length) body.fire_facts = fire_facts;
-    if (Object.keys(signage_facts).length) body.signage_facts = signage_facts;
+
+    // 건축 인허가: "기존 건물 그대로" + 희망 시설군을 아는 업종일 때만
+    // act_type=용도변경으로 자동 판정을 시도한다. current_facility_group은
+    // 1단계 주소 조회로 이미 서버에 반영돼 있어 다시 보낼 필요 없다(merge).
+    // 그 외(신축ᆞ증축ᆞ대수선 등 구조공사)는 채팅으로 이어서 확인한다.
+    const desired = FACILITY_GROUP_BY_BIZTYPE[bizType];
+    if (answers.sameBuilding === true && desired) {
+      body.case_facts = { act_type: "용도변경", desired_facility_group: desired };
+    }
+
+    // 식품위생: 업종이 비식품(사무실 등)이면 serves_food=false를 확정해서
+    // 보낸다(법령 해석이 아니라 업종 자체가 식품과 무관하다는 사실 판단).
+    const foodBlockActive = document.getElementById("foodBlock").classList.contains("active");
+    if (FOOD_BIZTYPES.has(bizType) || (bizType === "기타" && answers.serves_food === true)) {
+      body.food_facts = { serves_food: true };
+      if (foodBlockActive) {
+        for (const k of ["manufactures_or_cooks", "primarily_bakery", "serves_alcohol"]) {
+          if (answers[k] !== undefined) body.food_facts[k] = answers[k];
+        }
+        const area = document.getElementById("store_area_sqm").value;
+        if (area !== "") body.food_facts.store_area_sqm = Number(area);
+      }
+    } else if (bizType === "기타" && answers.serves_food === false) {
+      body.food_facts = { serves_food: false };
+    } else if (bizType !== "기타" && !FOOD_BIZTYPES.has(bizType)) {
+      body.food_facts = { serves_food: false };
+    }
 
     try {
       const res = await fetch(`${API_BASE}/facts`, {
@@ -334,8 +294,6 @@
       localStorage.setItem("permit_assistant_permit_result", JSON.stringify(data.permit_preview));
     }
     if (data.food_result) localStorage.setItem("permit_assistant_food_result", data.food_result);
-    if (data.fire_result) localStorage.setItem("permit_assistant_fire_result", JSON.stringify(data.fire_result));
-    if (data.signage_result) localStorage.setItem("permit_assistant_signage_result", data.signage_result);
     const address = document.getElementById("address").value.trim();
     if (address) localStorage.setItem("permit_assistant_address", address);
   }
@@ -347,14 +305,14 @@
       rows.push(["건축 인허가", data.permit_preview.permit_type]);
       if (data.permit_preview.procedures.length) rows.push(["절차", data.permit_preview.procedures.join(" → ")]);
     } else {
-      rows.push(["건축 인허가", "판정에 필요한 정보가 더 필요합니다."]);
+      rows.push(["건축 인허가", "채팅으로 이어서 확인해주세요(신축ᆞ증축ᆞ대수선 등)."]);
     }
     if (data.food_result) rows.push(["식품위생 영업 종류", data.food_result]);
-    if (data.fire_result) rows.push(["소방시설", data.fire_result.length ? data.fire_result.join(", ") : "설치 대상 없음"]);
-    if (data.signage_result) rows.push(["간판ᆞ옥외광고물", data.signage_result]);
     rows.push(["전체 진행률", `${data.project_status.progress}%`]);
 
     body.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+    document.getElementById("step2").classList.remove("active");
+    document.getElementById("stepHint").textContent = "판정이 끝났습니다.";
     document.getElementById("result").style.display = "block";
     document.getElementById("result").scrollIntoView({ behavior: "smooth" });
   }
