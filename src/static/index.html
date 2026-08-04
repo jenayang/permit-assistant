@@ -1029,10 +1029,24 @@
             text: "사업자등록",
             done: !!taskProgress.business_registration,
             field: "business_registration",
-            locked: !(taskProgress.documents_prepared && latestFoodResult != null),
+            // 인허가불필요 케이스(예: 일반수선)는 서류 준비 자체가 없어
+            // documents_prepared가 영원히 안 채워진다 - permitNotNeeded면
+            // 그 substep을 이미 통과(notApplicable)로 보는 것과 같은 기준으로
+            // 여기서도 통과 처리해야 잠금이 영구히 안 풀리는 버그가 없다
+            // (2026-08-04, 사용승인까지 끝났는데 Lock이 안 풀린다는 신고).
+            locked: !((taskProgress.documents_prepared || permitNotNeeded) && latestFoodResult != null),
             lockReason: "임대차계약서ᆞ영업신고 확인 후 진행 가능",
           },
-          { text: "위생교육", done: !!taskProgress.hygiene_education, field: "hygiene_education" },
+          {
+            text: "위생교육",
+            done: !!taskProgress.hygiene_education,
+            field: "hygiene_education",
+            // 위생교육 의무는 식품위생법상 영업자ᆞ종업원 대상 - 식품위생법
+            // 비대상이 확정되면(해당없음ᆞ완제품 소매 신고대상제외) 위생교육도
+            // 대상이 아니다(식품위생 항목과 동일 판정 기준 재사용).
+            notApplicable: latestFoodResult === "해당없음" || latestFoodResult === "신고대상제외",
+            naReason: "식품위생법상 영업자가 아니라 위생교육 대상이 아닙니다",
+          },
         ],
       },
       {

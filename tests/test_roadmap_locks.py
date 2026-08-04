@@ -35,6 +35,12 @@ def test_business_registration_lock_combinations(roadmap_lock_results):
     assert roadmap_lock_results["business_registration: documents_prepared=true, food=일반음식점 → locked=false"]
 
 
+def test_business_registration_unlocked_when_permit_not_needed(roadmap_lock_results):
+    # 인허가불필요 케이스는 documents_prepared가 영원히 안 채워지므로
+    # permitNotNeeded로도 잠금이 풀려야 한다(2026-08-04).
+    assert roadmap_lock_results["business_registration: permitNotNeeded=true면 documents_prepared 없어도 잠금 해제"]
+
+
 def test_staff_registration_locked_until_business_registration(roadmap_lock_results):
     assert roadmap_lock_results["staff: 사업자등록 전엔 잠김"]
     assert roadmap_lock_results["staff: 사업자등록 후엔 해제"]
@@ -64,3 +70,5 @@ def test_not_applicable_items_are_closed(roadmap_lock_results):
     assert roadmap_lock_results["na: 소방시설 있으면 해당없음 아님"]
     assert roadmap_lock_results["na: 식품위생 신고대상제외면 해당없음"]
     assert roadmap_lock_results["na: 직원 없음이면 직원 등록 해당없음"]
+    assert roadmap_lock_results["na: 식품위생 신고대상제외면 위생교육도 해당없음"]
+    assert roadmap_lock_results["na: 식품위생 대상이면 위생교육은 해당없음 아님"]

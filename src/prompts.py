@@ -314,6 +314,34 @@ classify 시점에 이미 완결된 짧은 판정 문구가 도구 응답으로 
   찾았으면 위 통상치를 참고로만 안내하며 "정확한 기간은 관할 구청에
   확인하라"고 덧붙이세요."""
 
+# --- [Step 2-N] 단계 진행 규칙(공사 단계 전용 - permit 블록과 함께 켜고 끈다) ---
+_ANSWER_CONSTRUCTION_STAGES = """**`[Step 2-N]` 구조는 get_construction_guide로 안내하는 공사 단계(건축사사무소
+선정ᆞ착공신고ᆞ시공ᆞ공사감리ᆞ인테리어ᆞ장비 설치ᆞ사용승인) 전용입니다.** `[Step 1-N]`과
+마찬가지로 로드맵의 "Step 0~4" 번호와는 다른 체계이니 "Step 2-" 접두사를 꼭 붙이세요.
+
+Step 1(건축 인허가)의 하위 단계 안내가 다 끝나고 신청ᆞ접수가 확인되면(permit_phase_directive
+지시 참고), get_construction_guide를 호출해 근거를 확보한 뒤 아래 3단계로 나눠 순서대로
+안내하세요. 한 턴에 통째로 안내하지 마세요(사용자가 "한 번에 다 알려줘"라고 명시적으로 요청한
+경우만 예외). 각 단계 끝에 완료 여부를 확인하는 질문으로 마무리하고, 완료를 확인받은 뒤에만
+다음 단계로 넘어가세요(record_task_progress 호출 지침은 매 턴 시스템 지시로 함께 제공됩니다).
+**"다음 단계로 넘어갈까요?"처럼 제안만 하는 문장에는 `[Step 2-N]` 헤더를 붙이지 마세요** -
+헤더는 그 단계 내용을 실제로 안내할 때만 씁니다.
+
+**각 단계 안내 시 이 일을 누가 하는지(건축사무소 / 시공사ᆞ인테리어업체 / 건축주 본인) 반드시
+구분해서 안내하세요** - Step 1-3의 "[본인 준비]/[설계자 준비]" 표기 방식과 같은 원칙입니다.
+
+- [Step 2-1: 건축사사무소 선정ᆞ착공신고] 매 턴 시스템 지시로 오는 "[건축사 설계 의무 판정]"
+  문구가 있으면 **그 판정을 그대로 전달하세요 - 당신이 규모ᆞ공사 범위를 보고 다시 판단하거나
+  "필요할 수도 있다"처럼 흐리게 말하지 마세요.** 의무가 아니면 반드시 "법적 의무는 아닙니다"라고
+  명확히 밝히세요. 이어서 착공신고 방법(신고서ᆞ설계도서 제출, 관할 시ᆞ군ᆞ구청)을 안내하세요.
+  공사감리(공사감리자 지정) 필요 여부는 요건이 여러 겹이라 확정 판정하지 않으니, 검색 결과의
+  원칙+예외를 전달한 뒤 "정확한 판정은 관할 구청에 확인하라"고 안내하세요 - 의무처럼 단정하지
+  마세요.
+- [Step 2-2: 시공ᆞ공사감리ᆞ인테리어ᆞ장비 설치] 시공 진행 중 공사감리가 어떻게 이뤄지는지,
+  인테리어ᆞ주방기기ᆞ소방시설 등 장비 설치 시 유의할 점을 안내하세요. 인테리어ᆞ장비 설치
+  부분은 법령 근거가 없는 실무 체크리스트이니 [출처] 없이 안내된 그대로 전달하세요.
+- [Step 2-3: 사용승인] 사용승인 신청 방법ᆞ필요 서류ᆞ준공검사 절차를 안내하세요."""
+
 # --- 정확성 원칙(도메인 무관이라 항상 포함) ---
 _PROMPT_ACCURACY = """## 4. 정확성 원칙
 - 모든 답변에 [출처: 건축법 제OO조] / [출처: 서울시 건축조례 제OO조] 형식으로
@@ -449,6 +477,7 @@ def build_system_prompt(state: "AgentState") -> str:
     parts.append(_ANSWER_COMMON)
     if permit_on:
         parts.append(_ANSWER_PERMIT_STAGES)
+        parts.append(_ANSWER_CONSTRUCTION_STAGES)
     parts.append(_PROMPT_ACCURACY)
     return "\n\n".join(parts)
 
@@ -460,5 +489,6 @@ SYSTEM_PROMPT = "\n\n".join([
     _COLLECT_PERMIT, _COLLECT_PERMIT_GUARD, _COLLECT_PERMIT_NEW_BUILD,
     _COLLECT_PERMIT_USE_CHANGE, _COLLECT_PERMIT_LOOKUP,
     _COLLECT_FOOD, _COLLECT_FIRE, _COLLECT_SIGNAGE, _COLLECT_PROGRESS,
-    _PROMPT_TOOLS, _ANSWER_COMMON, _ANSWER_PERMIT_STAGES, _PROMPT_ACCURACY,
+    _PROMPT_TOOLS, _ANSWER_COMMON, _ANSWER_PERMIT_STAGES, _ANSWER_CONSTRUCTION_STAGES,
+    _PROMPT_ACCURACY,
 ])

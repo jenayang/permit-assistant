@@ -12,6 +12,7 @@ import re
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from src.agents.permit import requires_licensed_architect
 from src.message_utils import extract_text
 
 if TYPE_CHECKING:
@@ -38,6 +39,12 @@ _STAGE_DOMAIN = "case_facts"
 # (몇 분짜리 행위)를 분리하고, 사전진단을 서류 준비보다 앞으로 옮겼다.
 _STAGE_MARKER_LINE_PATTERN = re.compile(r"^#{0,3}\s*\*{0,2}\s*\[Step\s*1-([1-4])")
 
+# Step 2(공사)도 Step1과 같은 라인 앵커 원칙으로 세분화한다(2026-08-04 - 한
+# 턴에 사무소 선정~사용승인을 통째로 응답하는 문제 신고). 3단계로 압축:
+# 2-1 건축사사무소 선정ᆞ착공신고 / 2-2 시공ᆞ공사감리ᆞ인테리어ᆞ장비 설치 /
+# 2-3 사용승인.
+_STEP2_MARKER_LINE_PATTERN = re.compile(r"^#{0,3}\s*\*{0,2}\s*\[Step\s*2-([1-3])")
+
 
 def _mentioned_stages(text: str) -> list[int]:
     """줄 시작에 오는 [Step 1-N] 중 "실제로 그 단계 내용을 공개한" 것만 센다.
@@ -59,6 +66,17 @@ def _mentioned_stages(text: str) -> list[int]:
     return mentioned
 
 
+def _mentioned_construction_stages(text: str) -> list[int]:
+    """줄 시작에 오는 [Step 2-N] 중 실제로 그 단계 내용을 공개한 것만 센다.
+    _mentioned_stages와 동일 원칙(물음표로 끝나는 제안 문장은 제외)."""
+    mentioned = []
+    for line in text.splitlines():
+        m = _STEP2_MARKER_LINE_PATTERN.match(line)
+        if m and not line.rstrip().endswith(("?", "？")):
+            mentioned.append(int(m.group(1)))
+    return mentioned
+
+
 def _max_allowed_stage(state: "AgentState") -> int:
     """이번 턴 답변에 등장해도 되는 최대 [Step 1-N] 번호. 이 구조 자체가
     _STAGE_DOMAIN(permit) 전용이라, permit 판정 전에는 0(전부 금지) -
@@ -70,6 +88,17 @@ def _max_allowed_stage(state: "AgentState") -> int:
     if not state.get("case_facts", {}).get("_classified"):
         return 0
     return state.get("disclosed_stage", {}).get(_STAGE_DOMAIN, 0) + 1
+
+
+def _max_allowed_construction_stage(state: "AgentState") -> int:
+    """이번 턴 답변에 등장해도 되는 최대 [Step 2-N] 번호. Step 1의 하위
+    4단계가 다 안 끝났으면(_STAGE_DOMAIN < 4) Step2 얘기 자체가 근거 없는
+    진행이라 0으로 막는다. 끝난 뒤엔 지금까지 공개된 construction_stage + 1 -
+    한 턴에 최대 한 단계만 새로 공개."""
+    disclosed_stage = state.get("disclosed_stage", {})
+    if disclosed_stage.get(_STAGE_DOMAIN, 0) < 4:
+        return 0
+    return disclosed_stage.get("construction_stage", 0) + 1
 
 
 # 건축 인허가 트랙(Step 0→1→2)은 실제로 순서가 있는 절차(행위유형 확정 →
@@ -129,7 +158,10 @@ def _roadmap_status_summary(state: "AgentState") -> str:
         "- '공사 완료 후에 하는 것' 항목(영업신고 접수ᆞ소방시설ᆞ간판 설치ᆞ직원등록ᆞ영업시작)을 "
         "안내하기 직전에는, 사용승인이 위 Step 2 상태에 아직 반영되지 않았으면 곧장 안내하지 "
         "말고 \"사용승인은 받으셨어요?\"처럼 완료 여부부터 확인하세요. 완료했다고 답하면 "
-        "record_task_progress(use_approval=True)로 기록한 뒤 다음 턴부터 안내하세요."
+        "record_task_progress(use_approval=True)로 기록한 뒤 다음 턴부터 안내하세요.\n"
+        "- '사업자등록을 완료했다'는 말은 Step 3의 다섯 항목(식품위생ᆞ소방ᆞ간판ᆞ사업자등록ᆞ"
+        "위생교육) 중 하나일 뿐입니다. 사업자등록 완료만으로 창업 준비가 끝난 것처럼 답하지 "
+        "말고, 아직 미완료인 나머지 Step 3 항목을 함께 짚어주세요."
     )
 
 
@@ -181,7 +213,7 @@ def permit_phase_directive(state: "AgentState") -> str | None:
             f"이상은 절대 먼저 꺼내지 마세요 - 사용자가 이어서 요청하면 다음 턴에 공개하세요."
         )
 
-    if not disclosed_stage.get("construction_guide"):
+    if not disclosed_stage.get("construction_guide_shown"):
         if not task_progress.get("application_submitted"):
             return (
                 "[진행 상태] Step 1의 하위 단계 [Step 1-1]~[Step 1-4] 안내는 모두 끝났지만, "
@@ -197,6 +229,60 @@ def permit_phase_directive(state: "AgentState") -> str | None:
             "확인됐습니다. 이번 턴에는 사용자가 안 물어봐도 "
             "\"다음은 Step 2(공사) 단계입니다\"처럼 존재를 먼저 짚어주고 get_construction_guide를 "
             "호출해 안내하세요 - 식품위생ᆞ사업자등록 등 창업 준비 트랙으로 곧장 건너뛰지 마세요."
+        )
+
+    # Step 2도 Step 1과 동일 패턴: [Step 2-N] 하나씩만 공개, 각 단계 완료
+    # 확인 후에만 다음 단계로(2026-08-04 - Step2를 한 턴에 통째로 안내하던
+    # 문제 신고). 건축사 설계 의무는 requires_licensed_architect가 이미
+    # 결정론적으로 계산한 값을 여기서 다시 꺼내 매 턴 명시적으로 박아 넣는다
+    # - Step 1-1에서 한 번 언급된 뒤 Step2 시점엔 LLM이 그 판정을 잊고
+    # RAG 텍스트만으로 "규모에 따라 필요할 수도 있다"처럼 흐리게 재서술하는
+    # 문제가 있었다(감리는 여전히 규칙화 안 함, 2026-07-27 결정 유지).
+    verdict = requires_licensed_architect(state.get("case_facts") or {})
+    if verdict is True:
+        architect_note = (
+            "[건축사 설계 의무 판정] 이 사례는 건축법상 건축사사무소 설계가 필요한 대상입니다"
+            "(법적 의무). 이 판정을 그대로 전달하고 재판단하거나 흐리게 말하지 마세요."
+        )
+    elif verdict is False:
+        architect_note = (
+            "[건축사 설계 의무 판정] 이 사례는 건축사사무소 설계가 법적 의무는 아닙니다"
+            "(개인이 직접 진행 가능). \"법적 의무는 아닙니다\"라고 명확히 밝히고, 실무에서 "
+            "인테리어 업체ᆞ행정사 도움을 받기도 한다는 정도만 참고로 덧붙이세요 - \"필요할 수도 "
+            "있다\"처럼 의무인 듯 흐리게 말하지 마세요."
+        )
+    else:
+        architect_note = ""
+
+    construction_disclosed = disclosed_stage.get("construction_stage", 0)
+    if construction_disclosed == 1 and not task_progress.get("construction_notice"):
+        return (
+            architect_note + "\n\n[진행 상태] [Step 2-1: 건축사사무소 선정ᆞ착공신고] 안내까지 "
+            "끝났습니다. 이번 턴에는 [Step 2-2]로 넘어가지 말고 \"착공신고는 하셨어요?\"처럼 "
+            "완료 여부부터 확인하세요. 완료했다고 답하면 "
+            "record_task_progress(construction_notice=True)로 기록한 뒤 다음 턴부터 "
+            "[Step 2-2]를 안내하세요."
+        )
+    if construction_disclosed == 2 and not task_progress.get("construction"):
+        return (
+            "[진행 상태] [Step 2-2: 시공ᆞ공사감리ᆞ인테리어ᆞ장비 설치] 안내까지 끝났습니다. "
+            "이번 턴에는 [Step 2-3]으로 넘어가지 말고 \"시공은 끝나셨어요?\"처럼 완료 여부부터 "
+            "확인하세요. 완료했다고 답하면 record_task_progress(construction=True)로 기록한 뒤 "
+            "다음 턴부터 [Step 2-3]을 안내하세요."
+        )
+    if construction_disclosed < 3:
+        return (
+            architect_note + f"\n\n[진행 상태] Step 2(공사)의 하위 단계 중 지금까지 "
+            f"[Step 2-{construction_disclosed}]까지 공개했습니다. 이번 턴에는 "
+            f"[Step 2-{construction_disclosed + 1}]까지만 안내하고, 그 이상은 절대 먼저 꺼내지 "
+            "마세요 - 사용자가 이어서 요청하면 다음 턴에 공개하세요."
+        )
+    if not task_progress.get("use_approval"):
+        return (
+            "[진행 상태] Step 2(공사)의 하위 단계 [Step 2-1]~[Step 2-3] 안내가 모두 끝났습니다. "
+            "이번 턴에는 \"사용승인은 받으셨어요?\"처럼 완료 여부부터 확인하세요. 완료했다고 "
+            "답하면 record_task_progress(use_approval=True)로 기록하세요(착공신고ᆞ시공도 "
+            "자동으로 완료 처리됩니다)."
         )
 
     return "[진행 상태] Step 1~2(건축 인허가ᆞ공사) 안내가 모두 끝났습니다."
@@ -241,7 +327,7 @@ def _should_force_construction_guide(state: "AgentState") -> bool:
     disclosed_stage = state.get("disclosed_stage", {})
     if disclosed_stage.get(_STAGE_DOMAIN, 0) < 4:
         return False
-    if disclosed_stage.get("construction_guide"):
+    if disclosed_stage.get("construction_guide_shown"):
         return False
     if not (state.get("task_progress") or {}).get("application_submitted"):
         return False

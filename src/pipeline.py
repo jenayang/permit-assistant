@@ -23,7 +23,7 @@ from src import config
 from src.agent import extract_text
 from src.graph import graph
 from src.guard import GROUNDING_TOOL_NAMES
-from src.agents.roadmap_progress import TASK_PROGRESS_FIELDS
+from src.agents.roadmap_progress import TASK_PROGRESS_FIELDS, cascade_construction_progress
 from src.rag.ingestion import ingest_all
 from src.project_status import compute_project_status
 from src.rag.retriever import index_documents, count_documents, reset_collection
@@ -176,7 +176,8 @@ def update_task_progress(user_id: str, field: str, value: bool) -> dict:
         raise ValueError(f"알 수 없는 진행상황 항목: {field}")
 
     config_dict = {"configurable": {"thread_id": user_id}}
-    graph.update_state(config_dict, {"task_progress": {field: value}})
+    patch = cascade_construction_progress({field: value})
+    graph.update_state(config_dict, {"task_progress": patch})
     state = graph.get_state(config_dict)
     return state.values.get("task_progress") or {}
 

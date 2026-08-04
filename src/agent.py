@@ -104,11 +104,13 @@ class AgentState(MessagesState):
     # (2026-07-27 실측 확인). 프롬프트 지시만으로는 LLM이 한 턴에 4단계를
     # 전부 쏟아내는 걸 못 막아서(2026-07-26 실사용 세션에서 재현, guard_node
     # 참고) 이 값으로 "이번 턴엔 몇 단계까지만" 상한을 그래프가 강제한다.
-    # 2026-07-28: "construction_guide" 키를 추가해 같은 dict를 Step1→2 전환
-    # 신호로도 재사용한다(0/1 플래그 - get_construction_guide가 대화 중 한
-    # 번이라도 호출됐는지, guard_node가 갱신). task_progress의
-    # "construction"(사용자가 실제로 착공했다는 자기보고)과는 의미가 다르니
-    # 혼동하지 말 것 - 여긴 "안내를 이미 보여줬는지"만 본다. 자세한 이유는
+    # 2026-07-28: "construction_guide_shown" 키를 추가해 같은 dict를 Step1→2
+    # 전환 신호로도 재사용한다(bool - get_construction_guide가 대화 중 한 번이라도
+    # 호출됐는지, guard_node가 갱신). task_progress의 "construction"(사용자가
+    # 실제로 착공했다는 자기보고)과는 의미가 다르니 혼동하지 말 것 - 여긴
+    # "안내를 이미 보여줬는지"만 본다. 2026-08-04: Step2도 [Step 2-N]으로
+    # 세분화하며 "construction_stage"(int 0~3, 텍스트 공개 카운터)를 별도 키로
+    # 추가했다 - case_facts 카운터와 같은 패턴. 자세한 이유는
     # permit_phase_directive 참고.
     # 리듀서 없이 기본 덮어쓰기(guard_node가 한 번에 하나씩만 갱신).
     disclosed_stage: dict[str, int]
@@ -313,6 +315,7 @@ from src.roadmap import (  # noqa: E402
     permit_phase_directive,
 )
 from src.guard import _CITATION_PATTERN  # noqa: E402
+from src.agents.roadmap_progress import cascade_construction_progress  # noqa: E402
 
 
 # 정의를 묻는 질문("건폐율이 뭐야")은 기록할 사실이 없어 강제 대상에서 뺀다.
@@ -522,6 +525,8 @@ def _agent_result(response: AIMessage) -> dict:
         state_key = _FACT_TOOL_TO_STATE_KEY.get(tc["name"])
         if state_key is not None:
             updates.setdefault(state_key, {}).update(_coerce_tool_args(tc["name"], tc["args"]))
+    if "task_progress" in updates:
+        updates["task_progress"] = cascade_construction_progress(updates["task_progress"])
     return {"messages": [response], **updates}
 
 

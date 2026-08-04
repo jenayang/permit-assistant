@@ -14,6 +14,8 @@ from src.classify import _derive_ledger_facility_group
 from src.guard import guard_node
 from src.roadmap import (
     _STAGE_DOMAIN,
+    _max_allowed_construction_stage,
+    _mentioned_construction_stages,
     _should_force_construction_guide,
     permit_phase_directive,
 )
@@ -86,11 +88,15 @@ def test_permit_phase_directive_none_before_classification():
 
 def test_sequential_walkthrough_then_construction_transition():
     """Step1-1→1-2→1-3→1-4 순서로 진행하고, 다 끝나면 Step2(공사) 전환 넛지가
-    나오고, get_construction_guide 호출 후엔 더 이상 넛지가 안 나온다.
+    나오고, get_construction_guide 호출 후엔 Step 2-1→2-2→2-3 순서로 같은
+    완료-확인 게이트가 적용된다.
 
     2026-08-03: 1-2(사전검토)→1-3, 1-3(서류준비)→1-4 전환에도 완료 확인 게이트가
     생겼다 - 확인 전엔 다음 단계로 못 넘어가고, task_progress로 완료를 기록해야
-    다음 단계 안내가 나온다(기존에 있던 1-4→Step2 게이트와 동일한 패턴)."""
+    다음 단계 안내가 나온다(기존에 있던 1-4→Step2 게이트와 동일한 패턴).
+    2026-08-04: Step2(공사)도 [Step 2-1]~[Step 2-3]으로 세분화하며 같은 패턴을
+    적용했다 - disclosed_stage["construction_guide"](int 1 고정)가
+    construction_guide_shown(bool)ᆞconstruction_stage(int 0~3)로 분리됐다."""
     state = _base_state()
 
     assert "[Step 1-1]까지만" in permit_phase_directive(state)
@@ -141,7 +147,36 @@ def test_sequential_walkthrough_then_construction_transition():
     state["messages"].append(AIMessage(content="다음은 Step 2(공사) 단계입니다. 착공신고부터 안내드릴게요."))
     state = _apply(state, guard_node(state))
 
-    assert state["disclosed_stage"].get("construction_guide") == 1
+    assert state["disclosed_stage"].get("construction_guide_shown") is True
+
+    directive = permit_phase_directive(state)
+    assert "[Step 2-1]까지만" in directive, "construction_stage=0이면 Step2-1까지만 허용"
+
+    state["messages"].append(AIMessage(content="[Step 2-1: 건축사사무소 선정ᆞ착공신고] 착공신고 방법 안내드릴게요."))
+    state = _apply(state, guard_node(state))
+    assert state["disclosed_stage"].get("construction_stage") == 1
+
+    directive = permit_phase_directive(state)
+    assert "착공신고는 하셨어요" in directive, "착공신고 완료 확인 전엔 Step2-2로 넘어가면 안 된다"
+    state["task_progress"] = {**state["task_progress"], "construction_notice": True}
+    assert "[Step 2-2]까지만" in permit_phase_directive(state)
+
+    state["messages"].append(AIMessage(content="[Step 2-2: 시공ᆞ공사감리ᆞ인테리어ᆞ장비 설치] 시공 안내드릴게요."))
+    state = _apply(state, guard_node(state))
+    assert state["disclosed_stage"].get("construction_stage") == 2
+
+    directive = permit_phase_directive(state)
+    assert "시공은 끝나셨어요" in directive, "시공 완료 확인 전엔 Step2-3으로 넘어가면 안 된다"
+    state["task_progress"] = {**state["task_progress"], "construction": True}
+    assert "[Step 2-3]까지만" in permit_phase_directive(state)
+
+    state["messages"].append(AIMessage(content="[Step 2-3: 사용승인] 사용승인 절차 안내드릴게요."))
+    state = _apply(state, guard_node(state))
+    assert state["disclosed_stage"].get("construction_stage") == 3
+
+    directive = permit_phase_directive(state)
+    assert "사용승인은 받으셨어요" in directive, "사용승인 확인 전엔 전체 완료로 끝내면 안 된다"
+    state["task_progress"] = {**state["task_progress"], "use_approval": True}
     assert permit_phase_directive(state) == "[진행 상태] Step 1~2(건축 인허가ᆞ공사) 안내가 모두 끝났습니다."
 
 
@@ -303,7 +338,7 @@ def test_no_force_before_application_submitted_even_if_ai_proposed_step2():
 def test_no_force_when_construction_guide_already_shown():
     """이미 한 번 호출됐으면(플래그 세팅됨) 더 강제할 필요 없다."""
     state = _base_state()
-    state["disclosed_stage"] = {_STAGE_DOMAIN: 4, "construction_guide": 1}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 4, "construction_guide_shown": True}
     state["task_progress"] = {"application_submitted": True}
     state["messages"] = [
         HumanMessage(content="공사는 어떻게 진행돼?"),
@@ -423,6 +458,62 @@ def test_correction_omission_ignores_reconfirmation():
     assert not any(
         isinstance(m, ToolMessage) and m.name == "_answer_guard" for m in update.get("messages", [])
     )
+
+
+def test_mentioned_construction_stages_excludes_question_lines():
+    """물음표로 끝나는 제안 문장("~안내해 드릴까요?")은 실제 공개로 안 센다
+    (_mentioned_stages와 동일 원칙)."""
+    text = "**[Step 2-2: 시공ᆞ공사감리ᆞ인테리어ᆞ장비 설치]**로 넘어가도 될까요?"
+    assert _mentioned_construction_stages(text) == []
+
+
+def test_mentioned_construction_stages_recognizes_bold_marker():
+    text = "**[Step 2-1: 건축사사무소 선정ᆞ착공신고]**\n착공신고는 다음과 같이 진행합니다."
+    assert _mentioned_construction_stages(text) == [1]
+
+
+def test_max_allowed_construction_stage_zero_before_step1_done():
+    """Step1의 하위 4단계가 안 끝났으면 Step2 얘기 자체가 근거 없는 진행이라
+    0으로 막는다."""
+    state = {"disclosed_stage": {_STAGE_DOMAIN: 3}}
+    assert _max_allowed_construction_stage(state) == 0
+
+
+def test_max_allowed_construction_stage_increments_after_step1_done():
+    state = {"disclosed_stage": {_STAGE_DOMAIN: 4, "construction_stage": 1}}
+    assert _max_allowed_construction_stage(state) == 2
+
+
+def test_guard_node_caps_construction_stage_overreach():
+    """한 턴에 [Step 2-1]~[Step 2-3]을 몰아서 공개해도 허용치(1)로 캡을
+    씌워서 저장한다 - Step1과 동일한 방어."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 4, "construction_guide_shown": True}
+    state["messages"] = [
+        HumanMessage(content="공사 전체 다 알려줘"),
+        AIMessage(content="[Step 2-1: 건축사사무소 선정ᆞ착공신고] ...\n[Step 2-2: 시공] ...\n[Step 2-3: 사용승인] ..."),
+    ]
+    update = guard_node(state)
+    guard_msgs = [m for m in update.get("messages", []) if isinstance(m, ToolMessage) and m.name == "_answer_guard"]
+    assert guard_msgs, "허용치를 넘는 Step2 단계 공개인데도 재시도가 유도되지 않음"
+    assert "Step 2-1" in guard_msgs[0].content and "Step 2-3" in guard_msgs[0].content
+
+
+def test_permit_phase_directive_states_architect_requirement_explicitly():
+    """건축사 설계 의무 판정(requires_licensed_architect)이 Step2 진입 시점에
+    다시 명시적으로 지시문에 실려야 한다 - LLM이 RAG 텍스트만 보고 "규모에
+    따라 필요할 수도 있다"처럼 흐리게 재서술하는 문제를 막기 위함."""
+    state = _base_state()
+    state["case_facts"] = {"_classified": True, "act_type": "신축"}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 4, "construction_guide_shown": True}
+    state["task_progress"] = {}
+    directive = permit_phase_directive(state)
+    assert "건축사 설계 의무" in directive
+    assert "대상입니다" in directive  # 신축은 규모 무관 건축사 필요(True)
+
+    state["case_facts"] = {"_classified": True, "act_type": "일반수선"}
+    directive = permit_phase_directive(state)
+    assert "법적 의무는 아닙니다" in directive  # 일반수선은 인허가불필요 → requires=False
 
 
 def test_correction_omission_ignores_without_prior_numeric_facts():

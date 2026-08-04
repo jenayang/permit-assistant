@@ -97,3 +97,22 @@ def record_task_progress(
         k: v for k, v in locals().items() if v is not None
     })
     return "기록됨."
+
+
+# 사용승인은 법적으로 착공신고ᆞ시공이 끝나야만 가능한 절차라, 뒷단계가
+# True로 기록되면 앞단계도 자동으로 True 채워도 안전하다(2026-08-04 -
+# "사용승인 완료했는데 착공신고ᆞ시공 체크박스가 그대로"라는 신고에 대응).
+_CONSTRUCTION_ORDER = ("construction_notice", "construction", "use_approval")
+
+
+def cascade_construction_progress(update: dict) -> dict:
+    """update에 뒤 단계가 True로 있으면 앞 단계도(명시값 없으면) True로 채운다.
+
+    이미 명시적으로 다른 값(예: False)이 들어있는 필드는 덮어쓰지 않는다 -
+    setdefault라 update에 없던 키만 채워진다."""
+    result = dict(update)
+    for i in range(len(_CONSTRUCTION_ORDER) - 1, 0, -1):
+        if result.get(_CONSTRUCTION_ORDER[i]) is True:
+            for earlier in _CONSTRUCTION_ORDER[:i]:
+                result.setdefault(earlier, True)
+    return result

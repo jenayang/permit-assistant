@@ -20,13 +20,13 @@ const endMarker = "\n    ];\n";
 const endIdx = html.indexOf(endMarker, startIdx) + endMarker.length;
 const block = html.slice(startIdx, endIdx);
 
-function buildSteps({ latestFoodResult, latestFireResult, latestSignageResult, taskProgress, actType, step1Substeps, latestPermitResult, caseTypeResult, requiresArchitect = null }) {
+function buildSteps({ latestFoodResult, latestFireResult, latestSignageResult, taskProgress, actType, step1Substeps, latestPermitResult, caseTypeResult, requiresArchitect = null, permitNotNeeded = false }) {
   const fn = new Function(
     "latestFoodResult", "latestFireResult", "latestSignageResult", "taskProgress",
-    "actType", "step1Substeps", "latestPermitResult", "caseTypeResult", "requiresArchitect",
+    "actType", "step1Substeps", "latestPermitResult", "caseTypeResult", "requiresArchitect", "permitNotNeeded",
     block + "\nreturn steps;"
   );
-  return fn(latestFoodResult, latestFireResult, latestSignageResult, taskProgress, actType, step1Substeps, latestPermitResult, caseTypeResult, requiresArchitect);
+  return fn(latestFoodResult, latestFireResult, latestSignageResult, taskProgress, actType, step1Substeps, latestPermitResult, caseTypeResult, requiresArchitect, permitNotNeeded);
 }
 
 // renderRoadmap()의 실제 분기(sub.field가 있으면 locked&&!done일 때만 잠금
@@ -86,6 +86,12 @@ function check(label, passed) {
     const locked = isVisuallyLocked(findSub(steps, "Step 3 · 창업 행정", "사업자등록"));
     check(`business_registration: documents_prepared=${docs}, food=${food} → locked=${expectLocked}`, locked === expectLocked);
   }
+
+  // 인허가불필요 케이스는 documents_prepared가 영원히 안 채워진다 -
+  // permitNotNeeded=true면 documents_prepared 없이도 잠금이 풀려야 한다
+  // (2026-08-04, 사용승인까지 끝났는데 Lock이 안 풀린다는 신고).
+  const steps = buildSteps({ ...commonArgs, latestFoodResult: "일반음식점", latestFireResult: [], latestSignageResult: null, taskProgress: { documents_prepared: false }, permitNotNeeded: true });
+  check("business_registration: permitNotNeeded=true면 documents_prepared 없어도 잠금 해제", !isVisuallyLocked(findSub(steps, "Step 3 · 창업 행정", "사업자등록")));
 }
 
 // 직원 등록 - 사업자등록 여부 + hires_staff 예외
@@ -139,6 +145,12 @@ function check(label, passed) {
 
   steps = buildSteps({ ...commonArgs, latestFoodResult: null, latestFireResult: [], latestSignageResult: null, taskProgress: { hires_staff: false } });
   check("na: 직원 없음이면 직원 등록 해당없음", !!findSub(steps, "Step 4 · 오픈 준비", "직원 등록").notApplicable);
+
+  steps = buildSteps({ ...commonArgs, latestFoodResult: "신고대상제외", latestFireResult: [], latestSignageResult: null, taskProgress: {} });
+  check("na: 식품위생 신고대상제외면 위생교육도 해당없음", !!findSub(steps, "Step 3 · 창업 행정", "위생교육").notApplicable);
+
+  steps = buildSteps({ ...commonArgs, latestFoodResult: "일반음식점", latestFireResult: [], latestSignageResult: null, taskProgress: {} });
+  check("na: 식품위생 대상이면 위생교육은 해당없음 아님", !findSub(steps, "Step 3 · 창업 행정", "위생교육").notApplicable);
 }
 
 process.stdout.write(JSON.stringify(results));

@@ -18,7 +18,14 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.message_utils import extract_text
-from src.roadmap import _STAGE_DOMAIN, _STEP2_KEYWORDS, _max_allowed_stage, _mentioned_stages
+from src.roadmap import (
+    _STAGE_DOMAIN,
+    _STEP2_KEYWORDS,
+    _max_allowed_construction_stage,
+    _max_allowed_stage,
+    _mentioned_construction_stages,
+    _mentioned_stages,
+)
 
 if TYPE_CHECKING:
     from src.agent import AgentState
@@ -55,7 +62,7 @@ def _has_grounding_search(messages) -> bool:
 
 def _construction_guide_shown(messages) -> bool:
     """get_construction_guide가 대화 전체에서 한 번이라도 호출됐는지 -
-    disclosed_stage["construction_guide"] 갱신에 쓴다(permit_phase_directive의
+    disclosed_stage["construction_guide_shown"] 갱신에 쓴다(permit_phase_directive의
     Step 1→2 전환 넛지를 한 번 보여준 뒤엔 매 턴 반복하지 않기 위함). 도구
     이름을 직접 문자열로 비교하지만, 이 호출 이력 → 상태 플래그 변환 지점을
     guard_node 한 곳으로 모아뒀기 때문에 도구가 나중에 개명되거나 대체돼도
@@ -204,7 +211,7 @@ def _construction_guide_gap_violations(state: "AgentState", last_text: str, mess
     "Step 2(공사 단계)"를 통째로 도구 호출 없이 안내하고 넘어가는 사례가
     확인됨(2026-07-29, RAG 활용도 점검 중 발견).
 
-    disclosed_stage["construction_guide"] 플래그가 아니라 _construction_guide_shown
+    disclosed_stage["construction_guide_shown"] 플래그가 아니라 _construction_guide_shown
     (메시지 이력을 직접 스캔)을 쓴다 - 그 플래그는 이 함수가 속한 guard_node
     호출의 결과로 이번 턴에 막 세워지는 값이라, 정상적으로 도구를 호출한 턴
     자체에서 플래그를 참조하면 아직 갱신 전이라 오탐이 난다.
@@ -293,10 +300,11 @@ def guard_node(state: "AgentState") -> dict:
     2026-07-26 실사용 세션에서 재현됨).
 
     막는 위반 일곱 가지:
-    1. 허용된 단계 수([_max_allowed_stage])를 넘겨 [Step 1-N]을 안내 - 판정 전
-       절차 안내를 아예 시도한 경우(허용치 0)와, 판정 후 한 턴에 여러 단계를
-       몰아서 공개한 경우(사용자가 "1단계만" 이라고 명시해도 무시하고 전체
-       단계를 다 준 사례 포함) 둘 다 이 하나의 규칙으로 잡는다.
+    1. 허용된 단계 수([_max_allowed_stage]/[_max_allowed_construction_stage])를
+       넘겨 [Step 1-N]/[Step 2-N]을 안내 - 판정 전 절차 안내를 아예 시도한
+       경우(허용치 0)와, 판정 후 한 턴에 여러 단계를 몰아서 공개한 경우(사용자가
+       "1단계만" 이라고 명시해도 무시하고 전체 단계를 다 준 사례 포함) 둘 다 이
+       하나의 규칙으로 잡는다(Step2도 2026-08-04에 동일 원칙으로 확장).
     2. search_regulations/search_by_term을 한 번도 호출하지 않았는데
        [출처: ...] 인용이 있는 경우 - 근거 없이 조항을 지어낸 것.
     3. [Step 1-2]/[Step 1-3]을 언급했는데 record_permit_synthesis로 실제 기록은
@@ -350,10 +358,20 @@ def guard_node(state: "AgentState") -> dict:
     mentioned = _mentioned_stages(last_text)
     max_mentioned = max(mentioned, default=0)
 
+    mentioned2 = _mentioned_construction_stages(last_text)
+    max_mentioned2 = max(mentioned2, default=0)
+    allowed2 = _max_allowed_construction_stage(state)
+
     violations = []
     if max_mentioned > allowed:
         violations.append(
             f"이번 턴엔 [Step 1-{allowed}]까지만 안내할 수 있는데 [Step 1-{max_mentioned}]까지 "
+            f"안내했습니다. 허용된 단계까지만 남기고 나머지는 삭제한 뒤, 다음에 계속 "
+            f"안내해도 될지 사용자에게 짧게 물어보며 마무리하세요."
+        )
+    if max_mentioned2 > allowed2:
+        violations.append(
+            f"이번 턴엔 [Step 2-{allowed2}]까지만 안내할 수 있는데 [Step 2-{max_mentioned2}]까지 "
             f"안내했습니다. 허용된 단계까지만 남기고 나머지는 삭제한 뒤, 다음에 계속 "
             f"안내해도 될지 사용자에게 짧게 물어보며 마무리하세요."
         )
@@ -392,8 +410,11 @@ def guard_node(state: "AgentState") -> dict:
     new_disclosed_stage = dict(disclosed_stage)
     if max_mentioned > 0 and capped != disclosed_stage.get(_STAGE_DOMAIN, 0):
         new_disclosed_stage[_STAGE_DOMAIN] = capped
-    if not disclosed_stage.get("construction_guide") and _construction_guide_shown(messages):
-        new_disclosed_stage["construction_guide"] = 1
+    if not disclosed_stage.get("construction_guide_shown") and _construction_guide_shown(messages):
+        new_disclosed_stage["construction_guide_shown"] = True
+    capped2 = min(max_mentioned2, allowed2)
+    if max_mentioned2 > 0 and capped2 != disclosed_stage.get("construction_stage", 0):
+        new_disclosed_stage["construction_stage"] = capped2
     if new_disclosed_stage != disclosed_stage:
         update["disclosed_stage"] = new_disclosed_stage
     return update
