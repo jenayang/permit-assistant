@@ -20,7 +20,10 @@ from langchain_core.messages import AIMessage
 from langchain_core.messages import ToolMessage
 
 from src import config
-from src.agent import extract_text
+from src.agent import extract_text, merge_facts
+from src.agents.permit import build_permit_result
+from src.agents.site import get_land_zone_category, lookup_building_ledger
+from src.classify import classify_node
 from src.graph import graph
 from src.guard import GROUNDING_TOOL_NAMES
 from src.agents.roadmap_progress import TASK_PROGRESS_FIELDS, cascade_construction_progress
@@ -181,6 +184,97 @@ def update_task_progress(user_id: str, field: str, value: bool) -> dict:
     state = graph.get_state(config_dict)
     return state.values.get("task_progress") or {}
 
+
+# === 폼 기반 판정 (LLM 호출 없음) ===
+def submit_facts(
+    user_id: str,
+    address: Optional[str] = None,
+    case_facts: Optional[dict] = None,
+    food_facts: Optional[dict] = None,
+    fire_facts: Optional[dict] = None,
+    signage_facts: Optional[dict] = None,
+) -> dict:
+    """채팅 대화 없이(폼 제출) case_facts 등을 그래프 상태에 직접 반영하고
+    판정까지 돌린다. update_task_progress와 같은 원칙(LLM 미호출, 결과가
+    이미 그래프에 있는 순수 함수 classify_node/build_permit_result 재사용) -
+    실제 대화 중 tools→classify로 이어지는 그래프 흐름을 그대로 두 단계로
+    수동 재현한다.
+    """
+    config_dict = {"configurable": {"thread_id": user_id}}
+
+    # 1단계: 사용자가 제출한 facts를 먼저 반영(merge_facts 리듀서가 기존
+    # 상태와 병합) - record_case_facts 등 도구가 하는 일과 동일한 patch.
+    patch: dict = {}
+    if case_facts:
+        patch["case_facts"] = case_facts
+    if food_facts:
+        patch["food_facts"] = food_facts
+    if fire_facts:
+        patch["fire_facts"] = fire_facts
+    if signage_facts:
+        patch["signage_facts"] = signage_facts
+    if patch:
+        graph.update_state(config_dict, patch)
+
+    state = graph.get_state(config_dict).values
+
+    # 이번 턴에 새로 남길 메시지는 반드시 HumanMessage로 시작해야 한다 - 폼만
+    # 제출하고 채팅을 한 번도 안 한 세션에서 이력의 첫 메시지가 곧바로
+    # AIMessage(tool_calls)로 남으면, 이후 실제 채팅에서 Gemini가 "함수 호출
+    # 턴은 사용자 턴 또는 함수 응답 턴 뒤에만 올 수 있다"는 제약을 위반했다며
+    # 400 INVALID_ARGUMENT로 거부하는 걸 실측 확인(2026-08-04) - 실제 대화는
+    # 항상 HumanMessage로 시작해서 이 문제가 없었다.
+    turn_messages: list = []
+    if address or patch:
+        summary = []
+        if address:
+            summary.append(f"주소 {address}")
+        for label, facts in (("건축", case_facts), ("식품위생", food_facts), ("소방", fire_facts), ("간판", signage_facts)):
+            if facts:
+                summary.append(f"{label} 정보 {len(facts)}건")
+        turn_messages.append(HumanMessage(content="[폼 제출] " + ", ".join(summary)))
+
+    # 주소가 있으면 기존 site.py 조회 도구를 그대로 재사용해 용도지역ᆞ
+    # 건축물대장을 자동으로 채운다(사용자가 이미 입력한 값은 덮지 않음).
+    if address:
+        zone = get_land_zone_category(address)
+        if zone and not (state.get("case_facts") or {}).get("land_zone"):
+            graph.update_state(config_dict, {"case_facts": {"land_zone": zone}})
+
+        ledger_text = lookup_building_ledger.invoke({"address": address})
+        call_id = f"formlookup_{uuid.uuid4().hex[:8]}"
+        turn_messages.append(
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "lookup_building_ledger", "args": {"address": address}, "id": call_id}],
+            )
+        )
+        turn_messages.append(ToolMessage(content=ledger_text, tool_call_id=call_id, name="lookup_building_ledger"))
+
+    if turn_messages:
+        graph.update_state(config_dict, {"messages": turn_messages})
+
+    # 2단계: classify_node를 직접 호출(실제 그래프의 tools→classify와 동일
+    # 절차) - 방금 반영한 메시지ᆞfacts를 포함한 최신 state를 다시 읽어서
+    # 넘긴다(_derive_ledger_facility_group이 방금 persist한 lookup_building_ledger
+    # ToolMessage를 실제로 찾아야 하므로).
+    state = graph.get_state(config_dict).values
+    classify_update = classify_node(state)
+    if classify_update:
+        graph.update_state(config_dict, classify_update)
+
+    final = graph.get_state(config_dict).values
+    return {
+        "case_facts": final.get("case_facts") or {},
+        "food_facts": final.get("food_facts") or {},
+        "fire_facts": final.get("fire_facts") or {},
+        "signage_facts": final.get("signage_facts") or {},
+        "permit_preview": build_permit_result(final.get("case_facts") or {}),
+        "food_result": final.get("food_result"),
+        "fire_result": final.get("fire_result"),
+        "signage_result": final.get("signage_result"),
+        "project_status": compute_project_status(final),
+    }
 
 
 # === CLI ===

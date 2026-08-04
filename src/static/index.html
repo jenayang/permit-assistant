@@ -212,6 +212,33 @@
     letter-spacing: 0.02em;
     margin-bottom: 10px;
   }
+  .side-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .side-tab {
+    flex: 1;
+    background: none;
+    border: none;
+    padding: 8px 4px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+  .side-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .docs-answer {
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 10px 2px;
+  }
+  .docs-answer ul, .docs-answer ol { padding-left: 20px; margin: 4px 0; }
   /* 각 Step을 "타임라인 레일(점+이어지는 선) + 본문" 가로 배치로 구성해서
      Step을 따라 내려가는 진행 흐름이 눈에 보이게 한다 - 이전엔 Step끼리
      독립된 박스라 "지금 어디까지 왔는지"를 잇는 느낌이 없었다(2026-07-27
@@ -636,11 +663,21 @@
     </div>
 
     <aside class="side-panel">
-      <div class="roadmap-title">📍 창업 로드맵</div>
-      <div class="roadmap" id="roadmap"></div>
-      <div class="stage-caption">✓ᆞ●는 시스템이 확인한 사실, 체크박스는 직접
-        눌러서 진행상황을 표시할 수 있어요.<br>실제 절차는 사안에 따라 다를 수
-        있어 참고용입니다.</div>
+      <div class="side-tabs">
+        <button type="button" class="side-tab active" id="roadmapTabBtn">📍 창업 로드맵</button>
+        <button type="button" class="side-tab" id="docsTabBtn">📄 필요 서류</button>
+      </div>
+      <div id="roadmapPanel">
+        <div class="roadmap" id="roadmap"></div>
+        <div class="stage-caption">✓ᆞ●는 시스템이 확인한 사실, 체크박스는 직접
+          눌러서 진행상황을 표시할 수 있어요.<br>실제 절차는 사안에 따라 다를 수
+          있어 참고용입니다.</div>
+      </div>
+      <div id="docsPanel" style="display: none;">
+        <div class="stage-caption" id="docsHint">현재까지 확인된 단계를 기준으로
+          필요 서류를 물어봅니다(기존 채팅과 같은 답변 - 근거 법령 포함).</div>
+        <div id="docsBody"></div>
+      </div>
     </aside>
   </div>
 </div>
@@ -657,6 +694,11 @@
   const roadmapEl = document.getElementById("roadmap");
   const nextActionEl = document.getElementById("nextAction");
   const statusTagsEl = document.getElementById("statusTags");
+  const roadmapTabBtn = document.getElementById("roadmapTabBtn");
+  const docsTabBtn = document.getElementById("docsTabBtn");
+  const roadmapPanel = document.getElementById("roadmapPanel");
+  const docsPanel = document.getElementById("docsPanel");
+  const docsBody = document.getElementById("docsBody");
 
   function getUserId() {
     let id = localStorage.getItem("permit_assistant_user_id");
@@ -1647,6 +1689,55 @@
     questionEl.style.height = Math.min(questionEl.scrollHeight, 120) + "px";
   });
 
+  // "필요 서류" 탭 - 새 백엔드 없이 기존 /query(채팅) 엔드포인트를 그대로
+  // 재사용한다. 지금까지 확정된 판정(caseTypeResult/latestFoodResult 등)을
+  // 바탕으로 질문 문자열만 조립해서 보내고, 답변을 renderMarkdown으로
+  // 그린다 - 서류 목록 자체는 기존 채팅과 동일한 근거(RAG)로 만들어진다.
+  let docsLoaded = false;
+
+  function switchSideTab(tab) {
+    const showDocs = tab === "docs";
+    roadmapTabBtn.classList.toggle("active", !showDocs);
+    docsTabBtn.classList.toggle("active", showDocs);
+    roadmapPanel.style.display = showDocs ? "none" : "";
+    docsPanel.style.display = showDocs ? "" : "none";
+    if (showDocs && !docsLoaded) loadDocumentsAnswer();
+  }
+
+  async function loadDocumentsAnswer() {
+    const topics = [];
+    if (caseTypeResult) topics.push(caseTypeResult);
+    if (latestFoodResult) topics.push(latestFoodResult);
+    if (latestSignageResult && !latestSignageResult.includes("불필요")) topics.push(`간판 ${latestSignageResult}`);
+    if (!topics.length) {
+      docsBody.innerHTML = '<div class="docs-answer">아직 확정된 판정이 없습니다. 채팅으로 먼저 상황을 알려주시면 필요 서류를 안내해드려요.</div>';
+      return;
+    }
+    docsLoaded = true;
+    docsBody.innerHTML = '<div class="docs-answer">불러오는 중...</div>';
+    const question = `${topics.join(", ")} 단계에서 필요한 서류를 목록으로 정리해줘`;
+    try {
+      const res = await fetch(`${API_BASE}/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, user_id: userId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        docsBody.innerHTML = `<div class="docs-answer">${data.detail || "조회에 실패했습니다."}</div>`;
+        docsLoaded = false;
+        return;
+      }
+      docsBody.innerHTML = `<div class="docs-answer">${renderMarkdown(data.answer)}</div>`;
+    } catch (err) {
+      docsBody.innerHTML = `<div class="docs-answer">서버에 연결할 수 없습니다: ${err.message}</div>`;
+      docsLoaded = false;
+    }
+  }
+
+  roadmapTabBtn.addEventListener("click", () => switchSideTab("roadmap"));
+  docsTabBtn.addEventListener("click", () => switchSideTab("docs"));
+
   newChatBtn.addEventListener("click", () => {
     localStorage.removeItem("permit_assistant_user_id");
     localStorage.removeItem("permit_assistant_case_facts");
@@ -1661,6 +1752,9 @@
     chatEl.innerHTML = "";
     chatEl.appendChild(emptyHint);
     resetStageIndicator();
+    docsLoaded = false;
+    docsBody.innerHTML = "";
+    switchSideTab("roadmap");
   });
 
   restoreStageIndicator();

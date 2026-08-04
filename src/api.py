@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src import config
-from src.pipeline import get_project_status, ingest, query, update_task_progress
+from src.pipeline import get_project_status, ingest, query, submit_facts, update_task_progress
 from src.agent import ContextOverflowError
 from src.rag.retriever import count_documents, find_unindexed_sources
 from src.agents.permit import PROCEDURE_TREE, PermitResult
@@ -129,6 +129,37 @@ class TaskProgressUpdateRequest(BaseModel):
 
 class TaskProgressUpdateResponse(BaseModel):
     task_progress: dict
+
+
+class FactsSubmitRequest(BaseModel):
+    """폼(intake.html) 제출용 - 채팅 없이 case_facts 등을 직접 채운다.
+
+    각 *_facts는 대응하는 record_*_facts 도구(src/agents/*.py)와 동일한
+    필드명을 그대로 받는 느슨한 dict다 - 도메인별 필드가 20개 가까이 돼서
+    여기 각각을 다시 타입 선언하지 않는다(그 필드 계약의 단일 진실 공급원은
+    record_*_facts 도구 시그니처).
+    """
+    user_id: str = Field(..., description="세션 ID")
+    address: Optional[str] = Field(None, description="사업장 주소(입력 시 용도지역ᆞ건축물대장 자동조회)")
+    case_facts: Optional[dict] = None
+    food_facts: Optional[dict] = None
+    fire_facts: Optional[dict] = None
+    signage_facts: Optional[dict] = None
+
+
+class FactsSubmitResponse(BaseModel):
+    case_facts: dict
+    food_facts: dict
+    fire_facts: dict
+    signage_facts: dict
+    # build_permit_result()의 결정론적 미리보기(permit_type + procedures만) -
+    # required_documents 등 LLM 종합이 필요한 필드는 비어 있다(finalize_node
+    # 몫, 폼 흐름에는 안 걸림).
+    permit_preview: Optional[PermitResult] = None
+    food_result: Optional[str] = None
+    fire_result: Optional[list[str]] = None
+    signage_result: Optional[str] = None
+    project_status: dict
 
 
 class IngestResponse(BaseModel):
@@ -244,6 +275,30 @@ def task_progress_endpoint(req: TaskProgressUpdateRequest) -> TaskProgressUpdate
     except Exception as e:
         logger.error("진행상황 갱신 실패: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"진행상황 갱신 실패: {e}")
+
+
+@app.post("/facts", response_model=FactsSubmitResponse, tags=["로드맵"])
+def facts_endpoint(req: FactsSubmitRequest) -> FactsSubmitResponse:
+    """intake.html 폼 제출 - 채팅 없이 case_facts 등을 직접 반영하고 판정한다.
+
+    /task-progress와 같은 원칙(LLM 호출 없음, 그래프 상태를 직접 patch) -
+    다만 이쪽은 patch 후 classify_node까지 재사용해 판정 결과도 함께 낸다.
+    """
+    try:
+        result = submit_facts(
+            user_id=req.user_id,
+            address=req.address,
+            case_facts=req.case_facts,
+            food_facts=req.food_facts,
+            fire_facts=req.fire_facts,
+            signage_facts=req.signage_facts,
+        )
+        return FactsSubmitResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("폼 제출 처리 실패: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"폼 제출 처리 실패: {e}")
 
 
 @app.post("/ingest", response_model=IngestResponse, tags=["인덱싱"])

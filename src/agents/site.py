@@ -134,6 +134,22 @@ def _vworld_query_land_zone(x: float, y: float) -> str | None:
         return None
 
 
+def get_land_zone_category(address: str) -> str | None:
+    """주소 → 용도지역 문자열만 반환하는 순수 조회 헬퍼(내부/외부 재사용용).
+
+    lookup_land_zone(@tool)의 프롬프트 안내문 조립과 분리해뒀다 - 채팅
+    도구뿐 아니라 폼 제출 API(pipeline.submit_facts)도 같은 조회 로직이
+    필요해서, 조회 자체는 여기 한 곳에만 있게 한다. API 키 미설정ᆞ지오코딩
+    실패ᆞ조회 실패는 전부 None(호출부가 "자동조회 안 됨"으로 처리).
+    """
+    if not config.VWORLD_API_KEY:
+        return None
+    coord = _vworld_geocode(address)
+    if coord is None:
+        return None
+    return _vworld_query_land_zone(*coord)
+
+
 @tool
 def lookup_land_zone(address: str) -> str:
     """주소로 용도지역(관리ᆞ농림ᆞ자연환경보전지역 여부)을 자동 조회합니다.
