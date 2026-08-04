@@ -34,7 +34,7 @@ TASK_PROGRESS_FIELDS: list[str] = [
     "construction_notice", "construction", "use_approval",
     "business_registration", "hygiene_education",
     "interior_equipment", "staff_registration", "opened",
-    "hires_staff",
+    "hires_staff", "uses_agency", "architect_selected", "interior_only",
 ]
 
 
@@ -52,6 +52,9 @@ def record_task_progress(
     staff_registration: bool | None = None,
     opened: bool | None = None,
     hires_staff: bool | None = None,
+    uses_agency: bool | None = None,
+    architect_selected: bool | None = None,
+    interior_only: bool | None = None,
 ) -> str:
     """사용자가 실제로 완료했다고 명시적으로 말한 창업 절차 항목을 기록하세요.
 
@@ -78,6 +81,12 @@ def record_task_progress(
       때만 필요한 절차라, 직원이 없으면 staff_registration 자체가 대상이
       아닙니다(그렇지 않으면 진행률이 100%를 못 채웁니다). 나중에 직원을
       채용하겠다고 하면 hires_staff=True로 다시 바꾸세요.
+    - **건축사사무소 선정이 의무가 아닐 때 "직접 하겠다/도움받겠다"를 명확히 밝히면
+      uses_agency로 기록하세요** - 이후 사전검토ᆞ서류 준비 안내가 이 값에 따라
+      갈립니다. 실제로 사무소ᆞ업체를 정했다고 밝히면 architect_selected=True로
+      기록하세요.
+    - **구조 공사 없이 인테리어만 진행한다고 명확히 밝히면 interior_only=True로
+      기록하세요** - 착공신고ᆞ시공 항목 자체가 대상이 아니게 됩니다.
 
     Args:
         pre_diagnosis_checked: 사전 진단 항목(주차ᆞ정화조ᆞ소방시설 등) 확인을 완료했는지
@@ -92,6 +101,10 @@ def record_task_progress(
         staff_registration: 직원 등록(4대보험 가입)을 완료했는지
         opened: 실제로 영업을 시작했는지
         hires_staff: 직원을 채용하는지(False면 직원 등록 항목이 대상 제외로 처리됨)
+        uses_agency: 건축사사무소 설계가 법적 의무가 아닐 때, 대행업체(건축사사무소ᆞ행정사)
+            도움을 받는지(True) 직접 진행하는지(False)
+        architect_selected: 건축사사무소(또는 대행업체)를 실제로 선정 완료했는지
+        interior_only: 구조 공사(신축ᆞ증축ᆞ대수선 등) 없이 인테리어만 진행하는지
     """
     logger.info("[도구] record_task_progress(%r)", {
         k: v for k, v in locals().items() if v is not None

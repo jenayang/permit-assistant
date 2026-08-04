@@ -6,7 +6,13 @@
 """
 from __future__ import annotations
 
-from src.agents.roadmap_progress import cascade_construction_progress
+from src.agents.roadmap_progress import TASK_PROGRESS_FIELDS, cascade_construction_progress
+
+
+def test_new_role_fields_registered():
+    assert "uses_agency" in TASK_PROGRESS_FIELDS
+    assert "architect_selected" in TASK_PROGRESS_FIELDS
+    assert "interior_only" in TASK_PROGRESS_FIELDS
 
 
 def test_use_approval_cascades_to_earlier_fields():
