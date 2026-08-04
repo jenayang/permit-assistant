@@ -25,6 +25,7 @@ from src.roadmap import (
     _max_allowed_stage,
     _mentioned_construction_stages,
     _mentioned_stages,
+    _pending_stage1_confirmation,
 )
 
 if TYPE_CHECKING:
@@ -111,6 +112,52 @@ def _synthesis_gap_violations(state: "AgentState", max_mentioned: int) -> list[s
             "[Step 1-3: 서류 준비]를 언급했지만 record_permit_synthesis(required_documents=[...])를 "
             "실제로 호출하지 않았습니다. 서류를 텍스트로 나열하는 데서 끝내지 말고, 반드시 "
             "그 도구를 실제로 호출해서 기록한 뒤 답변을 마무리하세요."
+        )
+    return violations
+
+
+def _tool_call_args_this_turn(messages, tool_name: str) -> list[dict]:
+    """이번 사용자 턴(마지막 HumanMessage 이후) 안에서 tool_name으로 호출된
+    tool_calls의 args 목록. _guard_retry_count와 같은 방식으로 역순 스캔한다."""
+    args_list = []
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage):
+            break
+        if isinstance(m, AIMessage):
+            for tc in (m.tool_calls or []):
+                if tc["name"] == tool_name:
+                    args_list.append(tc["args"])
+    return args_list
+
+
+def _premature_stage_content_violations(state: "AgentState", messages) -> list[str]:
+    """record_permit_synthesis가 이번 턴에 다음 단계 페이로드
+    (pre_diagnosis_items/required_documents)를 채우려는데, 그 앞 단계 완료
+    확인 게이트(_pending_stage1_confirmation)가 아직 안 풀려 있으면 위반.
+
+    [Step 1-N] 마커 유무와 무관하게 툴 호출 자체로 판별한다 - 마커 기반 탐지는
+    LLM이 대괄호 헤더 없이 서술형으로만 다음 단계 내용을 전달하면 아예 못
+    잡는 사각지대가 있었다(2026-08-04, 세션 3d2f20a1에서 재현)."""
+    case_facts = state.get("case_facts") or {}
+    if not case_facts.get("_classified"):
+        return []
+    disclosed = state.get("disclosed_stage", {}).get(_STAGE_DOMAIN, 0)
+    task_progress = state.get("task_progress") or {}
+    pending = _pending_stage1_confirmation(disclosed, task_progress, case_facts)
+    if pending is None:
+        return []
+
+    synth_calls = _tool_call_args_this_turn(messages, "record_permit_synthesis")
+    violations = []
+    if pending == 1 and any("pre_diagnosis_items" in a for a in synth_calls):
+        violations.append(
+            "건축사사무소 선정 확인 전에 [Step 1-2: 사전 검토] 내용(pre_diagnosis_items)을 "
+            "기록했습니다. 먼저 건축사 선정(또는 직접/대행 결정) 확인부터 받으세요."
+        )
+    if pending == 2 and any("required_documents" in a for a in synth_calls):
+        violations.append(
+            "사전 검토 확인 전에 [Step 1-3: 설계ᆞ서류 준비] 내용(required_documents)을 "
+            "기록했습니다. 먼저 사전 검토 완료 확인부터 받으세요."
         )
     return violations
 
@@ -386,6 +433,7 @@ def guard_node(state: "AgentState") -> dict:
     violations.extend(_fire_signage_gap_violations(state, messages))
     violations.extend(_construction_guide_gap_violations(state, last_text, messages))
     violations.extend(_correction_omission_violations(state, messages))
+    violations.extend(_premature_stage_content_violations(state, messages))
 
     if violations and _guard_retry_count(messages) < 1:
         logger.info("[guard] 위반 감지, 재시도 유도: %s", violations)

@@ -481,6 +481,82 @@ def test_synthesis_gap_still_triggers_retry():
     )
 
 
+def test_premature_stage3_content_via_tool_call_without_marker():
+    """회귀 테스트(세션 3d2f20a1, 2026-08-04) - [Step 1-2] 확인 전에
+    record_permit_synthesis(required_documents=[...])가 호출되면, 텍스트에
+    [Step 1-3] 마커가 전혀 없어도(서술형으로만 전달) 위반으로 잡아야 한다."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 2}
+    state["task_progress"] = {}
+    call_id = "c1"
+    state["messages"] = [
+        HumanMessage(content="다음 단계 알려줘"),
+        AIMessage(
+            content="설계도서 작성은 몇 주 정도 걸립니다. 필요 서류는 다음과 같습니다...",
+            tool_calls=[{
+                "name": "record_permit_synthesis",
+                "args": {"required_documents": ["용도변경 허가 신청서"]},
+                "id": call_id,
+            }],
+        ),
+        ToolMessage(content="기록됨.", tool_call_id=call_id, name="record_permit_synthesis"),
+    ]
+    update = guard_node(state)
+    guard_msgs = [m for m in update.get("messages", []) if isinstance(m, ToolMessage) and m.name == "_answer_guard"]
+    assert guard_msgs, "마커 없이 required_documents가 기록됐는데도 위반이 안 잡힘"
+    assert "사전 검토" in guard_msgs[0].content
+
+
+def test_premature_stage2_content_via_tool_call_without_marker():
+    """건축사 선정(1-1) 확인 전에 pre_diagnosis_items가 기록되면 마커 유무와
+    무관하게 위반으로 잡아야 한다."""
+    state = _base_state()
+    state["case_facts"] = {"_classified": True, "act_type": "신축"}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 1}
+    state["task_progress"] = {}
+    call_id = "c1"
+    state["messages"] = [
+        HumanMessage(content="다음 단계 알려줘"),
+        AIMessage(
+            content="사전 검토 항목은 다음과 같습니다...",
+            tool_calls=[{
+                "name": "record_permit_synthesis",
+                "args": {"pre_diagnosis_items": ["주차대수 확인"]},
+                "id": call_id,
+            }],
+        ),
+        ToolMessage(content="기록됨.", tool_call_id=call_id, name="record_permit_synthesis"),
+    ]
+    update = guard_node(state)
+    guard_msgs = [m for m in update.get("messages", []) if isinstance(m, ToolMessage) and m.name == "_answer_guard"]
+    assert guard_msgs, "건축사 선정 확인 전에 pre_diagnosis_items가 기록됐는데도 위반이 안 잡힘"
+
+
+def test_premature_stage_content_allowed_when_gate_already_passed():
+    """게이트가 이미 풀린 상태(pre_diagnosis_checked=True)라면 required_documents
+    기록은 정상 경로이므로 위반이 아니다."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 2}
+    state["task_progress"] = {"pre_diagnosis_checked": True}
+    call_id = "c1"
+    state["messages"] = [
+        HumanMessage(content="다음 단계 알려줘"),
+        AIMessage(
+            content="[Step 1-3: 설계ᆞ서류 준비] 필요 서류는 다음과 같습니다...",
+            tool_calls=[{
+                "name": "record_permit_synthesis",
+                "args": {"required_documents": ["용도변경 허가 신청서"]},
+                "id": call_id,
+            }],
+        ),
+        ToolMessage(content="기록됨.", tool_call_id=call_id, name="record_permit_synthesis"),
+    ]
+    update = guard_node(state)
+    assert not any(
+        isinstance(m, ToolMessage) and m.name == "_answer_guard" for m in update.get("messages", [])
+    )
+
+
 def test_correction_omission_triggers_retry():
     """idea_notes.md 스펙 그대로 재현: 유저가 이미 기록된 수치를 정정하는
     발화를 했는데(기존 size_sqm=85, "아까 85㎡라고 했는데 사실 100㎡야")
