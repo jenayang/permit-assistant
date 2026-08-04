@@ -296,6 +296,8 @@
     if (data.food_result) localStorage.setItem("permit_assistant_food_result", data.food_result);
     const address = document.getElementById("address").value.trim();
     if (address) localStorage.setItem("permit_assistant_address", address);
+    // index.html의 "내 로드맵 요약" 카드가 업종을 보여줄 수 있도록 저장.
+    localStorage.setItem("permit_assistant_biz_type", document.getElementById("bizType").value);
   }
 
   function renderResult(data) {

@@ -349,6 +349,9 @@ class PermitResult(BaseModel):
         default_factory=list, description="사전 진단 항목(주차ᆞ정화조ᆞ소방 등) 목록 - 아직 미채움"
     )
     related_laws: list[str] = Field(default_factory=list, description="근거 법령 목록 - 아직 미채움")
+    related_agencies: list[str] = Field(
+        default_factory=list, description="협의ᆞ접수 관련 기관 목록 - record_permit_synthesis(related_agencies=[...])로 LLM이 기록"
+    )
     explanation: str = Field(default="", description="LLM이 생성할 설명 텍스트 - 아직 미채움")
 
 

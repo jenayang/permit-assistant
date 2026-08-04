@@ -609,6 +609,7 @@ def finalize_node(state: AgentState) -> dict:
     result.required_documents = synthesis.get("required_documents", [])
     result.pre_diagnosis_items = synthesis.get("pre_diagnosis_items", [])
     result.related_laws = sorted(set(_CITATION_PATTERN.findall(last_content)))
+    result.related_agencies = synthesis.get("related_agencies", [])
     result.explanation = last_content
 
     logger.info(
