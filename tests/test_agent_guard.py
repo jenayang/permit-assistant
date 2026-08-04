@@ -15,7 +15,9 @@ from src.guard import guard_node
 from src.roadmap import (
     _STAGE_DOMAIN,
     _max_allowed_construction_stage,
+    _max_allowed_stage,
     _mentioned_construction_stages,
+    _pending_stage2_confirmation,
     _should_force_construction_guide,
     permit_phase_directive,
 )
@@ -84,6 +86,80 @@ def _disclosed(state: dict) -> int:
 def test_permit_phase_directive_none_before_classification():
     state = {"case_facts": {}}
     assert permit_phase_directive(state) is None
+
+
+def test_stage1_architect_gate_mandatory_blocks_until_selected():
+    """건축사 의무 대상(True)이면 architect_selected 확인 전엔 [Step 1-2]로 못 간다."""
+    state = _base_state()
+    state["case_facts"] = {"_classified": True, "act_type": "신축"}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 1}
+    state["task_progress"] = {}
+    directive = permit_phase_directive(state)
+    assert "건축사사무소는 선정하셨어요" in directive
+
+    state["task_progress"] = {"architect_selected": True}
+    directive = permit_phase_directive(state)
+    assert "[Step 1-2]까지만" in directive
+
+
+def test_stage1_architect_gate_optional_asks_direct_or_agency():
+    """건축사 선택제(False)면 먼저 직접/대행 여부를 물어야 한다."""
+    state = _base_state()
+    state["case_facts"] = {"_classified": True, "act_type": "일반수선"}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 1}
+    state["task_progress"] = {}
+    directive = permit_phase_directive(state)
+    assert "직접 진행하실 건가요" in directive
+
+
+def test_stage1_architect_gate_optional_self_managed_passes_immediately():
+    """직접(uses_agency=False) 선택 시 선정할 대상이 없으니 바로 통과한다."""
+    state = _base_state()
+    state["case_facts"] = {"_classified": True, "act_type": "일반수선"}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 1}
+    state["task_progress"] = {"uses_agency": False}
+    directive = permit_phase_directive(state)
+    assert "[Step 1-2]까지만" in directive
+
+
+def test_stage1_architect_gate_optional_agency_needs_selection():
+    """대행(uses_agency=True) 선택 시 architect_selected까지 확인돼야 한다."""
+    state = _base_state()
+    state["case_facts"] = {"_classified": True, "act_type": "일반수선"}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 1}
+    state["task_progress"] = {"uses_agency": True}
+    directive = permit_phase_directive(state)
+    assert "그 업체는 선정하셨어요" in directive
+
+    state["task_progress"] = {"uses_agency": True, "architect_selected": True}
+    directive = permit_phase_directive(state)
+    assert "[Step 1-2]까지만" in directive
+
+
+def test_max_allowed_stage_blocked_at_1_without_architect_decision():
+    state = {
+        "case_facts": {"_classified": True, "act_type": "신축"},
+        "disclosed_stage": {_STAGE_DOMAIN: 1},
+        "task_progress": {},
+    }
+    assert _max_allowed_stage(state) == 1
+
+
+def test_construction_phase_no_longer_mentions_architect():
+    """건축사 선정 안내는 이제 Step1-1 소관 - Step2 안내 문구엔 등장하면 안 된다."""
+    state = _base_state()
+    state["case_facts"] = {"_classified": True, "act_type": "신축"}
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 4, "construction_guide_shown": True, "construction_stage": 0}
+    state["task_progress"] = {"application_submitted": True}
+    directive = permit_phase_directive(state)
+    assert "건축사" not in directive
+
+
+def test_pending_stage2_confirmation_bypassed_when_interior_only():
+    """구조 공사 없이 인테리어만 하면 착공신고ᆞ시공 게이트를 건너뛴다."""
+    assert _pending_stage2_confirmation(1, {"interior_only": True}) is None
+    assert _pending_stage2_confirmation(2, {"interior_only": True}) is None
+    assert _pending_stage2_confirmation(1, {"interior_only": False}) == 1
 
 
 def test_sequential_walkthrough_then_construction_transition():
