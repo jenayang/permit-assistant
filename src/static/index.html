@@ -1417,7 +1417,7 @@
       const headerMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
       const hrMatch = trimmed.match(/^(-{3,}|\*{3,}|_{3,})$/);
       const bulletMatch = trimmed.match(/^[-*]\s+(.*)$/);
-      const orderedMatch = trimmed.match(/^\d+\.\s+(.*)$/);
+      const orderedMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
 
       if (headerMatch) {
         closeList();
@@ -1430,7 +1430,12 @@
         html.push(`<li>${renderInline(bulletMatch[1])}</li>`);
       } else if (orderedMatch) {
         if (listType !== "ol") { closeList(); html.push("<ol>"); listType = "ol"; }
-        html.push(`<li>${renderInline(orderedMatch[1])}</li>`);
+        // 번호를 브라우저 자동 매김에 맡기지 않고 value로 명시한다 - 번호 목록
+        // 중간에 하위 불릿(-)이 끼면 <ol>이 한 번 닫혔다 새로 열리면서 브라우저가
+        // 다시 1부터 세는 버그가 있었다(2026-08-04, "1. 2. 1."로 보이는 신고 -
+        // 세션 3d2f20a1에서 재현 확인). value를 매 <li>마다 명시하면 <ol>이
+        // 몇 번을 끊겨도 항상 원문 숫자 그대로 표시된다.
+        html.push(`<li value="${orderedMatch[1]}">${renderInline(orderedMatch[2])}</li>`);
       } else {
         closeList();
         html.push(trimmed === "" ? "<br>" : `<div>${renderInline(rawLine)}</div>`);

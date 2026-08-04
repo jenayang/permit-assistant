@@ -77,6 +77,23 @@ def _mentioned_construction_stages(text: str) -> list[int]:
     return mentioned
 
 
+def _pending_stage1_confirmation(disclosed: int, task_progress: dict) -> int | None:
+    """[Step 1-2]/[Step 1-3] 완료 확인이 아직 안 됐으면 그 단계 번호를 반환
+    (이 이상 못 감), 다 확인됐으면 None.
+
+    _max_allowed_stage(하드 캡)ᆞpermit_phase_directive(안내 문구)가 반드시 같은
+    소스를 봐야 한다 - 따로 두면 한쪽만 고치고 잊어버리는 드리프트가 실제로
+    있었다(2026-08-04, 세션 3d2f20a1에서 재현: permit_phase_directive는 "1-2
+    확인부터 하라"고 지시하는데 _max_allowed_stage는 그 조건을 모르고 그냥
+    disclosed+1을 허용치로 내줘서, LLM이 지시를 무시하면 [Step 1-3] 전체
+    내용이 확인 없이 그냥 새어나갔다)."""
+    if disclosed == 2 and not task_progress.get("pre_diagnosis_checked"):
+        return 2
+    if disclosed == 3 and not task_progress.get("documents_prepared"):
+        return 3
+    return None
+
+
 def _max_allowed_stage(state: "AgentState") -> int:
     """이번 턴 답변에 등장해도 되는 최대 [Step 1-N] 번호. 이 구조 자체가
     _STAGE_DOMAIN(permit) 전용이라, permit 판정 전에는 0(전부 금지) -
@@ -84,21 +101,46 @@ def _max_allowed_stage(state: "AgentState") -> int:
     항상 0으로 막혀서, 그 도메인들의 답변엔 [Step 1-N] 마커가 아예 등장하면
     안 된다(SYSTEM_PROMPT도 이렇게 지시). 판정 후에는 지금까지 공개된
     단계(disclosed_stage[_STAGE_DOMAIN]) + 1 - 한 턴에 최대 한 단계만 새로
-    공개하도록 강제한다."""
+    공개하도록 강제한다. 단, 앞 단계 완료 확인이 아직 안 됐으면
+    (_pending_stage1_confirmation) 그 단계에서 더 못 올라간다."""
     if not state.get("case_facts", {}).get("_classified"):
         return 0
-    return state.get("disclosed_stage", {}).get(_STAGE_DOMAIN, 0) + 1
+    disclosed = state.get("disclosed_stage", {}).get(_STAGE_DOMAIN, 0)
+    pending = _pending_stage1_confirmation(disclosed, state.get("task_progress") or {})
+    if pending is not None:
+        return pending
+    return disclosed + 1
+
+
+def _pending_stage2_confirmation(construction_disclosed: int, task_progress: dict) -> int | None:
+    """[Step 2-1]/[Step 2-2] 완료 확인이 아직 안 됐으면 그 단계 번호를 반환,
+    다 확인됐으면 None. _pending_stage1_confirmation과 동일한 이유로 하드
+    캡ᆞ안내 문구가 공유하는 단일 소스."""
+    if construction_disclosed == 1 and not task_progress.get("construction_notice"):
+        return 1
+    if construction_disclosed == 2 and not task_progress.get("construction"):
+        return 2
+    return None
 
 
 def _max_allowed_construction_stage(state: "AgentState") -> int:
     """이번 턴 답변에 등장해도 되는 최대 [Step 2-N] 번호. Step 1의 하위
-    4단계가 다 안 끝났으면(_STAGE_DOMAIN < 4) Step2 얘기 자체가 근거 없는
-    진행이라 0으로 막는다. 끝난 뒤엔 지금까지 공개된 construction_stage + 1 -
-    한 턴에 최대 한 단계만 새로 공개."""
+    4단계가 다 안 끝났거나(_STAGE_DOMAIN < 4) 신청ᆞ접수 확인이 아직 안 됐으면
+    (application_submitted) Step2 얘기 자체가 근거 없는 진행이라 0으로 막는다.
+    그 다음엔 지금까지 공개된 construction_stage + 1 - 한 턴에 최대 한 단계만
+    새로 공개하고, 앞 단계 완료 확인이 안 됐으면(_pending_stage2_confirmation)
+    그 단계에서 더 못 올라간다."""
     disclosed_stage = state.get("disclosed_stage", {})
     if disclosed_stage.get(_STAGE_DOMAIN, 0) < 4:
         return 0
-    return disclosed_stage.get("construction_stage", 0) + 1
+    task_progress = state.get("task_progress") or {}
+    if not task_progress.get("application_submitted"):
+        return 0
+    construction_disclosed = disclosed_stage.get("construction_stage", 0)
+    pending = _pending_stage2_confirmation(construction_disclosed, task_progress)
+    if pending is not None:
+        return pending
+    return construction_disclosed + 1
 
 
 # 건축 인허가 트랙(Step 0→1→2)은 실제로 순서가 있는 절차(행위유형 확정 →
@@ -192,14 +234,17 @@ def permit_phase_directive(state: "AgentState") -> str | None:
     # 사전검토(1-2)ᆞ서류준비(1-3) 안내가 끝나도 실제 완료 여부를 확인 안 받고
     # 그냥 다음 단계로 넘어가던 문제(2026-08-03) - Step 1-4→Step 2 전환에 이미
     # 있던 "완료 확인 후에만 다음 단계" 게이트를 같은 방식으로 확장한다.
-    if disclosed == 2 and not task_progress.get("pre_diagnosis_checked"):
+    # _max_allowed_stage와 같은 소스(_pending_stage1_confirmation)를 써서 이
+    # 안내 문구와 하드 캡이 서로 다른 조건을 보는 드리프트를 원천 차단한다.
+    pending1 = _pending_stage1_confirmation(disclosed, task_progress)
+    if pending1 == 2:
         return (
             "[진행 상태] Step 1-2(사전 검토) 안내까지 끝났습니다. 이번 턴에는 Step 1-3(설계ᆞ"
             "서류 준비)로 넘어가지 말고 \"사전 검토 항목은 확인해 보셨어요?\"처럼 완료 여부부터 "
             "확인하세요. 완료했다고 답하면 record_task_progress(pre_diagnosis_checked=True)로 "
             "기록한 뒤 다음 턴부터 Step 1-3을 안내하세요."
         )
-    if disclosed == 3 and not task_progress.get("documents_prepared"):
+    if pending1 == 3:
         return (
             "[진행 상태] Step 1-3(설계ᆞ서류 준비) 안내까지 끝났습니다. 이번 턴에는 Step 1-4(신청ᆞ"
             "접수)로 넘어가지 말고 \"설계도서ᆞ서류 준비는 다 되셨어요?\"처럼 완료 여부부터 확인하세요. "
@@ -255,7 +300,8 @@ def permit_phase_directive(state: "AgentState") -> str | None:
         architect_note = ""
 
     construction_disclosed = disclosed_stage.get("construction_stage", 0)
-    if construction_disclosed == 1 and not task_progress.get("construction_notice"):
+    pending2 = _pending_stage2_confirmation(construction_disclosed, task_progress)
+    if pending2 == 1:
         return (
             architect_note + "\n\n[진행 상태] [Step 2-1: 건축사사무소 선정ᆞ착공신고] 안내까지 "
             "끝났습니다. 이번 턴에는 [Step 2-2]로 넘어가지 말고 \"착공신고는 하셨어요?\"처럼 "
@@ -263,7 +309,7 @@ def permit_phase_directive(state: "AgentState") -> str | None:
             "record_task_progress(construction_notice=True)로 기록한 뒤 다음 턴부터 "
             "[Step 2-2]를 안내하세요."
         )
-    if construction_disclosed == 2 and not task_progress.get("construction"):
+    if pending2 == 2:
         return (
             "[진행 상태] [Step 2-2: 시공ᆞ공사감리ᆞ인테리어ᆞ장비 설치] 안내까지 끝났습니다. "
             "이번 턴에는 [Step 2-3]으로 넘어가지 말고 \"시공은 끝나셨어요?\"처럼 완료 여부부터 "

@@ -480,8 +480,29 @@ def test_max_allowed_construction_stage_zero_before_step1_done():
 
 
 def test_max_allowed_construction_stage_increments_after_step1_done():
-    state = {"disclosed_stage": {_STAGE_DOMAIN: 4, "construction_stage": 1}}
+    state = {
+        "disclosed_stage": {_STAGE_DOMAIN: 4, "construction_stage": 1},
+        "task_progress": {"application_submitted": True, "construction_notice": True},
+    }
     assert _max_allowed_construction_stage(state) == 2
+
+
+def test_max_allowed_construction_stage_zero_before_application_submitted():
+    """Step1이 다 끝났어도(disclosed=4) 신청ᆞ접수 확인이 아직 안 됐으면
+    Step2 얘기 자체가 근거 없는 진행이라 0으로 막아야 한다(2026-08-04 회귀 -
+    이 게이트가 하드 캡엔 없어서 [Step 2-1]이 새나갈 수 있었다)."""
+    state = {"disclosed_stage": {_STAGE_DOMAIN: 4}, "task_progress": {}}
+    assert _max_allowed_construction_stage(state) == 0
+
+
+def test_max_allowed_construction_stage_blocked_without_stage1_confirmation():
+    """[Step 2-1] 안내까지 끝났는데 착공신고 완료 확인이 안 됐으면 [Step 2-2]로
+    못 올라간다(1-2/1-3 확인 게이트와 같은 원칙, 세션 3d2f20a1 회귀)."""
+    state = {
+        "disclosed_stage": {_STAGE_DOMAIN: 4, "construction_stage": 1},
+        "task_progress": {"application_submitted": True},
+    }
+    assert _max_allowed_construction_stage(state) == 1
 
 
 def test_guard_node_caps_construction_stage_overreach():
@@ -489,6 +510,7 @@ def test_guard_node_caps_construction_stage_overreach():
     씌워서 저장한다 - Step1과 동일한 방어."""
     state = _base_state()
     state["disclosed_stage"] = {_STAGE_DOMAIN: 4, "construction_guide_shown": True}
+    state["task_progress"] = {"application_submitted": True}
     state["messages"] = [
         HumanMessage(content="공사 전체 다 알려줘"),
         AIMessage(content="[Step 2-1: 건축사사무소 선정ᆞ착공신고] ...\n[Step 2-2: 시공] ...\n[Step 2-3: 사용승인] ..."),
@@ -497,6 +519,41 @@ def test_guard_node_caps_construction_stage_overreach():
     guard_msgs = [m for m in update.get("messages", []) if isinstance(m, ToolMessage) and m.name == "_answer_guard"]
     assert guard_msgs, "허용치를 넘는 Step2 단계 공개인데도 재시도가 유도되지 않음"
     assert "Step 2-1" in guard_msgs[0].content and "Step 2-3" in guard_msgs[0].content
+
+
+def test_guard_blocks_step1_3_leak_before_step1_2_confirmed():
+    """회귀 테스트(세션 3d2f20a1, 2026-08-04) - [Step 1-2] 안내까지 끝났는데
+    pre_diagnosis_checked 확인 없이 [Step 1-3] 전체 내용을 먼저 안내하면
+    (실사용에서 실제로 발생: 서류 목록까지 다 보여준 뒤 맨 끝에서야 "사전 검토
+    확인하셨어요?"라고 물음) 하드 캡이 막아야 한다. 이전엔 _max_allowed_stage가
+    task_progress를 안 봐서 disclosed=2일 때도 허용치가 3이라 그냥 통과됐다."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 2}
+    state["task_progress"] = {}
+    state["messages"] = [
+        HumanMessage(content="다음 단계 알려줘"),
+        AIMessage(content="[Step 1-3: 설계ᆞ서류 준비] 필요 서류는 다음과 같습니다..."),
+    ]
+    update = guard_node(state)
+    guard_msgs = [m for m in update.get("messages", []) if isinstance(m, ToolMessage) and m.name == "_answer_guard"]
+    assert guard_msgs, "1-2 확인 전 1-3 내용이 새는데도 재시도가 유도되지 않음"
+    assert "Step 1-2" in guard_msgs[0].content and "Step 1-3" in guard_msgs[0].content
+
+
+def test_guard_allows_step1_3_after_step1_2_confirmed():
+    """pre_diagnosis_checked가 확인되면(disclosed=2에서 넘어갈 자격이 생기면)
+    정상적으로 [Step 1-3]을 안내할 수 있다 - 정상 경로까지 막으면 안 된다."""
+    state = _base_state()
+    state["disclosed_stage"] = {_STAGE_DOMAIN: 2}
+    state["task_progress"] = {"pre_diagnosis_checked": True}
+    state["messages"] = [
+        HumanMessage(content="다음 단계 알려줘"),
+        AIMessage(content="[Step 1-3: 설계ᆞ서류 준비] 필요 서류는 다음과 같습니다..."),
+    ]
+    update = guard_node(state)
+    assert not any(
+        isinstance(m, ToolMessage) and m.name == "_answer_guard" for m in update.get("messages", [])
+    )
 
 
 def test_permit_phase_directive_states_architect_requirement_explicitly():
