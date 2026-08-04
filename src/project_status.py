@@ -41,26 +41,27 @@ def _step_substeps(state: dict) -> list[list[tuple[str, bool]]]:
     case_facts = state.get("case_facts") or {}
     permit_result = state.get("permit_result")
     food_result = state.get("food_result")
-    fire_result = state.get("fire_result")
     signage_result = state.get("signage_result")
     tp = state.get("task_progress") or {}
+    interior_only = bool(tp.get("interior_only"))
 
     return [
-        [("행위 유형 확인", bool(case_facts.get("act_type")))],
         [
-            ("허가ᆞ신고 대상 판정", bool(permit_result)),
+            ("행위 유형 확인", bool(case_facts.get("act_type"))),
+            ("허가ᆞ신고ᆞ기재변경 대상 판정", bool(permit_result)),
+        ],
+        [
             ("사전 검토", bool(tp.get("pre_diagnosis_checked"))),
             ("설계ᆞ서류 준비", bool(tp.get("documents_prepared"))),
             ("신청ᆞ접수", bool(tp.get("application_submitted"))),
         ],
         [
-            ("착공신고", bool(tp.get("construction_notice"))),
-            ("공사(시공)", bool(tp.get("construction"))),
+            ("착공신고", interior_only or bool(tp.get("construction_notice"))),
+            ("공사(시공)", interior_only or bool(tp.get("construction"))),
             ("사용승인", bool(tp.get("use_approval"))),
         ],
         [
             ("식품위생 영업신고 확인", food_result is not None),
-            ("소방시설 확인", fire_result is not None),
             ("간판ᆞ옥외광고물 확인", signage_result is not None),
             ("사업자등록", bool(tp.get("business_registration"))),
             ("위생교육 이수", bool(tp.get("hygiene_education"))),

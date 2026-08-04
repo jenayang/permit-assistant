@@ -21,11 +21,20 @@ def test_food_registration_locked_until_use_approval(roadmap_lock_results):
     assert roadmap_lock_results["food: 사용승인 후엔 잠금 해제"]
 
 
-def test_fire_and_signage_locked_until_construction(roadmap_lock_results):
+def test_fire_locked_until_construction(roadmap_lock_results):
     assert roadmap_lock_results["fire: 공사 전엔 잠김"]
-    assert roadmap_lock_results["signage: 공사 전엔 잠김"]
     assert roadmap_lock_results["fire: 공사 후엔 해제"]
+
+
+def test_signage_locked_until_construction(roadmap_lock_results):
+    assert roadmap_lock_results["signage: 공사 전엔 잠김"]
     assert roadmap_lock_results["signage: 공사 후엔 해제"]
+
+
+def test_interior_only_closes_construction_substeps(roadmap_lock_results):
+    assert roadmap_lock_results["interior_only: 착공신고 해당없음"]
+    assert roadmap_lock_results["interior_only: 시공 해당없음"]
+    assert roadmap_lock_results["interior_only: 소방시설은 construction 없이도 잠금 해제"]
 
 
 def test_business_registration_lock_combinations(roadmap_lock_results):
@@ -56,9 +65,10 @@ def test_opening_locked_until_all_step3_items_done(roadmap_lock_results):
 
 
 def test_architect_badge_reflects_requires_architect(roadmap_lock_results):
-    # 건축법 제23조 건축사 대행 배지: 백엔드 requires_architect 값이 Step 1의
+    # 건축법 제23조 건축사 대행 배지: 백엔드 requires_architect 값이 Step 0의
     # architect 필드로 그대로 전달되는지(true=대행/false=직접/null=배지없음).
-    assert roadmap_lock_results["architect: true면 Step1 architect=true(대행 배지 표시)"]
+    # 판정 축이 Step0로 옮겨오면서(2026-08-04) 배지도 Step1에서 Step0로 이동.
+    assert roadmap_lock_results["architect: true면 Step0 architect=true(대행 배지 표시)"]
     assert roadmap_lock_results["architect: false면 배지 미표시(필드만 false)"]
     assert roadmap_lock_results["architect: null이면 배지 없음"]
 
