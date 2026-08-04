@@ -172,6 +172,9 @@ function check(label, passed) {
 
   steps = buildSteps({ ...commonArgs, latestFoodResult: null, latestFireResult: ["소화기구"], latestSignageResult: null, taskProgress: { interior_only: true } });
   check("interior_only: 소방시설은 construction 없이도 잠금 해제", !isVisuallyLocked(findSub(steps, "Step 2 · 공사", "소방시설")));
+
+  steps = buildSteps({ ...commonArgs, latestFoodResult: null, latestFireResult: [], latestSignageResult: "신고", taskProgress: { interior_only: true } });
+  check("interior_only: 간판도 construction 없이도 잠금 해제", !isVisuallyLocked(findSub(steps, "Step 3 · 창업 행정", "간판")));
 }
 
 process.stdout.write(JSON.stringify(results));

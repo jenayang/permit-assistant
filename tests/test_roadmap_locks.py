@@ -35,6 +35,7 @@ def test_interior_only_closes_construction_substeps(roadmap_lock_results):
     assert roadmap_lock_results["interior_only: 착공신고 해당없음"]
     assert roadmap_lock_results["interior_only: 시공 해당없음"]
     assert roadmap_lock_results["interior_only: 소방시설은 construction 없이도 잠금 해제"]
+    assert roadmap_lock_results["interior_only: 간판도 construction 없이도 잠금 해제"]
 
 
 def test_business_registration_lock_combinations(roadmap_lock_results):

@@ -1034,7 +1034,10 @@
             // 허가ᆞ신고가 필요 없는 간판이면 ✕로 닫는다.
             notApplicable: latestSignageResult != null && latestSignageResult.includes("불필요"),
             naReason: "허가ᆞ신고가 필요 없는 간판입니다",
-            locked: !taskProgress.construction,
+            // interior_only 케이스는 construction이 계속 false로 남을 수
+            // 있어(구조 공사 자체가 없으니) construction만으로 잠그면
+            // 영원히 안 풀린다 - interior_only면 잠금 조건에서 제외.
+            locked: !taskProgress.construction && !taskProgress.interior_only,
             lockReason: "공사(시공) 완료 후 설치 가능",
           },
           // 사업자등록은 다른 Step3 항목과 달리 "아무 때나 시작 가능"이
