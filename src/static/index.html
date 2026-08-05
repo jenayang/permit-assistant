@@ -342,6 +342,25 @@
     margin-left: 18px;
     flex-shrink: 0;
   }
+  .step-checklist-detail-wrap { padding: 0 16px 10px 40px; }
+  .step-checklist-detail-toggle {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 0;
+  }
+  .step-checklist-detail-panel {
+    margin-top: 6px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--surface-muted, rgba(127, 127, 127, 0.08));
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+  .step-checklist-detail-panel strong { color: var(--text); margin-right: 4px; }
   .step-agency-card {
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -1849,6 +1868,35 @@
       tagEl.textContent = tag;
       row.appendChild(tagEl);
       stepChecklistEl.appendChild(row);
+
+      // 2026-08-05 - STEP8(사업자등록 및 위생교육)의 핵심 항목에만 채워지는
+      // 참고 정보(왜 필요한지ᆞ근거 법령ᆞ준비 서류ᆞ소요 기간). detail이 없는
+      // 항목은 지금처럼 토글 버튼 없이 그린다.
+      if (sub.detail) {
+        const wrap = document.createElement("div");
+        wrap.className = "step-checklist-detail-wrap";
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "step-checklist-detail-toggle";
+        toggle.textContent = "왜 필요한가요?";
+        const panel = document.createElement("div");
+        panel.className = "step-checklist-detail-panel";
+        panel.style.display = "none";
+        panel.innerHTML = [
+          sub.detail.why ? `<div><strong>왜 필요한지</strong> ${sub.detail.why}</div>` : "",
+          sub.detail.basis ? `<div><strong>근거 법령</strong> ${sub.detail.basis}</div>` : "",
+          sub.detail.docs ? `<div><strong>준비 서류</strong> ${sub.detail.docs}</div>` : "",
+          sub.detail.duration ? `<div><strong>소요 기간</strong> ${sub.detail.duration}</div>` : "",
+        ].join("");
+        toggle.addEventListener("click", () => {
+          const open = panel.style.display !== "none";
+          panel.style.display = open ? "none" : "";
+          toggle.textContent = open ? "왜 필요한가요?" : "접기";
+        });
+        wrap.appendChild(toggle);
+        wrap.appendChild(panel);
+        stepChecklistEl.appendChild(wrap);
+      }
     });
     if (!stepChecklistEl.children.length) {
       stepChecklistEl.innerHTML = '<div class="step-detail-empty">이 단계에서 확인할 항목이 없습니다.</div>';

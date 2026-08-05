@@ -21,11 +21,10 @@ classify/finalize/guard는 모두 LLM이 아니라 그래프가 강제로 실행
   같은 분기 질문 단계) 매 턴 다시 실행해서 최신 상태로 갱신하고, 한 번이라도
   채워지면(=실제 종합이 끝난 시점) 그 결과를 잠가서 이후 무관한 대화가 덮어쓰지
   못하게 한다 - 자세한 배경은 finalize_node docstring 참고.
-- guard: 자유 텍스트로 끝나는 모든 답변을 정규식+상태로 검증한다(disclosed_stage
-  상한 초과, 검색 없이 지어낸 [출처: ...] 인용). 프롬프트 지시만으로는 LLM이
-  한 턴에 여러 단계를 몰아서 공개하거나 근거 없이 답하는 걸 못 막는다는 게
-  2026-07-26 실사용 세션에서 재현돼서 도입 - 자세한 배경은 guard_node docstring
-  참고.
+- guard: 자유 텍스트로 끝나는 모든 답변을 정규식+상태로 검증한다(검색 없이
+  지어낸 [출처: ...] 인용, 조회 성공 후 기록 누락 등). 프롬프트 지시만으로는
+  LLM이 근거 없이 앞서나가는 걸 못 막는다는 게 2026-07-26 실사용 세션에서
+  재현돼서 도입 - 자세한 배경은 guard_node docstring 참고.
 """
 from __future__ import annotations
 
@@ -50,13 +49,6 @@ from src.agents import TOOLS
 from src.agents.permit import PermitResult, build_permit_result
 
 logger = logging.getLogger(__name__)
-
-# disclosed_stage(dict[domain, stage])에서 지금 유일하게 4단계(상황분석/서류/
-# 사전진단/기간) 구조를 쓰는 도메인의 키. permit만 이 패턴을 쓴다 - food/fire/
-# signage 등 나머지는 classify 결과 자체가 완결된 답이라 단계 구조가 없다
-# (2026-07-27 논의: 두 번째로 이 패턴이 필요한 도메인이 실제로 생기면 그때
-# DOMAIN_CONFIGS에 supports_stage 같은 필드로 일반화 - 지금은 이르다).
-_STAGE_DOMAIN = "case_facts"
 
 
 # === 그래프 상태 ===(MessagesState + 대화 중 파악된 사용자 상황 사실들)
@@ -92,28 +84,6 @@ class AgentState(MessagesState):
     # 별도 종합(finalize) 단계 없이 classify 시점에 바로 확정된다.
     signage_facts: Annotated[dict, merge_facts]
     signage_result: str | None
-    # 4단계(상황분석/서류/사전진단/기간, 로드맵 Step 1의 하위 단계라 [Step 1-N]
-    # 으로 표시 - Step 0~4 전체 번호와 겹치면 혼동된다는 피드백으로 2026-07-27
-    # 개명) 안내 중 실제로 사용자에게 공개된 최대 단계(0~4) - 도메인별로
-    # 분리된 dict다(키: DOMAIN_CONFIGS의 facts_key, 지금은 "case_facts"=permit
-    # 만 실제로 씀). 처음엔 전역 스칼라 하나였는데, signage처럼 이 단계 구조를
-    # 안 쓰는 도메인의 답변에 LLM이 [Step 1-N] 마커를 잘못 갖다 써도 그게
-    # permit의 카운터를 오염시켜서
-    # (예: 간판 얘기만 했는데 disclosed_stage가 올라가 나중에 진짜 건축
-    # 얘기를 시작하면 이미 일부 단계가 끝난 것으로 오인) 도메인별로 분리했다
-    # (2026-07-27 실측 확인). 프롬프트 지시만으로는 LLM이 한 턴에 4단계를
-    # 전부 쏟아내는 걸 못 막아서(2026-07-26 실사용 세션에서 재현, guard_node
-    # 참고) 이 값으로 "이번 턴엔 몇 단계까지만" 상한을 그래프가 강제한다.
-    # 2026-07-28: "construction_guide_shown" 키를 추가해 같은 dict를 Step1→2
-    # 전환 신호로도 재사용한다(bool - get_construction_guide가 대화 중 한 번이라도
-    # 호출됐는지, guard_node가 갱신). task_progress의 "construction"(사용자가
-    # 실제로 착공했다는 자기보고)과는 의미가 다르니 혼동하지 말 것 - 여긴
-    # "안내를 이미 보여줬는지"만 본다. 2026-08-04: Step2도 [Step 2-N]으로
-    # 세분화하며 "construction_stage"(int 0~3, 텍스트 공개 카운터)를 별도 키로
-    # 추가했다 - case_facts 카운터와 같은 패턴. 자세한 이유는
-    # permit_phase_directive 참고.
-    # 리듀서 없이 기본 덮어쓰기(guard_node가 한 번에 하나씩만 갱신).
-    disclosed_stage: dict[str, int]
     # 사용자가 실제로 "완료했다"고 말한 항목들(착공신고ᆞ사업자등록ᆞ영업개시 등).
     # permit_result/food_result 등(규칙 엔진이 계산한 "뭘 해야 하는지" 판정)과는
     # 성격이 다르다 - 이건 실물 세계에서 벌어지는 일이라 AI가 스스로 판단하거나
@@ -221,15 +191,15 @@ def _fit_context(prefix: list, history: list, using_fallback: bool) -> list:
        매번 버리는 방식이었다. 여기서는 한도 근접이라는 명확한 이유가 있을 때만
        동작하므로 위험 프로필이 다르다.
     2. **LLM에 보내는 사본만 자르고 state["messages"]는 보존** - guard_node가
-       메시지 이력을 스캔해서 검색 여부(_has_grounding_search)ᆞ공사 안내 호출
-       여부(_construction_guide_shown)를 판정하기 때문이다. 원본을 지우면 "검색
-       안 했다"고 오판해 없는 위반을 만든다. 체크포인터에도 전체 이력이 남는다.
+       메시지 이력을 스캔해서 검색 여부(_has_grounding_search)를 판정하기
+       때문이다. 원본을 지우면 "검색 안 했다"고 오판해 없는 위반을 만든다.
+       체크포인터에도 전체 이력이 남는다.
     3. **직접 구현 대신 langchain의 trim_messages 사용** - 유효한 이력 형태
        (HumanMessage로 시작)와 tool_call/ToolMessage 짝 맞추기를 알아서 처리한다.
        짝이 깨지면 프로바이더가 400을 뱉는데, 그걸 직접 관리하면 버그가 나기 쉽다.
 
     판정 결과ᆞ사실은 메시지가 아니라 별도 상태 채널(case_facts/permit_result 등)에
-    있고 _roadmap_status_summary가 매 턴 현황을 다시 주입하므로, 오래된 메시지를
+    있고 current_step_directive가 매 턴 현황을 다시 주입하므로, 오래된 메시지를
     빼도 "지금까지 뭐가 확정됐는지"는 그대로 전달된다 - 이 구조 덕분에 절삭이
     일반 챗봇보다 안전하다.
     """
@@ -309,12 +279,7 @@ def _get_cerebras_llm_with_tools(tool_choice: str | None = None):
 
 
 # === 로드맵 단계 추적(src/roadmap.py) + 답변 신뢰성 검증(src/guard.py) 분리(Phase 4) ===
-from src.roadmap import (  # noqa: E402
-    _roadmap_status_summary,
-    _should_force_construction_guide,
-    domain_timing_directive,
-    permit_phase_directive,
-)
+from src.roadmap import current_step_directive, domain_timing_directive  # noqa: E402
 from src.guard import _CITATION_PATTERN  # noqa: E402
 from src.agents.roadmap_progress import cascade_construction_progress  # noqa: E402
 
@@ -373,9 +338,9 @@ def _forced_record_tool(state: AgentState) -> _ForcedToolDecision | None:
       - tool_choice 강제:                둘 다 3/3
     즉 ① 모델이 도구를 "필수"가 아니라 "권장"으로 다루고 ② 도구 수가 많을수록
     선택이 흐려진다. 프롬프트로 "반드시 기록하라"고 아무리 적어도(실제로 여러 번
-    강화했다) 안 고쳐지던 이유다. 반면 API 레벨 강제는 100% 재현됐다 -
-    get_construction_guide 한 지점에만 좁게 쓰던 방식(_should_force_construction_guide)을
-    모든 도메인으로 일반화한 것.
+    강화했다) 안 고쳐지던 이유다. 반면 API 레벨 강제는 100% 재현됐다 - 예전에
+    get_construction_guide 한 지점에만 좁게 쓰던 강제 방식을 모든 도메인으로
+    일반화한 것.
 
     강제 범위를 좁게 유지하는 세 조건:
     1. facts가 완전히 비어 있을 때만 - 도메인당 대화 전체에서 사실상 첫 기록
@@ -425,15 +390,11 @@ def agent_node(state: AgentState) -> dict:
     - 응답에 record_case_facts 호출이 있으면 그 인자를 case_facts에 병합
     - build_system_prompt로 이번 턴에 살아있는 도메인의 프롬프트 블록만
       조립해서 전달한다(파일 상단 블록 주석 참고).
-    - permit_phase_directive로 건축 인허가 트랙 순차 구간(Step 1-N 상한ᆞ
-      Step 1→2 전환)의 동적 지시를 덧붙인다(연성 유도 - 실제 차단은
-      guard_node가 담당).
-    - 매 턴 _roadmap_status_summary로 건축 인허가 트랙(순차)ᆞ창업 준비 트랙
-      (병렬 가능)의 진행 상태를 함께 전달한다.
-    - _should_force_construction_guide가 True면 tool_choice를 강제해서
-      get_construction_guide 호출을 API 레벨에서 보장한다(2026-07-31 -
-      프롬프트 지시만으로는 못 막는다는 게 반복 확인되어, guard_node의
-      사후 검증에 이어 이번엔 애초에 스킵 자체가 불가능하게 만드는 접근).
+    - current_step_directive로 "지금 여기" Step(건축 트랙ᆞ창업 트랙)의
+      미완료ᆞ비잠금 체크리스트를 매 턴 전달한다(2026-08-05, roadmap_model.py의
+      Step1~9를 단일 소스로 재사용 - 연성 유도, 강제 장치는 두지 않는다).
+    - domain_timing_directive로 판정이 끝난 도메인(소방ᆞ간판ᆞ식품위생 등)의
+      실행 시점(지금 가능한지ᆞ공사 완료를 기다려야 하는지)을 함께 전달한다.
 
     2026-07-30: 오래된 턴의 tool_call/ToolMessage를 걷어내는 컨텍스트
     트리밍(_trim_tool_noise)을 먼저 시도했다가 되돌렸다 - 실제 A/B 실험에서
@@ -446,25 +407,16 @@ def agent_node(state: AgentState) -> dict:
     # 확정됐는지"는 그대로 전달된다).
     prefix = [
         SystemMessage(content=build_system_prompt(state)),
-        SystemMessage(content=_roadmap_status_summary(state)),
     ]
-    directive = permit_phase_directive(state)
-    if directive:
-        prefix.append(SystemMessage(content=directive))
+    step_directive = current_step_directive(state)
+    if step_directive:
+        prefix.append(SystemMessage(content=step_directive))
     timing_directive = domain_timing_directive(state)
     if timing_directive:
         prefix.append(SystemMessage(content=timing_directive))
     messages = prefix + _fit_context(prefix, list(state["messages"]), _gemini_quota_exhausted)
 
-    # 공사 안내 강제가 우선 - Step1→2 전환은 그 턴에 반드시 짚어야 하는 지점이라,
-    # 같은 턴에 기록 강제와 겹치면 전환 쪽을 먼저 처리하고 기록은 다음 턴에 맡긴다.
-    if _should_force_construction_guide(state):
-        decision = _ForcedToolDecision(
-            tool="get_construction_guide", domain="construction",
-            reason="step1_done_guide_unshown", trigger="(직전 AI가 Step 2 제안)",
-        )
-    else:
-        decision = _forced_record_tool(state)
+    decision = _forced_record_tool(state)
     force_tool = decision.tool if decision else None
     if decision:
         logger.info(

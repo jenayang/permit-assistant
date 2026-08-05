@@ -101,6 +101,42 @@
       영원히 못 누르던 죽은 체크박스 수정, 세부 항목 16곳을 로컬 개별
       체크(`itemChecks`)로 전환해 정당한 이유 없이 비활성화된 체크박스 제거
 
+## Phase 7: Step1~9 체크리스트 확장 + 대화 안내 재설계 (2026-08-05, 완료)
+
+사용자가 GPT로 정리해온 Step1~9 상세 체크리스트("해야 할 일" 목록)를 반영하고,
+챗봇이 옛 5그룹(Step 0~4) 시절 설계인 `[Step 1-N]`/`[Step 2-N]` 텍스트 마커로
+안내하던 방식을 대화 로그(세션 b846cc22)에서 재확인 - 새 Step1~9 체크리스트와
+번호 체계가 겹쳐 혼란을 줬다. 상세 설계는
+[`docs/superpowers/specs/2026-08-05-step-checklist-guidance-redesign-design.md`](superpowers/specs/2026-08-05-step-checklist-guidance-redesign-design.md) 참고.
+
+- [x] `roadmap_model.py` Step1~9 체크리스트 확장 - 신규 substep 25개(연면적ᆞ
+      층수ᆞ건축주 여부 확인, 현장 방문ᆞ평면도 작성ᆞ소방 검토ᆞ임대차계약서ᆞ
+      건축물대장 사본ᆞ현장사진ᆞ기존 도면, 설계도서 제출ᆞ소유권 증빙ᆞ위임장ᆞ
+      수수료 납부, 시공사 선정ᆞ환기시설 설치, 소방 완공검사ᆞ현장검사ᆞ건축물대장
+      생성 확인, POSᆞ카드단말기ᆞ식자재 발주ᆞ시범 운영 등) + 기존 info 항목 2개
+      (구조 검토ᆞ신청서 작성)를 사용자 체크 가능 필드로 전환
+- [x] `record_task_progress` 스키마 25개 필드 확장(`TASK_PROGRESS_FIELDS` 단일
+      소스 - `/task-progress` API 수동 체크도 자동으로 함께 확장)
+- [x] `Substep.detail`(왜 필요한지ᆞ근거 법령ᆞ준비 서류ᆞ소요 기간) 추가, STEP8
+      (사업자등록 및 위생교육) 핵심 5개 항목에 채움 + `index.html` 아코디언 UI
+- [x] `[Step 1-N]`/`[Step 2-N]` 텍스트 마커 + `disclosed_stage` 페이싱ᆞ
+      `guard.py`의 마커 개수 강제 검증을 전부 제거하고, `roadmap.py`의
+      `current_step_directive()`로 교체 - 매 턴 `compute_roadmap_steps()`가
+      계산한 "지금 여기" Step의 미완료ᆞ비잠금 체크리스트를 그대로 SystemMessage로
+      전달하고, 강제 장치 없이 프롬프트 지시로만 페이싱을 유도(브레인스토밍에서
+      사용자가 명시적으로 선택한 트레이드오프)
+- [x] `project_status.py`의 5그룹 위치 인덱스 참조 갱신(substep 삽입으로 밀린
+      인덱스 5곳 수정) - 이 파일이 Step1~9 substep을 위치로 찾아 쓰는 구조라,
+      체크리스트 항목이 늘어날 때마다 같이 갱신해야 하는 기존 취약점을 직접 확인
+- [x] `guard_node` 위반 7종 → 4종으로 정리(마커 의존 3종 제거, 근거 인용ᆞ
+      건축물대장 조회 누락ᆞ소방ᆞ간판 판정 누락ᆞ수치 정정 누락은 유지)
+- [x] pytest 200 → 271 (신규 substep 유닛 테스트 12개 + `current_step_directive`
+      테스트 4개 추가, 마커 전용 테스트 다수 제거)
+- [x] LLM 스모크 테스트 - 새 지시문으로 실제 응답이 마커 없이 자연스럽게
+      체크리스트를 안내하는지 확인(간헐적으로 Gemini API 자체의 "function call
+      turn" 오류가 발생했으나 동일 입력 재시도 시 정상 응답 - 메시지 구조상
+      이상은 없어 API 쪽 일시적 오류로 판단, 이번 변경과의 인과관계는 낮음)
+
 ## 다음 우선순위 (현재 알려진 한계)
 
 - **로드맵 판정 축의 done/locked 의미 충돌**: 소방시설ᆞ간판ᆞ식품위생처럼

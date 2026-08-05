@@ -61,6 +61,10 @@ class Substep:
     not_applicable: bool = False
     na_reason: str | None = None
     required: bool = False
+    # 상세보기에서 클릭해 펼치는 참고 정보(왜 필요한지ᆞ근거 법령ᆞ준비 서류ᆞ
+    # 소요 기간). 2026-08-05 - STEP8(사업자등록 및 위생교육)의 핵심 항목에만
+    # 채운다. None이면 index.html이 아코디언 없이 지금처럼 렌더링한다.
+    detail: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -175,6 +179,9 @@ def compute_roadmap_steps(state: dict) -> list[Step]:
 
     act_type = case_facts.get("act_type")
     address = case_facts.get("address")
+    ownership = case_facts.get("ownership")
+    current_facility_group = case_facts.get("current_facility_group")
+    desired_facility_group = case_facts.get("desired_facility_group")
     permit_type = _attr(permit_result, "permit_type")
     classified = permit_type is not None
     permit_not_needed = permit_type == "인허가불필요"
@@ -203,9 +210,27 @@ def compute_roadmap_steps(state: dict) -> list[Step]:
             not_applicable=task_progress.get("uses_agency") is False,
             na_reason="직접 진행하기로 하셔서 건축사사무소 선정이 필요 없습니다",
         ),
+        Substep(text="현장 방문", done=bool(task_progress.get("site_visit_done")), field="site_visit_done"),
+        Substep(text="평면도 작성", done=bool(task_progress.get("floor_plan_drafted")), field="floor_plan_drafted"),
         Substep(
             text="구조 검토(2층 이상ᆞ연면적 200㎡ 초과 등 해당 시 - 건축법 시행령 제32조)",
-            done=False, info=True, check_key="design:structure_review",
+            done=bool(task_progress.get("structure_review_done")), field="structure_review_done",
+        ),
+        Substep(text="소방 검토", done=bool(task_progress.get("fire_review_done")), field="fire_review_done"),
+        Substep(
+            text="필요 시 관할 구청ᆞ소방서 등 협의",
+            done=bool(task_progress.get("consultation_done")), field="consultation_done",
+        ),
+        Substep(
+            text="임대차계약서 지참", done=bool(task_progress.get("lease_contract_prepared")),
+            field="lease_contract_prepared", not_applicable=(ownership == "소유자"),
+            na_reason="건축주 본인 소유라 임대차계약서가 필요 없습니다",
+        ),
+        Substep(text="건축물대장 사본 준비", done=bool(task_progress.get("ledger_copy_ready")), field="ledger_copy_ready"),
+        Substep(text="현장사진 촬영", done=bool(task_progress.get("site_photos_taken")), field="site_photos_taken"),
+        Substep(
+            text="기존 도면 준비(있는 경우)", done=bool(task_progress.get("existing_drawings_ready")),
+            field="existing_drawings_ready",
         ),
     ]
     design_docs_substeps.extend(
@@ -220,11 +245,39 @@ def compute_roadmap_steps(state: dict) -> list[Step]:
     # Step 5 · 허가ᆞ신고 신청ᆞ접수
     apply_step_title = f"{permit_type} 신청ᆞ접수" if (permit_type and not permit_not_needed) else "허가ᆞ신고 신청ᆞ접수"
     application_substeps = [
-        Substep(text="신청서 작성 및 서명", done=False, info=True, check_key="apply:form",
-                not_applicable=permit_not_needed, na_reason="이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다"),
-        Substep(text="서류 취합(도면ᆞ대지사용권원 등 준비된 서류 정리)", done=False, info=True,
-                check_key="apply:gather", not_applicable=permit_not_needed,
-                na_reason="이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다"),
+        Substep(
+            text="신청서 작성 및 서명", done=bool(task_progress.get("application_form_prepared")),
+            field="application_form_prepared",
+            not_applicable=permit_not_needed, na_reason="이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다",
+        ),
+        Substep(
+            text="설계도서 제출 준비", done=bool(task_progress.get("design_docs_ready")),
+            field="design_docs_ready",
+            not_applicable=permit_not_needed, na_reason="이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다",
+        ),
+        Substep(
+            text="건축물대장 첨부", done=bool(task_progress.get("ledger_attached")),
+            field="ledger_attached",
+            not_applicable=permit_not_needed, na_reason="이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다",
+        ),
+        Substep(
+            text="소유권 증빙 서류 준비", done=bool(task_progress.get("ownership_proof_ready")),
+            field="ownership_proof_ready",
+            not_applicable=permit_not_needed, na_reason="이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다",
+        ),
+        Substep(
+            text="위임장 준비(대행 신청 시)", done=bool(task_progress.get("poa_prepared")),
+            field="poa_prepared",
+            not_applicable=permit_not_needed or task_progress.get("uses_agency") is False,
+            na_reason=(
+                "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다" if permit_not_needed
+                else "본인이 직접 신청하므로 위임장이 필요 없습니다"
+            ),
+        ),
+        Substep(
+            text="수수료 납부", done=bool(task_progress.get("fee_paid")), field="fee_paid",
+            not_applicable=permit_not_needed, na_reason="이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다",
+        ),
         Substep(
             text="관할 구청 건축과 방문 또는 온라인(세움터) 접수",
             done=bool(task_progress.get("application_submitted")), field="application_submitted",
@@ -255,10 +308,23 @@ def compute_roadmap_steps(state: dict) -> list[Step]:
                     done=bool(act_type), required=True,
                 ),
                 Substep(
-                    text="건축물대장ᆞ용도지역 조회",
-                    done=case_facts.get("land_zone") is not None or case_facts.get("current_facility_group") is not None,
+                    text="건축물대장 조회ᆞ현재 용도ᆞ시설군 확인",
+                    done=current_facility_group is not None,
                     required=True, not_applicable=(act_type == "신축"),
                     na_reason="신축(빈 대지)은 기존 건축물대장이 없어 조회 대상이 아닙니다",
+                ),
+                Substep(text="연면적 확인", done=case_facts.get("size_sqm") is not None),
+                Substep(text="층수 확인", done=case_facts.get("floors") is not None),
+                Substep(text="용도지역 조회", done=case_facts.get("land_zone") is not None),
+                Substep(
+                    text=(f"건축주 여부 확인: {ownership}" if ownership else "건축주 여부 확인(소유ᆞ임차)"),
+                    done=ownership is not None,
+                ),
+                Substep(
+                    text="임차인인 경우 임대차계약서 준비",
+                    done=bool(task_progress.get("lease_contract_prepared")), field="lease_contract_prepared",
+                    not_applicable=(ownership == "소유자"),
+                    na_reason="건축주 본인 소유라 임대차계약서가 필요 없습니다",
                 ),
             ),
         ),
@@ -270,6 +336,12 @@ def compute_roadmap_steps(state: dict) -> list[Step]:
                 Substep(
                     text=(f"판정: {permit_type}" if permit_type else "허가ᆞ신고ᆞ기재변경 대상 판정"),
                     done=classified, required=True,
+                ),
+                Substep(
+                    text="시설군 변경 확인(용도변경 시)",
+                    done=(current_facility_group is not None and desired_facility_group is not None),
+                    not_applicable=(act_type is not None and act_type != "용도변경"),
+                    na_reason="용도변경이 아니라 시설군 변경 확인이 필요 없습니다",
                 ),
                 Substep(
                     text=(
@@ -319,10 +391,18 @@ def compute_roadmap_steps(state: dict) -> list[Step]:
                     na_reason="구조 공사 없이 인테리어만 진행하는 경우라 착공신고 대상이 아닙니다",
                 ),
                 Substep(
+                    text="시공사 선정", done=bool(task_progress.get("contractor_selected")),
+                    field="contractor_selected",
+                ),
+                Substep(
                     text="소방시설공사업자를 통한 소방시설 설치, 완공검사증명서 발급ᆞ보관(소방시설법)",
                     done=False, info=True, check_key="construction:fire_detail",
                     not_applicable=interior_only,
                     na_reason="구조 공사 없이 인테리어만 진행하는 경우라 해당 없습니다",
+                ),
+                Substep(
+                    text="환기시설 설치", done=bool(task_progress.get("ventilation_installed")),
+                    field="ventilation_installed",
                 ),
                 Substep(
                     text="시공 완료 확인", done=bool(task_progress.get("construction")), field="construction",
@@ -346,13 +426,34 @@ def compute_roadmap_steps(state: dict) -> list[Step]:
                     locked=not fire_signage_unlocked(task_progress),
                     lock_reason="공사(시공) 완료 후 설치ᆞ확인 가능",
                 ),
-                Substep(text="사용승인 신청서 제출(관할 구청 건축과ᆞ건축법)", done=False, info=True,
-                        check_key="use_approval:apply_detail"),
+                Substep(
+                    text="소방 완공검사증명서 발급 확인",
+                    done=bool(task_progress.get("fire_completion_inspection_done")),
+                    field="fire_completion_inspection_done",
+                    not_applicable=isinstance(fire_result, list) and len(fire_result) == 0,
+                    na_reason="연면적 기준상 설치 대상 소방시설이 없습니다",
+                    locked=not fire_signage_unlocked(task_progress),
+                    lock_reason="공사(시공) 완료 후 발급 가능",
+                ),
+                Substep(
+                    text="사용승인 신청서 제출(관할 구청 건축과ᆞ건축법)",
+                    done=bool(task_progress.get("use_approval_applied")), field="use_approval_applied",
+                ),
+                Substep(
+                    text="현장검사", done=bool(task_progress.get("site_inspection_done")),
+                    field="site_inspection_done",
+                ),
                 Substep(
                     text="정화조 설치ᆞ처리대상인원 확인, 건축물대장 반영 확인(정화조: 환경부고시 / 건축물대장: 법령 근거 없음ᆞ실무 관행)",
                     done=False, info=True, check_key="use_approval:septic_detail",
                 ),
                 Substep(text="사용승인 완료 확인", done=bool(task_progress.get("use_approval")), field="use_approval"),
+                Substep(
+                    text="건축물대장 생성 확인", done=bool(task_progress.get("building_ledger_created")),
+                    field="building_ledger_created",
+                    locked=not bool(task_progress.get("use_approval")),
+                    lock_reason="사용승인 완료 후 확인 가능",
+                ),
             ),
         ),
         Step(
@@ -367,30 +468,60 @@ def compute_roadmap_steps(state: dict) -> list[Step]:
                     na_reason="식품위생법상 별도 영업신고 대상이 아닙니다",
                     locked=not food_report_unlocked(task_progress),
                     lock_reason="사용승인 완료 후 신고 가능",
+                    detail={
+                        "why": "식품ᆞ음식을 다루는 영업은 식품위생법상 영업 종류별로 신고ᆞ허가가 필요합니다.",
+                        "basis": "식품위생법 시행령 제21조",
+                        "docs": "영업신고서, 시설 평면도, 위생교육필증 등",
+                        "duration": "통상 즉시~수일(관할 보건소 확인 필요)",
+                    },
                 ),
                 Substep(
-                    text="필요서류 준비(임대차계약서 사본, 영업신고증 사본 등 - 부가가치세법ᆞ실무 관행 혼합)",
+                    text="필요서류 준비(임대차계약서 사본, 영업신고증 사본, 소방시설완비증명서(대상 시) 등 - 부가가치세법ᆞ실무 관행 혼합)",
                     done=False, info=True, check_key="bizreg:docs_detail",
                     locked=not business_registration_unlocked(task_progress, food_result, permit_not_needed),
                     lock_reason="임대차계약서ᆞ영업신고 확인 후 진행 가능",
+                    detail={
+                        "why": "사업자등록ᆞ영업신고 접수 시 임대차계약서 등 소유ᆞ사용 권원을 증빙해야 합니다.",
+                        "basis": "부가가치세법ᆞ실무 관행",
+                        "docs": "임대차계약서 사본, 영업신고증 사본, 소방시설완비증명서(대상 시) 등",
+                        "duration": "서류 준비에 통상 수일",
+                    },
                 ),
                 Substep(
                     text="간이ᆞ일반과세자 여부 확인(관할 세무서ᆞ세무사 상담 권장, 부가가치세법)",
                     done=False, info=True, check_key="bizreg:tax_type_detail",
                     locked=not business_registration_unlocked(task_progress, food_result, permit_not_needed),
                     lock_reason="임대차계약서ᆞ영업신고 확인 후 진행 가능",
+                    detail={
+                        "why": "매출 규모ᆞ업종에 따라 간이과세자ᆞ일반과세자 여부가 달라 세금 계산 방식이 달라집니다.",
+                        "basis": "부가가치세법",
+                        "docs": "-",
+                        "duration": "관할 세무서ᆞ세무사 상담 시 즉시 확인 가능",
+                    },
                 ),
                 Substep(
                     text="사업자등록 신청 완료 확인(관할 세무서, 사업 개시일로부터 20일 이내ᆞ부가가치세법)",
                     done=bool(task_progress.get("business_registration")), field="business_registration",
                     locked=not business_registration_unlocked(task_progress, food_result, permit_not_needed),
                     lock_reason="임대차계약서ᆞ영업신고 확인 후 진행 가능",
+                    detail={
+                        "why": "사업을 개시하면 세무서에 사업자등록을 해야 세금계산서 발행ᆞ신고가 가능합니다.",
+                        "basis": "부가가치세법",
+                        "docs": "사업자등록신청서, 임대차계약서, 영업신고증 사본 등",
+                        "duration": "사업 개시일로부터 20일 이내, 접수 후 통상 즉시~수일",
+                    },
                 ),
                 Substep(
                     text="위생교육 이수(사전교육 6시간, 원격교육 가능ᆞ식품위생법 시행령 제21조제8호)",
                     done=bool(task_progress.get("hygiene_education")), field="hygiene_education",
                     not_applicable=food_result in ("해당없음", "신고대상제외"),
                     na_reason="식품위생법상 영업자가 아니라 위생교육 대상이 아닙니다",
+                    detail={
+                        "why": "식품위생법상 영업자는 영업 개시 전 위생교육을 이수해야 합니다.",
+                        "basis": "식품위생법 시행령 제21조제8호",
+                        "docs": "-",
+                        "duration": "사전교육 6시간(원격교육 가능)",
+                    },
                 ),
             ),
         ),
@@ -422,6 +553,16 @@ def compute_roadmap_steps(state: dict) -> list[Step]:
                     locked=not staff_registration_unlocked(task_progress),
                     lock_reason="사업자등록 완료 후 진행 가능",
                 ),
+                Substep(text="POS 설치", done=bool(task_progress.get("pos_installed")), field="pos_installed"),
+                Substep(
+                    text="카드단말기 설치", done=bool(task_progress.get("card_terminal_installed")),
+                    field="card_terminal_installed",
+                ),
+                Substep(
+                    text="식자재 발주", done=bool(task_progress.get("ingredients_ordered")),
+                    field="ingredients_ordered",
+                ),
+                Substep(text="시범 운영", done=bool(task_progress.get("trial_run_done")), field="trial_run_done"),
                 Substep(
                     text="최종 점검(사업자등록증ᆞ영업신고증 게시 등 - 법령 근거 없음ᆞ실무 관행)",
                     done=False, info=True, check_key="opening:final_check_detail",

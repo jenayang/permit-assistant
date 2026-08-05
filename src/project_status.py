@@ -1,6 +1,6 @@
 """Project Status - 창업 로드맵(Step 0~4)의 구조화된 진행 상태를 계산.
 
-agent.py의 _roadmap_status_summary()가 LLM 프롬프트에 넣을 "순차/병렬 트랙"
+roadmap.py의 current_step_directive()가 LLM 프롬프트에 넣을 "지금 여기 단계"
 텍스트를 만드는 것과는 별개다. 이 모듈은 프론트엔드 여러 화면(재접속 요약
 배너, 사이드바 Next Action 위젯, 향후 모바일 카드 등)이 공유해서 쓸 구조화된
 데이터를 계산한다 - "같은 데이터를 다르게 보여주는 문제"라는 원칙(2026-07-28
@@ -30,7 +30,7 @@ current_step 하나만 계산했는데, 실사용 세션(79430043)에서 문제�
 건축 트랙(Step0~2)이 안 끝난 채로 창업 준비 트랙(Step3~4, 식품위생 등)이
 먼저 진행되면(도메인이 실제로 병렬이라 흔한 일), 위젯은 계속 "Step1"이라고만
 말해서 사용자가 지금 위생교육 얘기를 하고 있는데도 진행 상황이 안 맞는
-것처럼 보였다. agent.py의 _roadmap_status_summary()ᆞ프론트 로드맵(시안 A2)은
+것처럼 보였다. roadmap.py의 current_step_directive()ᆞ프론트 로드맵(시안 A2)은
 이미 "건축 트랙(순차)ᆞ창업 준비 트랙(병렬)"으로 나눠서 다루고 있어서, 이
 함수도 같은 기준으로 트랙별 current_step/next_action을 따로 계산하도록
 맞췄다 - 단일 current_step 필드는 없앴다(두 트랙 상태를 하나로 뭉개면 다시
@@ -43,7 +43,7 @@ from src.roadmap_model import Step, compute_roadmap_steps, roadmap_steps_to_dict
 STEP_LABELS = ["건축 유형 확인", "건축 인허가", "공사", "창업 행정", "오픈 준비"]
 
 # 건축 트랙(Step 0~2, 실제로 순서가 있는 절차)과 창업 준비 트랙(Step 3~4,
-# 인허가 트랙과 무관하게 병렬 진행 가능) - agent.py의 _roadmap_status_summary()
+# 인허가 트랙과 무관하게 병렬 진행 가능) - roadmap.py의 current_step_directive()
 # 와 동일한 구분 기준.
 _CONSTRUCTION_TRACK_INDICES = (0, 1, 2)
 _STARTUP_TRACK_INDICES = (3, 4)
@@ -73,12 +73,12 @@ def _step_substeps(roadmap_steps: list[Step]) -> list[list[tuple[str, bool]]]:
         [
             ("사전 검토", s[3].substeps[-1].done),  # Step4 마지막 substep(사전 검토 확인 완료)
             ("설계ᆞ서류 준비", s[2].substeps[-1].done),  # Step3 마지막 substep(설계ᆞ서류 준비 완료 확인)
-            ("신청ᆞ접수", s[4].substeps[2].done),  # Step5 substep[2](접수)
+            ("신청ᆞ접수", s[4].substeps[6].done),  # Step5 substep[6](관할 구청 방문ᆞ접수)
         ],
         [
             ("착공신고", done_or_na(5, 1)),  # Step6 substep[1](착공신고 완료 확인)
-            ("공사(시공)", done_or_na(5, 3)),  # Step6 substep[3](시공 완료 확인)
-            ("사용승인", s[6].substeps[3].done),  # Step7 substep[3](사용승인 완료 확인)
+            ("공사(시공)", done_or_na(5, 5)),  # Step6 substep[5](시공 완료 확인)
+            ("사용승인", s[6].substeps[5].done),  # Step7 substep[5](사용승인 완료 확인)
         ],
         [
             ("식품위생 영업신고 확인", s[7].substeps[0].done),  # Step8 substep[0]
@@ -87,12 +87,12 @@ def _step_substeps(roadmap_steps: list[Step]) -> list[list[tuple[str, bool]]]:
             ("위생교육 이수", s[7].substeps[4].done),  # Step8 substep[4]
         ],
         [
-            ("인테리어ᆞ장비 설치", s[5].substeps[4].done),  # Step6 substep[4]
+            ("인테리어ᆞ장비 설치", s[5].substeps[6].done),  # Step6 substep[6]
             # 직원을 안 두는 1인ᆞ가족 운영 사업자는 4대보험 가입 신고 자체가
             # 대상이 아니다 - roadmap_model.py의 이 substep은 이미
             # hires_staff=False 우회를 done에 반영해 계산한다.
             ("직원 등록(4대보험 가입)", s[8].substeps[2].done),  # Step9 substep[2]
-            ("영업 시작", s[8].substeps[4].done),  # Step9 substep[4]
+            ("영업 시작", s[8].substeps[8].done),  # Step9 substep[8]
         ],
     ]
 

@@ -35,6 +35,17 @@ TASK_PROGRESS_FIELDS: list[str] = [
     "business_registration", "hygiene_education",
     "interior_equipment", "staff_registration", "opened",
     "hires_staff", "uses_agency", "architect_selected", "interior_only",
+    # 2026-08-05 - Step1~9 체크리스트 확장(사용자 GPT 피드백 반영)으로 추가된
+    # 25개 필드. 전부 사용자가 직접 완료를 밝히거나(챗봇이 대화로 확인해 기록)
+    # 상세보기 화면에서 직접 체크박스를 클릭해도(수동 기록) 채워지는 이중
+    # 경로다 - 위 필드들과 동일한 성격.
+    "lease_contract_prepared", "ledger_copy_ready", "site_photos_taken", "existing_drawings_ready",
+    "site_visit_done", "floor_plan_drafted", "structure_review_done", "fire_review_done", "consultation_done",
+    "application_form_prepared", "design_docs_ready", "ledger_attached", "ownership_proof_ready",
+    "poa_prepared", "fee_paid",
+    "contractor_selected", "ventilation_installed",
+    "fire_completion_inspection_done", "use_approval_applied", "site_inspection_done", "building_ledger_created",
+    "pos_installed", "card_terminal_installed", "ingredients_ordered", "trial_run_done",
 ]
 
 
@@ -55,6 +66,31 @@ def record_task_progress(
     uses_agency: bool | None = None,
     architect_selected: bool | None = None,
     interior_only: bool | None = None,
+    lease_contract_prepared: bool | None = None,
+    ledger_copy_ready: bool | None = None,
+    site_photos_taken: bool | None = None,
+    existing_drawings_ready: bool | None = None,
+    site_visit_done: bool | None = None,
+    floor_plan_drafted: bool | None = None,
+    structure_review_done: bool | None = None,
+    fire_review_done: bool | None = None,
+    consultation_done: bool | None = None,
+    application_form_prepared: bool | None = None,
+    design_docs_ready: bool | None = None,
+    ledger_attached: bool | None = None,
+    ownership_proof_ready: bool | None = None,
+    poa_prepared: bool | None = None,
+    fee_paid: bool | None = None,
+    contractor_selected: bool | None = None,
+    ventilation_installed: bool | None = None,
+    fire_completion_inspection_done: bool | None = None,
+    use_approval_applied: bool | None = None,
+    site_inspection_done: bool | None = None,
+    building_ledger_created: bool | None = None,
+    pos_installed: bool | None = None,
+    card_terminal_installed: bool | None = None,
+    ingredients_ordered: bool | None = None,
+    trial_run_done: bool | None = None,
 ) -> str:
     """사용자가 실제로 완료했다고 명시적으로 말한 창업 절차 항목을 기록하세요.
 
@@ -105,6 +141,31 @@ def record_task_progress(
             도움을 받는지(True) 직접 진행하는지(False)
         architect_selected: 건축사사무소(또는 대행업체)를 실제로 선정 완료했는지
         interior_only: 구조 공사(신축ᆞ증축ᆞ대수선 등) 없이 인테리어만 진행하는지
+        lease_contract_prepared: 임대차계약서를 준비(지참)했는지
+        ledger_copy_ready: 건축물대장 사본을 준비했는지
+        site_photos_taken: 현장사진을 촬영했는지
+        existing_drawings_ready: 기존 도면을 준비했는지(있는 경우)
+        site_visit_done: 건축사사무소의 현장 방문이 끝났는지
+        floor_plan_drafted: 평면도 작성이 끝났는지
+        structure_review_done: 구조 검토가 끝났는지
+        fire_review_done: 소방 검토가 끝났는지
+        consultation_done: 필요 시 관할 구청ᆞ소방서 등 협의가 끝났는지
+        application_form_prepared: 신청서 작성 및 서명이 끝났는지
+        design_docs_ready: 설계도서 제출 준비가 끝났는지
+        ledger_attached: 건축물대장 첨부가 끝났는지
+        ownership_proof_ready: 소유권 증빙 서류 준비가 끝났는지
+        poa_prepared: 위임장 준비(대행 신청 시)가 끝났는지
+        fee_paid: 수수료 납부가 끝났는지
+        contractor_selected: 시공사 선정이 끝났는지
+        ventilation_installed: 환기시설 설치가 끝났는지
+        fire_completion_inspection_done: 소방 완공검사증명서 발급 확인이 끝났는지
+        use_approval_applied: 사용승인 신청서 제출이 끝났는지
+        site_inspection_done: 현장검사가 끝났는지
+        building_ledger_created: 건축물대장 생성 확인이 끝났는지
+        pos_installed: POS 설치가 끝났는지
+        card_terminal_installed: 카드단말기 설치가 끝났는지
+        ingredients_ordered: 식자재 발주가 끝났는지
+        trial_run_done: 시범 운영이 끝났는지
     """
     logger.info("[도구] record_task_progress(%r)", {
         k: v for k, v in locals().items() if v is not None
