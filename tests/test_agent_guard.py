@@ -18,6 +18,7 @@ from src.roadmap import (
     _max_allowed_stage,
     _mentioned_construction_stages,
     _pending_stage2_confirmation,
+    _roadmap_status_summary,
     _should_force_construction_guide,
     domain_timing_directive,
     permit_phase_directive,
@@ -758,6 +759,22 @@ def test_domain_timing_directive_food_report_unlocked_after_use_approval():
     state["task_progress"] = {"use_approval": True}
     directive = domain_timing_directive(state)
     assert "지금 바로" in directive and "신고 접수를 진행" in directive
+
+
+# 2026-08-05 회귀 테스트 - "로드맵 시작이 아직도 창업 행정 단계를 병렬로
+# 안내해줌" 신고. Step0(행위 유형)조차 안 끝난 시점엔 "창업 준비 트랙"
+# 문단 자체를 아예 안 보여줘야 한다(전엔 무조건 보여줘서 LLM이 대화 첫
+# 턴부터 그 얘기를 꺼낼 근거로 삼을 수 있었음).
+def test_roadmap_status_summary_omits_startup_track_before_step0():
+    state = {"case_facts": {}, "permit_result": None, "task_progress": {}}
+    summary = _roadmap_status_summary(state)
+    assert "창업 준비 트랙" not in summary
+
+
+def test_roadmap_status_summary_includes_startup_track_after_step0():
+    state = {"case_facts": {"act_type": "용도변경"}, "permit_result": None, "task_progress": {}}
+    summary = _roadmap_status_summary(state)
+    assert "창업 준비 트랙" in summary
 
 
 def test_correction_omission_ignores_without_prior_numeric_facts():

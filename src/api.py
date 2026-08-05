@@ -159,6 +159,9 @@ class FactsSubmitResponse(BaseModel):
     food_result: Optional[str] = None
     fire_result: Optional[list[str]] = None
     signage_result: Optional[str] = None
+    # 주소 조회 버튼이 팝업으로 보여줄 lookup_building_ledger 원문 - 주소를
+    # 안 보냈으면 None(2026-08-05, intake.html 재구성).
+    building_ledger_text: Optional[str] = None
     project_status: dict
 
 

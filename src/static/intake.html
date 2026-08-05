@@ -54,28 +54,104 @@
   .area-input-row { display: flex; gap: 8px; }
   .area-input-row input { flex: 1; }
   .area-input-row select { padding: 10px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 14px; }
+
+  /* 업종 선택 - 참조 이미지(image9)처럼 균등폭 컬럼이 아니라 텍스트 길이에
+     맞는 알약(pill) 버튼이 줄바꿈되며 나열되는 형태(2026-08-05). 기존
+     .toggle(균등폭 2분할)과 시각적으로 구분하기 위해 새 클래스로 분리. */
+  .chip-group { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip-group button {
+    padding: 9px 16px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13.5px;
+    cursor: pointer;
+  }
+  .chip-group button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  #addressLookupBtn { margin-top: 10px; }
+  #bizTypeOther { margin-top: 10px; display: none; }
+
+  /* 주소 조회 결과 팝업 - VWorld/건축HUB 조회 결과를 그 자리에서 바로
+     보여준다(2026-08-05, "팝업으로 건축물 조회 결과 보여주기"). */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .45);
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 50;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal-card {
+    background: var(--panel);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    max-width: 440px;
+    width: 100%;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 20px;
+  }
+  .modal-card h3 { font-size: 15px; margin: 0 0 10px; }
+  .modal-card pre {
+    white-space: pre-wrap;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.6;
+    margin: 0;
+    color: var(--text);
+  }
+  .modal-card .modal-note {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    background: var(--surface-2);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-top: 4px;
+  }
+  .modal-close-btn {
+    margin-top: 16px;
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    font-size: 13.5px;
+    background: var(--accent);
+    color: var(--accent-text);
+    padding: 9px 16px;
+    font-weight: 600;
+  }
 </style>
 </head>
 <body>
 <div class="layout">
   <h1>로드맵 만들기</h1>
-  <div class="sub" id="stepHint">어떤 업종을 창업하시나요?</div>
+  <div class="sub" id="stepHint">사업 예정지 주소와 업종을 알려주세요.</div>
 
   <div class="step active" id="step1">
     <div class="card">
       <div class="field">
-        <label for="bizType">업종</label>
-        <select id="bizType">
-          <option value="카페">카페</option>
-          <option value="음식점">음식점</option>
-          <option value="사무실">사무실</option>
-          <option value="기타">기타</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="address">창업하고자 하는 주소</label>
-        <input id="address" placeholder="예: 서울특별시 강남구 테헤란로 123">
+        <label for="address">사업 예정지 주소</label>
+        <input id="address" placeholder="도로명 주소 입력 (예: 서울특별시 강남구 테헤란로 123)">
+        <div class="field-hint">주소를 입력하면 건축물 용도ᆞ연면적 등 기본 현황을 공공데이터(VWorld)로 조회해 팝업으로 보여드립니다. 신축(빈 대지) 예정이라 조회 결과가 없어도 정상이니 그대로 진행하시면 됩니다.</div>
+        <button class="primary-btn" id="addressLookupBtn" type="button">주소 조회 및 건축물 확인</button>
         <div id="lookupStatus"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="field">
+        <label>업종</label>
+        <div class="chip-group" id="bizTypeGroup">
+          <button type="button" data-value="카페">카페ᆞ음료</button>
+          <button type="button" data-value="음식점">음식점</button>
+          <button type="button" data-value="소매점">소매점</button>
+          <button type="button" data-value="사무실">사무실</button>
+          <button type="button" data-value="주거 리모델링">주거 리모델링</button>
+          <button type="button" data-value="기타">기타</button>
+        </div>
+        <input id="bizTypeOther" placeholder="업종을 입력해주세요">
       </div>
     </div>
     <button class="primary-btn" id="nextBtn" type="button">다음</button>
@@ -151,6 +227,14 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="ledgerModal">
+  <div class="modal-card">
+    <h3 id="ledgerModalTitle">건축물 조회 결과</h3>
+    <div id="ledgerModalBody"></div>
+    <button class="modal-close-btn" id="ledgerModalCloseBtn" type="button">확인</button>
+  </div>
+</div>
+
 <script>
   const API_BASE = "";
 
@@ -168,13 +252,20 @@
   // 업종 → 희망 시설군(FACILITY_GROUPS, permit.py). 법령 해석이 필요 없는
   // 명확한 매핑만 넣는다 - 카페ᆞ음식점은 "제2종근린생활시설 중 대부분"이라고
   // FACILITY_GROUPS 주석에 이미 명시돼 있고, 사무실은 "업무시설"로 명확하다.
-  // 소매점처럼 면적ᆞ업태에 따라 시설군이 갈리는 애매한 업종은 넣지 않는다
-  // (여기 없는 업종=기타는 건축 인허가 판정을 채팅으로 넘긴다).
+  // 소매점ᆞ주거 리모델링처럼 면적ᆞ업태에 따라 시설군이 갈리는 애매한 업종은
+  // 넣지 않는다(여기 없는 업종은 건축 인허가 판정을 채팅으로 넘긴다).
   const FACILITY_GROUP_BY_BIZTYPE = { "카페": 7, "음식점": 7, "사무실": 8 };
+  // 식품위생법 세부 질문(food-block)을 항상 보여줄 확정 식품 업종.
   const FOOD_BIZTYPES = new Set(["카페", "음식점"]);
+  // 식품 취급 여부가 업종만으로는 안 갈리는 업종 - "음식ᆞ식품을 취급하는
+  // 업종인가요?"를 먼저 물어본 뒤 답에 따라 food-block을 보여준다(2026-08-05,
+  // 업종 버튼에 "소매점" 추가하면서 "기타"와 같은 처리로 편입 - 편의점 등
+  // 소매점도 식품을 팔 수 있어 "기타"처럼 애매한 업종으로 취급).
+  const ASK_FOOD_BIZTYPES = new Set(["소매점", "기타"]);
 
   const answers = {}; // 토글 버튼 선택값 저장 (key -> true/false)
   let lookupCaseFacts = {}; // 1단계 주소 자동조회로 받은 case_facts(land_zone/current_facility_group)
+  let selectedBizType = null; // 업종 버튼그룹 선택값(내부 키 - "카페"ᆞ"음식점"ᆞ"소매점"ᆞ"사무실"ᆞ"주거 리모델링"ᆞ"기타")
 
   // 영업장 면적 ㎡ᆞ평 변환(1평=3.305785㎡, 한국국토정보공사 고시 환산율) - 사용자가
   // 어느 단위로 입력해도 제출 시 store_area_sqm(㎡)로 변환해서 보낸다.
@@ -204,32 +295,82 @@
     });
   });
 
-  document.getElementById("nextBtn").addEventListener("click", async () => {
-    const bizType = document.getElementById("bizType").value;
+  // 업종 버튼그룹(select 대신, 2026-08-05) - "기타" 선택 시에만 자유 입력란을
+  // 보여준다. 내부 판정 로직(FACILITY_GROUP_BY_BIZTYPE 등)은 버튼의
+  // data-value(고정 6종)만 보고, 실제 화면ᆞ저장용 라벨은 getBizTypeLabel()이
+  // "기타"일 때 사용자가 입력한 텍스트로 대체한다.
+  const bizTypeOtherInput = document.getElementById("bizTypeOther");
+  document.querySelectorAll("#bizTypeGroup button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#bizTypeGroup button").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      selectedBizType = btn.dataset.value;
+      bizTypeOtherInput.style.display = selectedBizType === "기타" ? "block" : "none";
+    });
+  });
+  function getBizTypeLabel() {
+    if (selectedBizType === "기타" && bizTypeOtherInput.value.trim()) return bizTypeOtherInput.value.trim();
+    return selectedBizType;
+  }
+
+  // 주소 조회 버튼 - "다음"과 분리된 독립 동작(2026-08-05, "주소 조회 및
+  // 건축물 확인 버튼 누르기 → 팝업으로 결과"). /facts에 주소만 보내면
+  // case_facts 자동조회 + 건축물대장 원문(building_ledger_text)까지 같이
+  // 온다 - 새 엔드포인트를 만들지 않고 기존 /facts를 재사용.
+  const ledgerModal = document.getElementById("ledgerModal");
+  const ledgerModalBody = document.getElementById("ledgerModalBody");
+  function openLedgerModal(html) {
+    ledgerModalBody.innerHTML = html;
+    ledgerModal.classList.add("active");
+  }
+  document.getElementById("ledgerModalCloseBtn").addEventListener("click", () => {
+    ledgerModal.classList.remove("active");
+  });
+  document.getElementById("addressLookupBtn").addEventListener("click", async () => {
     const address = document.getElementById("address").value.trim();
     const statusEl = document.getElementById("lookupStatus");
-    const nextBtn = document.getElementById("nextBtn");
-
-    if (address) {
-      nextBtn.disabled = true;
-      statusEl.textContent = "주소 조회 중...";
-      try {
-        const res = await fetch(`${API_BASE}/facts`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: getUserId(), address }),
-        });
-        if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
-        const data = await res.json();
-        lookupCaseFacts = data.case_facts || {};
-        statusEl.textContent = lookupCaseFacts.current_facility_group
-          ? "주소 조회 완료 - 기존 건축물 정보를 확인했습니다."
-          : "자동조회 결과가 없습니다 - 계속 진행해도 됩니다.";
-      } catch (e) {
-        statusEl.textContent = `주소 조회 실패(계속 진행 가능): ${e.message}`;
-      } finally {
-        nextBtn.disabled = false;
+    const btn = document.getElementById("addressLookupBtn");
+    if (!address) {
+      statusEl.textContent = "주소를 먼저 입력해주세요.";
+      return;
+    }
+    btn.disabled = true;
+    statusEl.textContent = "주소 조회 중...";
+    try {
+      const res = await fetch(`${API_BASE}/facts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: getUserId(), address }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+      const data = await res.json();
+      lookupCaseFacts = data.case_facts || {};
+      const ledgerText = data.building_ledger_text || "";
+      // lookup_building_ledger(site.py)는 대장이 없으면 "등록된 건축물대장이
+      // 없습니다..."라는 문장을 그대로 돌려준다 - 신축(빈 대지) 예정이면
+      // 정상이므로, 이 경우는 실패가 아니라 안내로 표시한다.
+      if (ledgerText.includes("없습니다")) {
+        statusEl.textContent = "자동조회 결과가 없습니다 - 신축 등으로 계속 진행해도 됩니다.";
+        openLedgerModal(`<div class="modal-note">${ledgerText}<br><br>신축(빈 대지)에 새로 지으시는 경우라면 정상입니다 - 기존 건축물 정보가 없을 뿐이니 그대로 다음 단계로 진행해주세요.</div>`);
+      } else if (ledgerText) {
+        statusEl.textContent = "주소 조회 완료 - 기존 건축물 정보를 확인했습니다.";
+        openLedgerModal(`<pre>${ledgerText}</pre>`);
+      } else {
+        statusEl.textContent = "건축물대장 자동 조회가 설정되어 있지 않습니다 - 계속 진행해도 됩니다.";
+        openLedgerModal(`<div class="modal-note">${ledgerText || "건축물 조회 결과를 가져오지 못했습니다. 계속 진행해주세요."}</div>`);
       }
+    } catch (e) {
+      statusEl.textContent = `주소 조회 실패(계속 진행 가능): ${e.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById("nextBtn").addEventListener("click", () => {
+    const bizType = selectedBizType;
+    if (!bizType) {
+      document.getElementById("lookupStatus").textContent = "업종을 먼저 선택해주세요.";
+      return;
     }
 
     // 업종에 따라 2단계에서 보여줄 항목을 정한다.
@@ -238,18 +379,18 @@
     if (FOOD_BIZTYPES.has(bizType)) {
       foodBlock.classList.add("active");
       bizTypeUnknownField.style.display = "none";
-    } else if (bizType === "기타") {
+    } else if (ASK_FOOD_BIZTYPES.has(bizType)) {
       bizTypeUnknownField.style.display = "";
       foodBlock.classList.remove("active");
-      // "기타" 업종은 음식 취급 여부를 직접 물어본 뒤 그 답에 따라 식품 세부
-      // 질문을 보여준다.
+      // 소매점ᆞ기타 업종은 음식 취급 여부를 직접 물어본 뒤 그 답에 따라
+      // 식품 세부 질문을 보여준다.
       document.querySelector('.toggle[data-key="serves_food"]').querySelectorAll("button").forEach((btn) => {
         btn.addEventListener("click", () => {
           foodBlock.classList.toggle("active", btn.dataset.value === "true");
         });
       });
     } else {
-      // 사무실 등 비식품 업종 - 식품 질문 자체를 생략(자동으로 serves_food=false).
+      // 사무실ᆞ주거 리모델링 등 비식품 업종 - 식품 질문 자체를 생략(자동으로 serves_food=false).
       foodBlock.classList.remove("active");
       bizTypeUnknownField.style.display = "none";
     }
@@ -266,7 +407,7 @@
     btn.disabled = true;
     btn.textContent = "판정 중...";
 
-    const bizType = document.getElementById("bizType").value;
+    const bizType = selectedBizType;
     const body = { user_id: getUserId() };
 
     // 건축 인허가: "기존 건물 그대로" + 희망 시설군을 아는 업종일 때만
@@ -278,10 +419,11 @@
       body.case_facts = { act_type: "용도변경", desired_facility_group: desired };
     }
 
-    // 식품위생: 업종이 비식품(사무실 등)이면 serves_food=false를 확정해서
-    // 보낸다(법령 해석이 아니라 업종 자체가 식품과 무관하다는 사실 판단).
+    // 식품위생: 업종이 비식품(사무실ᆞ주거 리모델링)이면 serves_food=false를
+    // 확정해서 보낸다(법령 해석이 아니라 업종 자체가 식품과 무관하다는 사실
+    // 판단). 소매점ᆞ기타는 애매해서 2단계에서 직접 물어본 답(answers.serves_food)을 따른다.
     const foodBlockActive = document.getElementById("foodBlock").classList.contains("active");
-    if (FOOD_BIZTYPES.has(bizType) || (bizType === "기타" && answers.serves_food === true)) {
+    if (FOOD_BIZTYPES.has(bizType) || (ASK_FOOD_BIZTYPES.has(bizType) && answers.serves_food === true)) {
       body.food_facts = { serves_food: true };
       if (foodBlockActive) {
         for (const k of ["manufactures_or_cooks", "primarily_bakery", "serves_alcohol"]) {
@@ -294,9 +436,9 @@
             : Number(area);
         }
       }
-    } else if (bizType === "기타" && answers.serves_food === false) {
+    } else if (ASK_FOOD_BIZTYPES.has(bizType) && answers.serves_food === false) {
       body.food_facts = { serves_food: false };
-    } else if (bizType !== "기타" && !FOOD_BIZTYPES.has(bizType)) {
+    } else if (!ASK_FOOD_BIZTYPES.has(bizType) && !FOOD_BIZTYPES.has(bizType)) {
       body.food_facts = { serves_food: false };
     }
 
@@ -335,7 +477,9 @@
     const address = document.getElementById("address").value.trim();
     if (address) localStorage.setItem("permit_assistant_address", address);
     // index.html의 "내 로드맵 요약" 카드가 업종을 보여줄 수 있도록 저장.
-    localStorage.setItem("permit_assistant_biz_type", document.getElementById("bizType").value);
+    // "기타" 선택 + 직접 입력한 텍스트가 있으면 그 텍스트를 그대로 저장한다
+    // (getBizTypeLabel() - 2026-08-05, 업종 버튼그룹 재구성).
+    localStorage.setItem("permit_assistant_biz_type", getBizTypeLabel());
   }
 
   function renderResult(data) {

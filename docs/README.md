@@ -14,6 +14,7 @@
 | `dev_log_YYYY-MM-DD.md` | 그날 세션의 스냅샷(시점 기록, 이후 갱신 안 함) | 특정 날짜에 무슨 일이 있었는지 |
 | [`idea_notes.md`](idea_notes.md) | 외부 자료 리뷰에서 나온 아이디어(대부분 미착수) | 새 레포ᆞ자료를 검토할 때 |
 | [`use_cases.md`](use_cases.md) / [`test_scenarios.md`](test_scenarios.md) | 사용자 사례ᆞ판정 시나리오 | 규칙 엔진을 고칠 때 |
+| [`roadmap_step_checklist.md`](roadmap_step_checklist.md) | 로드맵 Step1~9 각 단계 "해야 할 일" 콘텐츠 검토용 정리 | 로드맵 체크리스트 내용을 고칠 때 |
 | [`data_sources.md`](data_sources.md) | 법령ᆞ조례 출처 | 데이터를 추가할 때 |
 | [`project_portfolio.md`](project_portfolio.md) | 취업용 회고(독자가 다름) | 포트폴리오 정리 |
 

@@ -17,8 +17,13 @@
     --error: #dc2626;
     /* 로드맵 "완료" 상태색 - 원래 초록(#1f9d55)이었는데 전체 팔레트를 파란
        계열로 통일해달라는 요청(2026-07-28)으로 --accent(진행중)보다 짙은
-       남색으로 교체. 완료ᆞ진행중ᆞ대기를 색상(hue)이 아니라 명도로 구분한다. */
+       남색으로 교체했었다. 2026-08-05: 상태 배지를 한 차례 전부 동일 색으로
+       통일했다가("모든 상태 색깔 통일"), 곧이어 "스텝별로 다른 색으로,
+       진행중이 제일 잘 보이게"로 요청이 뒤집혀 다시 색상 차별화로
+       전환했다 - 완료는 파랑, 대기는 회색(--text-muted), 진행중만 색상
+       (hue) 자체를 다르게(주황) 줘서 가장 눈에 띄게 한다. */
     --done: #1e40af;
+    --in-progress: #d97706;
     --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
     --shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 4px 14px rgba(16, 24, 40, .05);
     --surface-2: #eef1f5;
@@ -286,6 +291,15 @@
     border-radius: 999px;
     padding: 2px 10px;
   }
+  /* 상세 화면 상태 배지도 목록과 같은 색상 차별화 규칙을 쓴다(아래
+     .roadmap-step-status-text 색상 규칙과 동일 원칙, 2026-08-05). */
+  .step-detail-status.done { color: var(--done); border-color: color-mix(in srgb, var(--done) 45%, var(--border)); }
+  .step-detail-status.current {
+    color: var(--in-progress);
+    border-color: var(--in-progress);
+    background: color-mix(in srgb, var(--in-progress) 14%, transparent);
+    font-weight: 700;
+  }
   .step-detail-meta {
     font-size: 13px;
     color: var(--text-muted);
@@ -353,10 +367,11 @@
     font-weight: 600;
   }
   .roadmap-step-title { flex: 1; min-width: 0; }
-  /* 대기ᆞ진행중ᆞ완료 상태를 색으로 구분하던 걸 원형 테두리 배지 하나로
-     통일(2026-08-05 피드백: "모든 상태는 동일하게 색깔 통일, 상태는 동그라미
-     테두리 넣기") - 상세 화면의 .step-detail-status와 같은 pill 모양으로
-     맞춰 두 화면이 같은 시각 언어를 쓰게 한다. */
+  /* 상태 배지 - 2026-08-05에 "모든 상태 동일 색"으로 통일했다가, 바로
+     이어진 피드백("스텝별로 다른 색으로, 진행중이 제일 잘 보이게")으로
+     다시 색상 차별화로 전환. 원형 테두리 pill 모양(2026-07-28 이후 유지)은
+     그대로 두고 상태별 색만 다시 나눈다 - 완료(파랑)ᆞ대기(회색, 기본값)ᆞ
+     진행중(주황, 배경까지 채워 가장 눈에 띄게). */
   .roadmap-step-status-text {
     font-size: 11.5px;
     font-weight: 600;
@@ -365,6 +380,16 @@
     border-radius: 999px;
     padding: 2px 10px;
     flex-shrink: 0;
+  }
+  .roadmap-step.done .roadmap-step-status-text {
+    color: var(--done);
+    border-color: color-mix(in srgb, var(--done) 45%, var(--border));
+  }
+  .roadmap-step.current .roadmap-step-status-text {
+    color: var(--in-progress);
+    border-color: var(--in-progress);
+    background: color-mix(in srgb, var(--in-progress) 14%, transparent);
+    font-weight: 700;
   }
   .roadmap-step-subtitle {
     font-size: 12px;
@@ -685,6 +710,7 @@
       --text-muted: #9aa0a8;
       --bot-bubble: #2a2c32;
       --done: #60a5fa;
+      --in-progress: #fbbf24;
       --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 18px rgba(0, 0, 0, .35);
       --surface-2: #26282f;
     }
@@ -1451,7 +1477,11 @@
       const isCurrent = idx === currentIdx && !allDone;
 
       const stepEl = document.createElement("div");
-      stepEl.className = "roadmap-step" + (allDone ? " done" : "") + (isCurrent ? " current" : "");
+      // "진행 중" 텍스트가 뜨는 조건(isCurrent || hasProgress)과 .current
+      // 클래스(색상 담당)가 어긋나면 안 된다 - 순서를 벗어나 먼저 일부
+      // 체크된 스텝도 "진행 중" 색으로 보여야 한다(2026-08-05, 상태 색상
+      // 차별화로 전환하며 함께 맞춤).
+      stepEl.className = "roadmap-step" + (allDone ? " done" : "") + ((isCurrent || hasProgress) && !allDone ? " current" : "");
       stepEl.addEventListener("click", () => showStepDetail(idx, step.title));
 
       const head = document.createElement("div");
@@ -1953,9 +1983,12 @@
     const hasProgress = doneCount > 0 && !allDone;
     const isCurrent = idx === lastRoadmapCurrentIdx && !allDone;
     const statusWord = allDone ? "완료" : (isCurrent || hasProgress) ? "진행 중" : "대기";
+    // 목록 화면의 .roadmap-step.done/.current와 같은 색상 규칙을 쓰기 위해
+    // 같은 이름의 클래스를 붙인다(2026-08-05, 상태 색상 차별화).
+    const statusClass = allDone ? "done" : (isCurrent || hasProgress) ? "current" : "";
     // "N단계 · 제목" 형식(참조 이미지의 상세 화면 표기) - 목록 카드는
     // "STEP N ᆞ 제목"(영문)을 쓰지만 상세 화면은 원래 한글 표기를 유지한다.
-    stepDetailTitleEl.innerHTML = `${idx + 1}단계 ᆞ ${title} <span class="step-detail-status">${statusWord}</span>`;
+    stepDetailTitleEl.innerHTML = `${idx + 1}단계 ᆞ ${title} <span class="step-detail-status ${statusClass}">${statusWord}</span>`;
 
     const agencies = (latestPermitResult?.related_agencies?.length
       ? latestPermitResult.related_agencies

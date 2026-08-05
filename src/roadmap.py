@@ -207,7 +207,7 @@ def _roadmap_status_summary(state: "AgentState") -> str:
             return "진행중"
         return "미착수"
 
-    return (
+    summary = (
         "[로드맵 상태]\n"
         "건축 인허가 트랙(순차 진행 - 앞 단계가 '완료'가 아니면 다음 단계 내용을 "
         "먼저 꺼내지 마세요. 이번 턴 사용자 말이 다음 단계 얘기여도, 앞 단계가 "
@@ -216,6 +216,21 @@ def _roadmap_status_summary(state: "AgentState") -> str:
         f"- Step 1(인허가 판정): {_status(step1_done, step0_done)}\n"
         f"- Step 2(공사: 착공신고ᆞ시공ᆞ사용승인, 사용자가 직접 완료를 "
         f"말해야 확인됨): {_status(step2_done, step2_started)}\n"
+    )
+
+    # 2026-08-05: 이 문단(창업 준비 트랙 안내)이 무조건(진행 상황과 무관하게)
+    # 매 턴 주입되던 게 실사용 버그의 원인이었다 - "사용자가 특정 항목을 직접
+    # 물으면 그건 바로 안내해도 됩니다"라는 문구가 대화 첫 턴(Step0조차 시작
+    # 안 한 상태)에도 그대로 적용돼, LLM이 아직 아무것도 확정 안 된 채로
+    # "창업 준비 트랙은 병렬로..."를 먼저 꺼내는 사례가 신고됨(사용자 피드백:
+    # "로드맵 시작이 아직도 창업 행정 단계를 병렬로 안내해줌"). Step 0(행위
+    # 유형 확인)조차 안 끝난 시점엔 창업 준비 얘기를 꺼낼 근거 자체가 없으니
+    # (업종도 모르는데 식품위생ᆞ간판을 안내할 수 없음), 이 문단 자체를
+    # step0_done 이후로 미룬다.
+    if not step0_done:
+        return summary
+
+    summary += (
         "창업 준비 트랙(Step 3: 식품위생ᆞ소방ᆞ간판ᆞ사업자등록ᆞ위생교육, "
         "Step 4: 오픈 준비) - 인허가 트랙과 병렬이지만 '아무거나 지금'이 아니라 "
         "실무 순서에 맞춰 안내하세요:\n"
@@ -237,6 +252,7 @@ def _roadmap_status_summary(state: "AgentState") -> str:
         "위생교육) 중 하나일 뿐입니다. 사업자등록 완료만으로 창업 준비가 끝난 것처럼 답하지 "
         "말고, 아직 미완료인 나머지 Step 3 항목을 함께 짚어주세요."
     )
+    return summary
 
 
 def permit_phase_directive(state: "AgentState") -> str | None:

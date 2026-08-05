@@ -236,6 +236,7 @@ def submit_facts(
 
     # 주소가 있으면 기존 site.py 조회 도구를 그대로 재사용해 용도지역ᆞ
     # 건축물대장을 자동으로 채운다(사용자가 이미 입력한 값은 덮지 않음).
+    ledger_text: Optional[str] = None
     if address:
         zone = get_land_zone_category(address)
         if zone and not (state.get("case_facts") or {}).get("land_zone"):
@@ -276,6 +277,11 @@ def submit_facts(
         "food_result": final.get("food_result"),
         "fire_result": final.get("fire_result"),
         "signage_result": final.get("signage_result"),
+        # intake.html이 주소 조회 버튼을 누르면 팝업으로 그대로 보여주는
+        # 원문(lookup_building_ledger 결과) - 신축이라 대장이 없으면 그 이유가
+        # 담긴 문장이 그대로 온다("등록된 건축물대장이 없습니다..."). 새로
+        # 파싱하지 않고 이미 사람이 읽기 좋게 조립된 문자열을 그대로 재사용.
+        "building_ledger_text": ledger_text,
         "project_status": compute_project_status(final),
     }
 
