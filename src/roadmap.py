@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from src.agents.permit import requires_licensed_architect
 from src.message_utils import extract_text
+from src.roadmap_model import business_registration_unlocked, fire_signage_unlocked, food_report_unlocked
 
 if TYPE_CHECKING:
     from src.agent import AgentState
@@ -444,23 +445,14 @@ def _should_force_construction_guide(state: "AgentState") -> bool:
 # 사용자 피드백에서 나온 원칙 - 판정(food/fire/signage)은 2026-07-27 결정대로
 # 대화 순서와 무관하게 즉답하되(_roadmap_status_summary 219~238행 참고), 그
 # 뒤에 "실제로 언제 진행하면 좋은지"(병렬 가능하면 지금 진행 유도, 아니면
-# 선행 단계 명시)를 덧붙인다. 여기 적힌 잠금 조건ᆞ이유 문구는 src/static/
-# index.html의 renderRoadmap() 안 lockReason 문자열과 반드시 같은 사실을
-# 가리켜야 한다(단, 프론트가 아는 UI 문구를 그대로 복붙하는 게 아니라 채팅
-# 톤에 맞게 다시 쓴 것 - STEP_AGENCY_FALLBACK처럼 의도적으로 중복 유지되는
-# 표, 2026-08-04 선례와 동일 패턴).
-def _fire_signage_unlocked(task_progress: dict) -> bool:
-    """소방시설ᆞ간판 실제 설치가 가능해졌는지 - index.html의 소방ᆞ간판 항목
-    lockReason("공사(시공) 완료 후 설치 가능")과 동일 조건."""
-    return bool(task_progress.get("construction") or task_progress.get("interior_only"))
-
-
-def _food_report_unlocked(task_progress: dict) -> bool:
-    """식품위생 영업신고 실제 접수가 가능해졌는지 - index.html의
-    lockReason("사용승인 완료 후 신고 가능")과 동일 조건."""
-    return bool(task_progress.get("use_approval"))
-
-
+# 선행 단계 명시)를 덧붙인다. 잠금 predicate(fire_signage_unlocked/
+# food_report_unlocked/business_registration_unlocked)는 src/roadmap_model.py의
+# 함수를 그대로 import해서 쓴다(2026-08-05, Phase 3) - 예전엔 이 파일이 같은
+# 조건을 로컬 함수로 따로 갖고 있어서 "index.html의 lockReason과 반드시 같은
+# 조건이어야 한다"가 주석상의 약속일 뿐이었는데, 이제 둘 다 roadmap_model.py
+# 하나만 참조하므로 구조적으로 어긋날 수 없다. 아래 메시지 문구 자체는 여전히
+# 채팅 톤에 맞게 따로 쓴 것(STEP_AGENCY_FALLBACK처럼 의도적으로 중복 유지되는
+# 표, 2026-08-04 선례와 동일 패턴) - 조건만 단일화했다.
 def domain_timing_directive(state: "AgentState") -> str | None:
     """판정이 끝난 도메인(소방ᆞ간판ᆞ식품위생ᆞ위생교육ᆞ사업자등록)에 대해,
     "지금 실제로 진행해도 되는지ᆞ아직 뭘 기다려야 하는지"를 결정론적으로
@@ -480,7 +472,7 @@ def domain_timing_directive(state: "AgentState") -> str | None:
     lines: list[str] = []
 
     if fire_result is not None or signage_result is not None:
-        if _fire_signage_unlocked(task_progress):
+        if fire_signage_unlocked(task_progress):
             lines.append(
                 "소방시설ᆞ간판: 공사(시공)가 이미 끝났으니 지금 바로 설치를 "
                 "진행하셔도 됩니다."
@@ -493,7 +485,7 @@ def domain_timing_directive(state: "AgentState") -> str | None:
             )
 
     if food_result is not None:
-        if _food_report_unlocked(task_progress):
+        if food_report_unlocked(task_progress):
             lines.append(
                 "식품위생 영업신고: 사용승인이 이미 끝났으니 지금 바로 "
                 "관할 보건소에 신고 접수를 진행하셔도 됩니다."
@@ -513,8 +505,7 @@ def domain_timing_directive(state: "AgentState") -> str | None:
     if permit_result is not None:
         permit_type = getattr(permit_result, "permit_type", None)
         permit_not_needed = permit_type == "인허가불필요"
-        docs_ready = bool(task_progress.get("documents_prepared")) or permit_not_needed
-        if docs_ready and food_result is not None:
+        if business_registration_unlocked(task_progress, food_result, permit_not_needed):
             lines.append(
                 "사업자등록: 임대차계약서 등 서류ᆞ영업신고 종류가 이미 확인됐으니 "
                 "지금 바로 관할 세무서에 신청하셔도 됩니다(공사 완료를 기다릴 "
