@@ -1,4 +1,4 @@
-"""src/static/index.html의 로드맵 Step3ᆞ4 선행조건 잠금(🔒) 로직 검증.
+"""src/static/index.html의 로드맵 선행조건 잠금(🔒) 로직 검증.
 
 순수 JS 렌더 로직이라 파이썬으로 재작성하지 않고, tests/fixtures/
 roadmap_locks_check.js가 index.html에서 실제 코드 블록을 그대로 잘라내
@@ -11,7 +11,7 @@ fixture, 세션당 1회만 node 실행). 이렇게 하면 index.html이 바뀌�
 - 소방시설ᆞ간판: 공사(시공) 전까지 잠금
 - 사업자등록: 서류 준비 + 영업신고 판정 전까지 잠금(기존)
 - 직원 등록: 사업자등록 전까지 잠금(단, 직원 없음이면 예외)
-- 영업 시작: Step3 5개 항목 전부 완료 전까지 잠금
+- 영업 시작: 식품위생ᆞ간판ᆞ사업자등록ᆞ위생교육 4개 항목 전부 완료 전까지 잠금
 """
 from __future__ import annotations
 
@@ -61,15 +61,16 @@ def test_staff_registration_hires_staff_false_bypasses_lock(roadmap_lock_results
 
 
 def test_opening_locked_until_all_step3_items_done(roadmap_lock_results):
-    assert roadmap_lock_results["opened: 5개 중 1개(위생교육)만 빠져도 잠김"]
-    assert roadmap_lock_results["opened: 5개 전부 충족되면 해제"]
+    assert roadmap_lock_results["opened: 4개 중 1개(위생교육)만 빠져도 잠김"]
+    assert roadmap_lock_results["opened: 4개 전부 충족되면 해제"]
 
 
 def test_architect_badge_reflects_requires_architect(roadmap_lock_results):
-    # 건축법 제23조 건축사 대행 배지: 백엔드 requires_architect 값이 Step 0의
-    # architect 필드로 그대로 전달되는지(true=대행/false=직접/null=배지없음).
-    # 판정 축이 Step0로 옮겨오면서(2026-08-04) 배지도 Step1에서 Step0로 이동.
-    assert roadmap_lock_results["architect: true면 Step0 architect=true(대행 배지 표시)"]
+    # 건축법 제23조 건축사 대행 배지: 백엔드 requires_architect 값이 architect
+    # 필드로 그대로 전달되는지(true=대행/false=직접/null=배지없음). 9단계
+    # 재구성(2026-08-05)으로 실제 건축사를 선정하는 "건축사사무소 선정 및
+    # 도면 작성" Step으로 배지 위치를 옮겼다.
+    assert roadmap_lock_results["architect: true면 architect=true(대행 배지 표시)"]
     assert roadmap_lock_results["architect: false면 배지 미표시(필드만 false)"]
     assert roadmap_lock_results["architect: null이면 배지 없음"]
 
