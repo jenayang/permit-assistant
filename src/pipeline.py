@@ -174,6 +174,12 @@ def update_task_progress(user_id: str, field: str, value: bool) -> dict:
     클릭도 "사용자가 방금 완료라고 밝힌 것"이므로 - 굳이 LLM을 거쳐 자연어를
     왕복시키지 않고 graph.update_state로 직접 패치한다(대화 이력에는 안
     남지만 다음 질의ᆞ답변에는 그대로 반영됨).
+
+    project_status(steps 포함)도 같이 계산해 돌려준다(2026-08-05, Phase 5) -
+    체크박스 하나를 토글하면 그 필드뿐 아니라 cascade_construction_progress로
+    다른 필드가 같이 채워지거나(예: 사용승인 → 착공신고ᆞ시공도 자동 완료)
+    다른 Step의 잠금이 풀릴 수 있어서, 클라이언트가 그 결과를 다시 계산하지
+    않고 이 응답의 steps를 그대로 반영하기만 하면 되게 한다(단일 소스 원칙).
     """
     if field not in TASK_PROGRESS_FIELDS:
         raise ValueError(f"알 수 없는 진행상황 항목: {field}")
@@ -182,7 +188,10 @@ def update_task_progress(user_id: str, field: str, value: bool) -> dict:
     patch = cascade_construction_progress({field: value})
     graph.update_state(config_dict, {"task_progress": patch})
     state = graph.get_state(config_dict)
-    return state.values.get("task_progress") or {}
+    return {
+        "task_progress": state.values.get("task_progress") or {},
+        "project_status": compute_project_status(state.values),
+    }
 
 
 # === 폼 기반 판정 (LLM 호출 없음) ===

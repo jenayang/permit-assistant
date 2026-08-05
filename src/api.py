@@ -164,6 +164,11 @@ class TaskProgressUpdateRequest(BaseModel):
 
 class TaskProgressUpdateResponse(BaseModel):
     task_progress: dict
+    # steps(camelCase dict, roadmap_steps_to_dicts()) 포함 - 체크박스 하나를
+    # 토글해도 cascade_construction_progress로 다른 필드가 같이 채워지거나
+    # 다른 Step의 잠금이 풀릴 수 있어, 프론트가 다시 계산하지 않고 이 응답을
+    # 그대로 반영하도록 project_status 전체를 실어보낸다(2026-08-05, Phase 5).
+    project_status: dict
 
 
 class FactsSubmitRequest(BaseModel):
@@ -306,8 +311,8 @@ def task_progress_endpoint(req: TaskProgressUpdateRequest) -> TaskProgressUpdate
     자연어를 왕복시킬 필요가 없다.
     """
     try:
-        task_progress = update_task_progress(req.user_id, req.field, req.value)
-        return TaskProgressUpdateResponse(task_progress=task_progress)
+        result = update_task_progress(req.user_id, req.field, req.value)
+        return TaskProgressUpdateResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
