@@ -513,6 +513,16 @@ _FACT_TOOL_TO_STATE_KEY = {
     "record_fire_facts": "fire_facts",
     "record_signage_facts": "signage_facts",
     "record_task_progress": "task_progress",
+    # record_case_facts엔 address 필드가 없어서(법령 판정에 안 쓰임)
+    # case_facts에 주소가 저장된 적이 없었다 - 로드맵 Step1의 "사업 예정지
+    # 주소 확인" substep(src/roadmap_model.py)이 case_facts.get("address")를
+    # 보는데 아무도 안 채워서 영원히 미완료로 남는 버그였다(2026-08-05,
+    # 세션 b846cc22에서 신고). lookup_land_zone/lookup_building_ledger는
+    # 이미 address를 인자로 받는 도구라, 호출될 때 그 값을 case_facts에도
+    # 같이 적재한다 - 새 도구ᆞ새 판정 로직 추가 없이 이미 있는 호출에서
+    # 얻는 부수 효과.
+    "lookup_land_zone": "case_facts",
+    "lookup_building_ledger": "case_facts",
 }
 
 

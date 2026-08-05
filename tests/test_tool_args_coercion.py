@@ -68,3 +68,18 @@ def test_float_and_bool_fields_also_coerced():
     assert got == {"size_sqm": 400.0}
     got = _coerce_tool_args("record_signage_facts", {"sign_type": "돌출간판", "floor": "3"})
     assert got == {"sign_type": "돌출간판", "floor": 3}
+
+
+def test_lookup_tools_persist_address_into_case_facts():
+    """lookup_land_zone/lookup_building_ledger 호출 시 address가 case_facts에도
+    저장돼야 한다 - record_case_facts엔 address 필드가 없어서(법령 판정에
+    안 쓰임) 예전엔 이 값이 어디에도 안 남았다. 로드맵 Step1의 "사업 예정지
+    주소 확인" substep(src/roadmap_model.py)이 case_facts.get("address")를
+    보는데 아무도 안 채워서 영원히 미완료로 남는 회귀였다(2026-08-05,
+    세션 b846cc22 - 주소를 입력하고 건축물대장까지 조회했는데도 체크박스가
+    막혀있고 로드맵이 Step1에서 안 넘어감)."""
+    update = _agent_result(_ai("lookup_building_ledger", {"address": "서울시 강남구 테헤란로 1"}))
+    assert update["case_facts"] == {"address": "서울시 강남구 테헤란로 1"}
+
+    update = _agent_result(_ai("lookup_land_zone", {"address": "서울시 마포구 월드컵로 2"}))
+    assert update["case_facts"] == {"address": "서울시 마포구 월드컵로 2"}

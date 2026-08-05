@@ -762,17 +762,34 @@ def test_domain_timing_directive_food_report_unlocked_after_use_approval():
 
 
 # 2026-08-05 회귀 테스트 - "로드맵 시작이 아직도 창업 행정 단계를 병렬로
-# 안내해줌" 신고. Step0(행위 유형)조차 안 끝난 시점엔 "창업 준비 트랙"
-# 문단 자체를 아예 안 보여줘야 한다(전엔 무조건 보여줘서 LLM이 대화 첫
-# 턴부터 그 얘기를 꺼낼 근거로 삼을 수 있었음).
+# 안내해줌" 신고. 처음엔 step0_done(행위 유형 확인) 이후로만 이 문단을
+# 미뤘는데, act_type 하나만 말해도 바로 참이 돼서 사실상 게이트가 없는
+# 것과 같았다 - "챗봇이 여전히 첫 턴부터 창업행정 병렬시행 안내를 한다"는
+# 재신고(2026-08-05)로 게이트를 step2_started(공사 시작)로 강화했다.
 def test_roadmap_status_summary_omits_startup_track_before_step0():
     state = {"case_facts": {}, "permit_result": None, "task_progress": {}}
     summary = _roadmap_status_summary(state)
     assert "창업 준비 트랙" not in summary
 
 
-def test_roadmap_status_summary_includes_startup_track_after_step0():
-    state = {"case_facts": {"act_type": "용도변경"}, "permit_result": None, "task_progress": {}}
+def test_roadmap_status_summary_omits_startup_track_before_construction_starts():
+    """행위 유형ᆞ인허가 판정까지 다 끝나도, 공사(착공신고ᆞ시공ᆞ사용승인)가
+    하나도 시작 안 됐으면 "창업 준비 트랙" 병렬 안내는 아직 이르다."""
+    state = {
+        "case_facts": {"act_type": "용도변경"},
+        "permit_result": {"permit_type": "용도변경허가"},
+        "task_progress": {},
+    }
+    summary = _roadmap_status_summary(state)
+    assert "창업 준비 트랙" not in summary
+
+
+def test_roadmap_status_summary_includes_startup_track_once_construction_starts():
+    state = {
+        "case_facts": {"act_type": "용도변경"},
+        "permit_result": {"permit_type": "용도변경허가"},
+        "task_progress": {"construction_notice": True},
+    }
     summary = _roadmap_status_summary(state)
     assert "창업 준비 트랙" in summary
 
