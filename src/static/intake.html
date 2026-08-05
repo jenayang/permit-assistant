@@ -168,6 +168,15 @@
         <div class="field-hint">공사 없이 지금 있는 건물을 용도만 바꿔 쓰면 "예"를 선택하세요(용도변경으로 자동 판정됩니다). 새로 짓거나(신축ᆞ증축) 구조를 바꾸는 공사(대수선)가 필요하면 "아니오"를 선택하세요 - 이 경우는 판정이 더 복잡해 채팅으로 이어서 확인합니다.</div>
       </div>
 
+      <div class="field">
+        <label>이 대지ᆞ건물의 소유자이신가요, 임차인이신가요?</label>
+        <div class="toggle" data-key="ownership" data-type="string">
+          <button type="button" data-value="소유자">소유자</button>
+          <button type="button" data-value="임차인">임차인</button>
+        </div>
+        <div class="field-hint">임차인이면 건물 소유자의 동의서(사용승낙서)가 추가로 필요할 수 있어 절차 안내가 더 정확해집니다. 아직 모르면 비워두고 진행해도 됩니다.</div>
+      </div>
+
       <div class="field" id="bizTypeUnknownField" style="display:none;">
         <label>음식ᆞ식품을 취급하는 업종인가요?</label>
         <div class="toggle" data-key="serves_food">
@@ -284,13 +293,17 @@
   areaInputEl.addEventListener("input", updateAreaConvertedHint);
   areaUnitEl.addEventListener("change", updateAreaConvertedHint);
 
+  // data-type="string"인 토글(ownership - "소유자"ᆞ"임차인")은 boolean이 아니라
+  // 값 그대로 저장한다 - 나머지(sameBuilding/serves_food 등)는 기존처럼 "true"
+  // 문자열을 boolean으로 변환.
   document.querySelectorAll(".toggle").forEach((group) => {
     const key = group.dataset.key;
+    const isString = group.dataset.type === "string";
     group.querySelectorAll("button").forEach((btn) => {
       btn.addEventListener("click", () => {
         group.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
-        answers[key] = btn.dataset.value === "true";
+        answers[key] = isString ? btn.dataset.value : btn.dataset.value === "true";
       });
     });
   });
@@ -415,9 +428,17 @@
     // 1단계 주소 조회로 이미 서버에 반영돼 있어 다시 보낼 필요 없다(merge).
     // 그 외(신축ᆞ증축ᆞ대수선 등 구조공사)는 채팅으로 이어서 확인한다.
     const desired = FACILITY_GROUP_BY_BIZTYPE[bizType];
+    const caseFactsPatch = {};
     if (answers.sameBuilding === true && desired) {
-      body.case_facts = { act_type: "용도변경", desired_facility_group: desired };
+      caseFactsPatch.act_type = "용도변경";
+      caseFactsPatch.desired_facility_group = desired;
     }
+    // 소유자ᆞ임차인은 act_type 판정과 무관한 독립 사실이라 sameBuilding
+    // 여부와 무관하게 답했으면 그대로 보낸다 - classify_case 판정 자체엔
+    // 안 쓰이지만(build_permit_result의 procedures 안내 문구에만 반영),
+    // 대화로 이어질 때 다시 안 물어봐도 되게 미리 심어둔다.
+    if (answers.ownership) caseFactsPatch.ownership = answers.ownership;
+    if (Object.keys(caseFactsPatch).length) body.case_facts = caseFactsPatch;
 
     // 식품위생: 업종이 비식품(사무실ᆞ주거 리모델링)이면 serves_food=false를
     // 확정해서 보낸다(법령 해석이 아니라 업종 자체가 식품과 무관하다는 사실

@@ -31,6 +31,10 @@ function buildSteps({
   actType, latestPermitResult, caseTypeResult, requiresArchitect = null, permitNotNeeded = false,
   factInfoLines = [], preReviewSubsteps = [], designDocsSubsteps = [], applicationSubsteps = [],
   applyStepTitle = "허가ᆞ신고 신청ᆞ접수",
+  // 2026-08-05: Step1 체크리스트가 lastAddress/caseFacts를 직접 참조하도록
+  // 바뀌면서 새로 필요해진 자유변수 - 이 테스트는 Step1 자체를 검증하지
+  // 않으므로 기본값만 준다.
+  lastAddress = null, caseFacts = {},
 }) {
   // renderRoadmap()의 classified(buildChecklists()와 동일 정의)를 그대로
   // 재현 - "신고ᆞ허가 대상 판단" Step의 substep이 참조한다.
@@ -39,12 +43,14 @@ function buildSteps({
     "latestFoodResult", "latestFireResult", "latestSignageResult", "taskProgress",
     "actType", "latestPermitResult", "caseTypeResult", "requiresArchitect", "permitNotNeeded", "classified",
     "factInfoLines", "preReviewSubsteps", "designDocsSubsteps", "applicationSubsteps", "applyStepTitle",
+    "lastAddress", "caseFacts",
     block + "\nreturn steps;"
   );
   return fn(
     latestFoodResult, latestFireResult, latestSignageResult, taskProgress,
     actType, latestPermitResult, caseTypeResult, requiresArchitect, permitNotNeeded, classified,
-    factInfoLines, preReviewSubsteps, designDocsSubsteps, applicationSubsteps, applyStepTitle
+    factInfoLines, preReviewSubsteps, designDocsSubsteps, applicationSubsteps, applyStepTitle,
+    lastAddress, caseFacts
   );
 }
 

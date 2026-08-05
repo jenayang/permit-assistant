@@ -342,12 +342,75 @@
     margin-left: 18px;
     flex-shrink: 0;
   }
-  .step-doc-card, .step-agency-card {
+  .step-agency-card {
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 12px 14px;
     font-size: 13px;
     margin-bottom: 8px;
+  }
+  /* 필요 서류 카드 - 참조 이미지(2026-08-05)처럼 제목+부제(왼쪽)ᆞ작성주체
+     또는 템플릿 버튼(오른쪽)을 한 줄에 배치. */
+  .step-doc-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 8px;
+  }
+  .step-doc-card-title { font-size: 13.5px; font-weight: 600; }
+  .step-doc-card-subtitle { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+  /* "건축사 작성" - 이미지처럼 버튼이 아니라 우측에 텍스트로만 표기. */
+  .step-doc-author { font-size: 12px; color: var(--text-muted); flex-shrink: 0; white-space: nowrap; }
+  .step-doc-template-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 8px 14px;
+  }
+  .step-doc-template-btn:hover { background: var(--border); }
+  /* 서식 안내 팝업 - 실제 파일을 내려받는 게 아니라(구현 불가) 법령ᆞ서식
+     번호를 안내만 한다(2026-08-05, "템플릿 내려받기 누르면 팝업으로 안내"). */
+  .doc-template-modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .45);
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 50;
+  }
+  .doc-template-modal-overlay.active { display: flex; }
+  .doc-template-modal-card {
+    background: var(--panel);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    max-width: 420px;
+    width: 100%;
+    padding: 20px;
+  }
+  .doc-template-modal-card h3 { font-size: 15px; margin: 0 0 10px; }
+  .doc-template-modal-card p { font-size: 13px; line-height: 1.6; margin: 0; color: var(--text); }
+  .doc-template-modal-close-btn {
+    margin-top: 16px;
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    font-size: 13.5px;
+    background: var(--accent);
+    color: var(--accent-text);
+    padding: 9px 16px;
+    font-weight: 600;
   }
   .step-detail-empty { font-size: 13px; color: var(--text-muted); }
   /* manyfast 참조 화면(페이지10)처럼 타임라인 레일ᆞ아코디언 없이 평평한
@@ -805,6 +868,14 @@
   </div>
 </div>
 
+<div class="doc-template-modal-overlay" id="docTemplateModal">
+  <div class="doc-template-modal-card">
+    <h3 id="docTemplateModalTitle">서식 안내</h3>
+    <p id="docTemplateModalBody"></p>
+    <button class="doc-template-modal-close-btn" id="docTemplateModalCloseBtn" type="button">확인</button>
+  </div>
+</div>
+
 <script>
   const API_BASE = "";
   const chatEl = document.getElementById("chat");
@@ -974,14 +1045,15 @@
     return wMin === wMax ? `${wMin}주` : `${wMin}~${wMax}주`;
   }
 
-  // Step 1~9(2026-08-05, manyfast 9단계 와이어프레임 반영) 각각의 예상 준비
-  // 기간(일 단위 [min, max]) - 화면에 보이는 만큼 그대로 하드코딩한다. 1~3
-  // 단계는 자동조회ᆞ규칙 엔진 판정이라 소요기간 자체가 없다(0/0 → "당일").
+  // Step 1~9(2026-08-05, manyfast 9단계 와이어프레임 반영ᆞ이후 Step3/4 순서
+  // 교체) 각각의 예상 준비 기간(일 단위 [min, max]) - 화면에 보이는 만큼
+  // 그대로 하드코딩한다. 1~2단계는 자동조회ᆞ규칙 엔진 판정이라 소요기간
+  // 자체가 없다(0/0 → "당일").
   const STEP_DURATION_DAYS = [
     [0, 0],   // 1. 주소 및 건축물 현황 확인
     [0, 0],   // 2. 신고ᆞ허가 대상 판단
-    [0, 0],   // 3. 인허가 사전 검토
-    [14, 28], // 4. 건축사사무소 선정 및 도면 작성 - 2~4주
+    [14, 28], // 3. 건축사사무소 선정 및 도면 작성 - 2~4주
+    [0, 0],   // 4. 인허가 사전 검토
     [21, 35], // 5. 허가ᆞ신고 신청ᆞ접수 - 3~5주
     [28, 56], // 6. 착공신고 및 공사 - 4~8주
     [7, 14],  // 7. 사용승인ᆞ완공검사 - 1~2주
@@ -1106,22 +1178,6 @@
     const docs = latestPermitResult?.required_documents || [];
     const diag = latestPermitResult?.pre_diagnosis_items || [];
 
-    // 확인된 사실(case_facts)은 별도 "하위 태그" 줄로 떼어 보여주지 않고,
-    // 그 사실이 실제로 쓰인 Step 안에 바로 넣는다 - act_type은 Step0
-    // substep 자체가 이미 보여주고 있으니(아래), 나머지(소유여부ᆞ연면적ᆞ
-    // 용도지역ᆞ시설군 등 판정 입력값)는 Step1 안에 참고용 줄로 넣는다
-    // (2026-07-28 논의: "체킹된 내용은 해당 Step 안에").
-    const factInfoLines = [];
-    for (const [key, value] of Object.entries(caseFacts)) {
-      if (value == null || key === "_classified" || key === "act_type") continue;
-      if (key === "current_facility_group" || key === "desired_facility_group") continue;
-      const fmt = FACT_TAG_LABELS[key];
-      if (fmt) factInfoLines.push(fmt(value));
-    }
-    if (caseFacts.current_facility_group != null && caseFacts.desired_facility_group != null) {
-      factInfoLines.push(`시설군 ${caseFacts.current_facility_group}→${caseFacts.desired_facility_group}`);
-    }
-
     // 사전진단ᆞ서류는 판정이 나오면 실제 항목명을 그대로 보여준다(예전
     // 고도계가 보여주던 상세 정보 - 요약 라벨로 뭉개면 정보 손실). 단, 항목이
     // "나열됐다"는 것과 "완료됐다"는 것은 다르다 - AI가 사전진단ᆞ서류 항목을
@@ -1194,9 +1250,24 @@
       {
         title: "주소 및 건축물 현황 확인",
         subtitle: "건축물대장 조회ᆞ용도ᆞ연면적 확인",
+        // 2026-08-05 전면 개편 - 예전엔 "행위 유형 파악" 체크 하나 + case_facts
+        // 원본 값을 그대로 나열한 참고줄("시설군 8→7" 등)뿐이라 "이게 할
+        // 일이냐"는 피드백을 받았다. 실제로 이 Step에서 확정돼야 하는 사실
+        // 3가지(주소ᆞ행위유형ᆞ건축물대장ᆞ용도지역)를 시스템이 판정하는
+        // 항목으로 명시한다 - 사용자가 직접 체크하는 게 아니라(field 없음)
+        // 값이 채워지면 자동으로 체크되는 판정 축이라 required:true로 강제
+        // "필수" 표시(기본 규칙은 field 없으면 "권장"인데, 이 3개는 field가
+        // 없어도 필수라 명시적으로 오버라이드).
         substeps: [
-          { text: actType || "행위 유형 파악", done: !!actType },
-          ...(factInfoLines.length ? [{ text: factInfoLines.join(" · "), info: true }] : []),
+          { text: lastAddress ? `사업 예정지 주소 확인: ${lastAddress}` : "사업 예정지 주소 확인", done: !!lastAddress, required: true },
+          { text: actType ? `행위 유형 확인: ${actType}` : "행위 유형 확인(신축ᆞ증축ᆞ용도변경 등)", done: !!actType, required: true },
+          {
+            text: "건축물대장ᆞ용도지역 조회",
+            done: caseFacts.land_zone != null || caseFacts.current_facility_group != null,
+            required: true,
+            notApplicable: actType === "신축",
+            naReason: "신축(빈 대지)은 기존 건축물대장이 없어 조회 대상이 아닙니다",
+          },
         ],
       },
       {
@@ -1206,15 +1277,18 @@
           {
             text: latestPermitResult ? `판정: ${latestPermitResult.permit_type}` : (caseTypeResult ? `판정: ${caseTypeResult}` : "허가ᆞ신고ᆞ기재변경 대상 판정"),
             done: classified,
+            required: true,
           },
         ],
       },
       {
-        title: "인허가 사전 검토",
-        subtitle: "관할 구청 사전 협의ᆞ소방ᆞ위생 협의 여부 확인",
-        substeps: preReviewSubsteps,
-      },
-      {
+        // 2026-08-05: Step3/4 순서 교체 - 백엔드 챗봇 안내 순서(roadmap.py
+        // permit_phase_directive)는 [Step 1-1: 건축사사무소 선정]이
+        // [Step 1-2: 사전 검토]보다 항상 먼저다(건축사가 법적 의무든
+        // 아니든 직접/대행 결정부터 필요, 2026-08-04 설계). 로드맵 UI는
+        // 반대 순서(사전검토 먼저)였던 게 실사용 피드백으로 확인돼(챗봇은
+        // 건축사부터 묻는데 화면은 사전검토가 앞서 보여 혼란) 두 Step
+        // 객체를 통째로 맞바꿨다 - 내용ᆞ판정 로직은 그대로.
         title: "건축사사무소 선정 및 도면 작성",
         subtitle: "예상 2~4주 ᆞ 건축사 선임, 설계 도면 작성, 구조 검토",
         substeps: designDocsSubsteps,
@@ -1223,6 +1297,11 @@
         // 가능. null(정보부족)이면 배지를 아예 안 보여준다. 건축사를 실제로
         // 선정하는 이 Step에 배지를 둔다.
         architect: requiresArchitect,
+      },
+      {
+        title: "인허가 사전 검토",
+        subtitle: "관할 구청 사전 협의ᆞ소방ᆞ위생 협의 여부 확인",
+        substeps: preReviewSubsteps,
       },
       {
         title: applyStepTitle,
@@ -1939,8 +2018,52 @@
   // related_agencies를 서류ᆞ기관 카드로 보여준다 - 새 데이터 생성ᆞLLM
   // 호출 없이 이미 있는 구조화 데이터만 재배치한다. Step 인덱스는
   // renderRoadmap()의 steps 배열 순서와 같다(0:주소ᆞ건축물현황, 1:대상판단,
-  // 2:사전검토, 3:건축사ᆞ도면, 4:허가신청, 5:착공ᆞ공사, 6:사용승인ᆞ완공검사,
-  // 7:사업자등록ᆞ위생교육, 8:간판ᆞ오픈준비, 2026-08-05 9단계 재구성).
+  // 2:건축사ᆞ도면, 3:사전검토, 4:허가신청, 5:착공ᆞ공사, 6:사용승인ᆞ완공검사,
+  // 7:사업자등록ᆞ위생교육, 8:간판ᆞ오픈준비, 2026-08-05 9단계 재구성 후
+  // Step3/4 순서 교체 - 챗봇 안내 순서(건축사선정→사전검토)와 맞춤).
+
+  // 필요 서류 카드에 붙일 부가정보(작성주체ᆞ서식근거) - required_documents/
+  // pre_diagnosis_items는 LLM이 케이스별로 만드는 단순 문자열 목록이라
+  // (서식번호ᆞ작성주체 같은 구조화 정보가 없음) 자주 나오는 표준 서류명을
+  // 부분 일치로 찾아 정적으로 매칭한다(STEP_AGENCY_FALLBACK과 같은 패턴 -
+  // LLM 텍스트를 다시 구조화하는 대신, 이미 알려진 표준 서류에만 부가정보를
+  // 얹는다). search_regulations로 조문 대조 완료(2026-08-05) - 서식 번호까지
+  // 확인된 것만 넣었고, 확인 안 된 항목은 조문 없이 "실무 관행"으로 표시.
+  // author가 있으면 카드 우측에 "건축사 작성"만 텍스트로 표기(버튼 없음,
+  // 참조 이미지와 동일), 없고 template이 있으면 "템플릿 내려받기" 버튼을
+  // 눌렀을 때 실제 파일 대신 이 안내 문구를 팝업으로 보여준다(실제 서식
+  // 파일을 만들어 제공하기는 어려워 안내로 대체, 2026-08-05 사용자 결정).
+  // 배열 순서가 우선순위(먼저 매칭되는 규칙을 쓴다) - "OO 신청서"처럼 여러
+  // 규칙이 동시에 맞을 수 있는 문자열은, 더 구체적인 규칙(허가ᆞ신고 신청서)을
+  // 먼저 두고 그다음 일반 "신청서" 캐치올을, "건축물대장"(등본 발급 안내)
+  // 보다도 앞에 둔다 - "건축물대장 기재사항 변경 신청서"는 등본을 떼는 게
+  // 아니라 제출하는 신청서라 신청서 쪽 안내가 맞다.
+  const DOCUMENT_METADATA = [
+    { match: /허가.*신청서|신청서.*허가|신고.*신청서/, author: null, template: "건축법 시행규칙 제6조, 별지 제1호의4서식(건축ᆞ대수선ᆞ용도변경 허가 신청서) - 관할 구청 건축과 또는 세움터에서 서식을 받으세요." },
+    { match: /신고서/, author: null, template: "건축법 시행규칙 제12조, 별지 제6호서식(건축ᆞ대수선ᆞ용도변경 신고서) - 관할 구청 건축과 또는 세움터에서 서식을 받으세요." },
+    { match: /신청서/, author: null, template: "관할 구청 건축과 또는 세움터에서 서식을 받으실 수 있습니다(건축법 시행규칙)." },
+    { match: /배치도|평면도|입면도|단면도|구조도|설계도서|내화|방화|피난|건축설비|도서/, author: "건축사 작성", template: null },
+    { match: /구조.*안전.*확인서|구조안전확인/, author: "건축사 작성", template: "건축법 시행령 제32조 - 설계자(건축사)가 발급, 착공신고 시 제출합니다. 대상 여부(층수ᆞ연면적 기준)는 관할 구청에 확인하세요." },
+    { match: /토지이용계획확인서/, author: null, template: "정부24 또는 민원24에서 온라인 발급 가능합니다(토지이용규제 기본법)." },
+    { match: /대지.*소유|소유권.*증명|사용권.*증명|동의서/, author: null, template: "건축법 시행규칙 제6조제1항제1호의2 - 등기부등본(정부24 발급)으로 갈음할 수 있습니다." },
+    { match: /건축물대장/, author: null, template: "정부24에서 온라인 발급 가능합니다." },
+    { match: /위임장/, author: null, template: "법령 근거 없음(실무 관행) - 대리인이 접수할 때 첨부하는 서류로, 정해진 법정 서식은 없습니다." },
+  ];
+  function lookupDocumentMeta(text) {
+    for (const m of DOCUMENT_METADATA) {
+      if (m.match.test(text)) return m;
+    }
+    return null;
+  }
+  const docTemplateModal = document.getElementById("docTemplateModal");
+  const docTemplateModalBody = document.getElementById("docTemplateModalBody");
+  document.getElementById("docTemplateModalCloseBtn").addEventListener("click", () => {
+    docTemplateModal.classList.remove("active");
+  });
+  function openDocTemplateModal(text) {
+    docTemplateModalBody.textContent = text;
+    docTemplateModal.classList.add("active");
+  }
 
   // "어느 부서가 접수하는지"라는 행정 상식 표(법령 판정 아님, CLAUDE.md §1과
   // 무관) - latestPermitResult.related_agencies(LLM이 record_permit_synthesis
@@ -1948,8 +2071,8 @@
   const STEP_AGENCY_FALLBACK = [
     [],                                                     // 0. 주소 및 건축물 현황 확인 - 자동조회, 기관 방문 불필요
     [],                                                     // 1. 신고ᆞ허가 대상 판단 - 규칙 엔진 자동 판정
-    ["관할 시ᆞ군ᆞ구청 건축과"],                              // 2. 인허가 사전 검토
-    ["건축사사무소"],                                         // 3. 건축사사무소 선정 및 도면 작성
+    ["건축사사무소"],                                         // 2. 건축사사무소 선정 및 도면 작성
+    ["관할 시ᆞ군ᆞ구청 건축과"],                              // 3. 인허가 사전 검토
     ["관할 시ᆞ군ᆞ구청 건축과"],                              // 4. 허가ᆞ신고 신청ᆞ접수
     ["관할 시ᆞ군ᆞ구청 건축과"],                              // 5. 착공신고 및 공사
     ["관할 시ᆞ군ᆞ구청 건축과", "관할 소방서"],                 // 6. 사용승인ᆞ완공검사
@@ -2011,7 +2134,11 @@
       const row = document.createElement("div");
       row.className = "step-checklist-item";
       const lockedNow = sub.locked && !sub.done;
-      let tag = sub.field ? "필수" : "권장";
+      // 기본 규칙은 "field(사용자가 직접 체크 가능)가 있으면 필수, 없으면
+      // 권장"이지만, 시스템이 판정하는 축(field 없음)이어도 실제로는 필수인
+      // 항목이 있다(예: 주소ᆞ행위유형 확인) - sub.required로 명시 오버라이드
+      // 가능하게 한다(2026-08-05).
+      let tag = sub.required === true ? "필수" : sub.required === false ? "권장" : (sub.field ? "필수" : "권장");
       if (sub.notApplicable) tag = "해당없음";
       else if (lockedNow) tag = "선행조건 필요";
 
@@ -2050,13 +2177,47 @@
       stepChecklistEl.innerHTML = '<div class="step-detail-empty">이 단계에서 확인할 항목이 없습니다.</div>';
     }
 
-    // 필요 서류 - permit_result가 있는 Step(주로 Step1)만 실제 값을 갖고
-    // 있다. 다운로드 버튼은 만들지 않는다(실제 템플릿 파일이 없다는 기존
-    // 결정 유지) - 서류명만 카드로.
+    // 필요 서류 - permit_result가 있는 Step(주로 건축사ᆞ도면/사전검토)만
+    // 실제 값을 갖고 있다. 알려진 표준 서류명이면 DOCUMENT_METADATA로
+    // 작성주체("건축사 작성")ᆞ서식 안내(템플릿 버튼 → 팝업)를 붙인다
+    // (2026-08-05, 참조 이미지 레이아웃).
     const docs = [...(latestPermitResult?.pre_diagnosis_items || []), ...(latestPermitResult?.required_documents || [])];
-    stepDocsEl.innerHTML = docs.length
-      ? docs.map((d) => `<div class="step-doc-card">${escapeHtml(d)}</div>`).join("")
-      : '<div class="step-detail-empty">관련 서류는 채팅으로 확인해주세요.</div>';
+    stepDocsEl.innerHTML = "";
+    if (docs.length) {
+      docs.forEach((d) => {
+        const meta = lookupDocumentMeta(d);
+        const card = document.createElement("div");
+        card.className = "step-doc-card";
+        const left = document.createElement("div");
+        const title = document.createElement("div");
+        title.className = "step-doc-card-title";
+        title.textContent = d;
+        left.appendChild(title);
+        if (meta?.template) {
+          const subtitle = document.createElement("div");
+          subtitle.className = "step-doc-card-subtitle";
+          subtitle.textContent = meta.template.split(" - ")[0];
+          left.appendChild(subtitle);
+        }
+        card.appendChild(left);
+        if (meta?.author) {
+          const authorEl = document.createElement("span");
+          authorEl.className = "step-doc-author";
+          authorEl.textContent = meta.author;
+          card.appendChild(authorEl);
+        } else if (meta?.template) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "step-doc-template-btn";
+          btn.textContent = "템플릿 내려받기";
+          btn.addEventListener("click", () => openDocTemplateModal(meta.template));
+          card.appendChild(btn);
+        }
+        stepDocsEl.appendChild(card);
+      });
+    } else {
+      stepDocsEl.innerHTML = '<div class="step-detail-empty">관련 서류는 채팅으로 확인해주세요.</div>';
+    }
 
     // 관련 기관 및 전문가
     stepAgenciesEl.innerHTML = agencies.length
