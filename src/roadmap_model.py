@@ -33,7 +33,7 @@ tool도 case_facts에 쓰지 않는다(index.html도 client localStorage에 tool
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, is_dataclass, replace
 from typing import Any
 
 from src.agents.permit import requires_licensed_architect
@@ -81,6 +81,32 @@ class Step:
     def done(self) -> bool:
         items = self.countable
         return bool(items) and all(s.done for s in items)
+
+
+def _to_camel(name: str) -> str:
+    head, *rest = name.split("_")
+    return head + "".join(p.title() for p in rest)
+
+
+def _to_camel_dict(obj: Any) -> Any:
+    """dataclass(Substep/Step)를 camelCase 키의 plain dict로 변환한다 - API
+    응답(/project-status, /query의 project_status)과 index.html이 이미 쓰는
+    JS 프로퍼티 이름(checkKey/lockReason/notApplicable/naReason)을 그대로
+    맞추기 위해서다(Phase 4ᆞ5). 파이썬 쪽은 snake_case 컨벤션을 유지하고,
+    외부로 나가는 경계에서만 이 함수 하나로 변환한다 - 필드가 늘어나도
+    dataclasses.fields()를 그대로 훑으므로 여기 있는 매핑을 손으로 따로
+    갱신할 필요가 없다."""
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return {_to_camel(f.name): _to_camel_dict(getattr(obj, f.name)) for f in fields(obj)}
+    if isinstance(obj, (tuple, list)):
+        return [_to_camel_dict(v) for v in obj]
+    return obj
+
+
+def roadmap_steps_to_dicts(steps: list[Step]) -> list[dict]:
+    """compute_roadmap_steps() 결과를 API 응답에 그대로 실을 수 있는
+    camelCase dict 리스트로 변환한다."""
+    return [_to_camel_dict(step) for step in steps]
 
 
 def is_visually_locked(sub: Substep) -> bool:

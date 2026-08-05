@@ -38,7 +38,7 @@ current_step 하나만 계산했는데, 실사용 세션(79430043)에서 문제�
 """
 from __future__ import annotations
 
-from src.roadmap_model import Step, compute_roadmap_steps
+from src.roadmap_model import Step, compute_roadmap_steps, roadmap_steps_to_dicts
 
 STEP_LABELS = ["건축 유형 확인", "건축 인허가", "공사", "창업 행정", "오픈 준비"]
 
@@ -124,7 +124,8 @@ def compute_project_status(state: dict) -> dict:
         {"progress": int, "completed": list[str],
          "construction_track": {"current_step", "next_action"},
          "startup_track": {"current_step", "next_action"},
-         "summary": str}
+         "summary": str, "requires_architect": bool | None,
+         "steps": list[dict]}  # Step1~9 상세(camelCase, roadmap_model.Step 참고)
     """
     roadmap_steps = compute_roadmap_steps(state)
     steps = _step_substeps(roadmap_steps)
@@ -179,4 +180,8 @@ def compute_project_status(state: dict) -> dict:
         "startup_track": {"current_step": startup_current_step, "next_action": startup_next_action},
         "summary": summary,
         "requires_architect": requires_architect,
+        # Step1~9 상세 체크리스트(2026-08-05, Phase 4) - camelCase dict라
+        # /project-status(StepOut 스키마)ᆞ/query(project_status: dict 그대로
+        # 통과)ᆞ/facts 세 응답 경로 모두 같은 모양으로 나간다.
+        "steps": roadmap_steps_to_dicts(roadmap_steps),
     }

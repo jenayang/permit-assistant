@@ -13,7 +13,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src import config
 from src.pipeline import get_project_status, ingest, query, submit_facts, update_task_progress
@@ -110,6 +110,37 @@ class TrackStatus(BaseModel):
     next_action: Optional[str] = None
 
 
+class SubstepOut(BaseModel):
+    """src/roadmap_model.py의 Substep을 그대로 반영 - roadmap_steps_to_dicts()가
+    이미 camelCase 키(checkKey/lockReason/notApplicable/naReason)로 변환해
+    넘기므로 alias만 선언하고 populate_by_name으로 snake_case 생성도 허용한다
+    (테스트에서 파이썬 kwargs로 직접 만들 때 편하도록)."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    text: str
+    done: bool
+    field: Optional[str] = None
+    check_key: Optional[str] = Field(None, alias="checkKey")
+    info: bool = False
+    locked: bool = False
+    lock_reason: Optional[str] = Field(None, alias="lockReason")
+    not_applicable: bool = Field(False, alias="notApplicable")
+    na_reason: Optional[str] = Field(None, alias="naReason")
+    required: bool = False
+
+
+class StepOut(BaseModel):
+    """src/roadmap_model.py의 Step을 그대로 반영(1-based index, STEP 1~9)."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    index: int
+    title: str
+    subtitle: str
+    substeps: list[SubstepOut]
+    architect: Optional[bool] = None
+    parallel: bool = False
+
+
 class ProjectStatusResponse(BaseModel):
     progress: int
     completed: list[str]
@@ -119,6 +150,10 @@ class ProjectStatusResponse(BaseModel):
     # 건축사 설계 의무 대상 여부(건축법 제23조). True=대행 필요, False=개인 직접
     # 가능, None=정보 부족. compute_project_status()가 규칙 엔진 결과를 그대로 실음.
     requires_architect: Optional[bool] = None
+    # Step1~9 상세 체크리스트(2026-08-05, Phase 4) - src/roadmap_model.py가
+    # 유일한 계산 소스. 기존 5개 필드는 그대로라 이 필드를 안 쓰는 기존
+    # 클라이언트에 영향 없음(breaking change 없음).
+    steps: list[StepOut] = []
 
 
 class TaskProgressUpdateRequest(BaseModel):
