@@ -184,12 +184,18 @@ DOMAIN_CONFIGS: list[_DomainConfig] = [
 ]
 
 
-def run_classifier(state: "AgentState", config: _DomainConfig) -> tuple[list, dict] | None:
+def run_classifier(state: "AgentState", config: _DomainConfig, auto_search: bool = True) -> tuple[list, dict] | None:
     """도메인 하나에 대해 "아직 미분류면 classify_fn 실행 → tool_call/
     ToolMessage 구성 → 필요하면 자동 검색까지" 공통 처리를 한다. 이미
     분류됐거나 아직 정보가 부족하면 None을 반환해 classify_node가 건너뛰게
     한다. permit(도메인)처럼 나온 결과를 즉시 저장하지 않는 경우는
-    config.state_key가 None이라 자동으로 저장을 생략한다."""
+    config.state_key가 None이라 자동으로 저장을 생략한다.
+
+    auto_search=False면 rag_query가 있어도 _auto_search_messages를 안 부른다 -
+    intake.html 폼 제출(submit_facts)처럼 응답을 즉시 돌려줘야 하는 흐름에서
+    rerank 지연을 피하기 위함(2026-08-05 피드백). 근거 검색 자체를 없애는
+    게 아니라 시점만 미루는 것 - guard_node의 _has_grounding_search가 대화
+    전체를 스캔하므로, 이후 실제 채팅에서 인용이 나오면 그때 검색을 요구한다."""
     facts = state.get(config.facts_key, {})
     if facts.get("_classified"):
         return None
@@ -207,7 +213,7 @@ def run_classifier(state: "AgentState", config: _DomainConfig) -> tuple[list, di
         state_update[config.state_key] = output.raw_result
     logger.info("[classify:%s] facts=%r → %r", config.facts_key, facts, output.raw_result)
 
-    if output.rag_query:
+    if output.rag_query and auto_search:
         messages.extend(_auto_search_messages(output.rag_query))
 
     return messages, state_update
@@ -238,7 +244,7 @@ def _derive_ledger_facility_group(state: "AgentState") -> int | None:
     return None
 
 
-def classify_node(state: "AgentState") -> dict:
+def classify_node(state: "AgentState", auto_search: bool = True) -> dict:
     """DOMAIN_CONFIGS에 등록된 도메인마다 run_classifier를 돌려, 그 결과를
     (LLM이 부른 게 아니라 이 노드가 직접 구성한) tool_calls 모양 메시지로
     기록한다. pipeline.py의 tool_calls 추출 로직과 프론트의 로드맵 렌더링
@@ -248,6 +254,9 @@ def classify_node(state: "AgentState") -> dict:
     도메인들은 서로 독립적이라 한 턴에 하나만, 여럿, 혹은
     (route_after_tools가 이미 걸러줘서) 아무것도 새로 분류되지 않을 수
     있다 - 해당하는 도메인만 골라 처리하고 메시지를 이어붙인다.
+
+    auto_search=False면 run_classifier에 그대로 전달돼 판정 직후 자동 rerank
+    검색을 전부 생략한다(submit_facts 전용, run_classifier 주석 참고).
     """
     # 순환참조 회피(모듈 docstring 참고) - agent.py가 이 모듈의 DOMAIN_CONFIGS를
     # 가져다 쓰므로, 여기서 agent.py를 최상단에서 import할 수 없다.
@@ -266,7 +275,7 @@ def classify_node(state: "AgentState") -> dict:
         logger.info("[classify] 건축물대장 주용도→시설군 자동 기록: current_facility_group=%d", derived)
 
     for config in DOMAIN_CONFIGS:
-        result = run_classifier(state, config)
+        result = run_classifier(state, config, auto_search=auto_search)
         if result is None:
             continue
         domain_messages, domain_update = result

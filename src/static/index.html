@@ -140,7 +140,7 @@
      쓰고 톤(카드 구분ᆞ여백ᆞpill 배지)만 맞춘다. */
   .page-header { width: 100%; text-align: left; margin-bottom: 14px; }
   .page-header h2 { font-size: 16px; margin: 0; }
-  .summary-card, .progress-card, .next-step-card {
+  .next-step-card {
     width: 100%;
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -150,27 +150,6 @@
     margin-bottom: 14px;
   }
   .card-title { font-size: 13px; font-weight: 700; margin-bottom: 12px; }
-  .summary-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px 16px;
-  }
-  .summary-label { display: block; font-size: 11px; color: var(--text-muted); }
-  .summary-value { display: block; font-size: 13px; font-weight: 600; margin-top: 2px; }
-  .summary-notice { font-size: 11px; color: var(--text-muted); margin-top: 12px; }
-  .progress-bar { width: 100%; height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
-  .progress-fill { height: 100%; background: var(--accent); border-radius: 4px; }
-  .progress-pct { font-size: 12px; color: var(--text-muted); margin-top: 6px; text-align: right; }
-  .progress-stats { display: flex; gap: 10px; margin-top: 12px; }
-  .progress-stats > div {
-    flex: 1;
-    text-align: center;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 8px 4px;
-  }
-  .stat-num { display: block; font-size: 16px; font-weight: 700; }
-  .stat-label { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
   .next-step-body { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .next-step-text { font-size: 13px; }
   .next-step-btn {
@@ -198,13 +177,22 @@
     padding: 14px 24px;
     border-bottom: 1px solid var(--border);
   }
-  .next-action:empty { display: none; border-bottom: none; }
+  .next-action.is-hidden { display: none; border-bottom: none; }
+  .next-action-pct-block { flex-shrink: 0; text-align: center; }
   .next-action-pct {
     font-family: var(--mono);
     font-size: 22px;
     font-weight: 700;
     color: var(--accent);
-    flex-shrink: 0;
+  }
+  /* 완료/진행/대기 건수 - 원래 사이드 패널 "전체 진행률" 카드에 있던 걸,
+     그 카드가 상단 %와 같은 값을 중복 표시해서(2026-08-05 피드백) 상단 %
+     바로 옆으로 옮겼다. */
+  .next-action-stats {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    white-space: nowrap;
   }
   .next-action-body { flex: 1; min-width: 0; }
   .next-action-progress { margin-bottom: 10px; }
@@ -235,6 +223,32 @@
     text-wrap: balance;
   }
   .next-action-headline strong { color: var(--accent); font-weight: 700; }
+  /* "내 로드맵 요약" 압축판 - intake.html에서 이미 사용자가 확인한 값이라
+     사이드 패널에 큰 카드로 다시 안 보여주고, 상단 % 행 오른쪽에 참고용
+     태그 한 줄로만 둔다(2026-08-05 피드백). */
+  .next-action-side {
+    flex-shrink: 0;
+    max-width: 280px;
+    text-align: right;
+  }
+  .next-action-summary-line {
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .next-action-summary-sub {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  @media (max-width: 720px) {
+    .next-action-side { display: none; }
+  }
   /* 전체 창업 로드맵(Step 0~4) - "AI가 확인된 사실만 진행률에 반영한다"는
      원칙에 따라, 판정(permit_result/food_result/fire_result/signage_result)이
      난 항목과 사용자가 완료를 직접 말한 항목(task_progress)만 체크된다 -
@@ -553,7 +567,7 @@
     border-radius: 14px;
     white-space: pre-wrap;
     line-height: 1.5;
-    font-size: 14px;
+    font-size: 12.5px;
   }
   .msg.user .bubble {
     background: var(--accent);
@@ -708,7 +722,19 @@
     </div>
   </header>
 
-  <div class="next-action" id="nextAction"></div>
+  <div class="next-action is-hidden" id="nextAction">
+    <div class="next-action-pct-block">
+      <div class="next-action-pct" id="nextActionPct"></div>
+      <div class="next-action-stats" id="nextActionStats"></div>
+    </div>
+    <div class="next-action-body">
+      <div class="next-action-progress">
+        <div class="next-action-bar"><div class="next-action-fill" id="nextActionFill"></div></div>
+      </div>
+      <div class="next-action-headline" id="nextActionHeadline"></div>
+    </div>
+    <div class="next-action-side" id="nextActionSide"></div>
+  </div>
 
   <div class="main-grid">
     <div class="app">
@@ -731,8 +757,6 @@
         <div class="page-header">
           <h2>맞춤형 로드맵 결과</h2>
         </div>
-        <div class="summary-card" id="summaryCard"></div>
-        <div class="progress-card" id="progressCard"></div>
         <div class="next-step-card" id="nextStepCard"></div>
         <div class="side-panel-title">📍 전체 로드맵 단계</div>
         <div class="roadmap" id="roadmap"></div>
@@ -785,9 +809,12 @@
   const nextActionEl = document.getElementById("nextAction");
   const statusTagsEl = document.getElementById("statusTags");
   const roadmapOverviewEl = document.getElementById("roadmapOverview");
-  const summaryCardEl = document.getElementById("summaryCard");
-  const progressCardEl = document.getElementById("progressCard");
   const nextStepCardEl = document.getElementById("nextStepCard");
+  const nextActionPctEl = document.getElementById("nextActionPct");
+  const nextActionStatsEl = document.getElementById("nextActionStats");
+  const nextActionFillEl = document.getElementById("nextActionFill");
+  const nextActionHeadlineEl = document.getElementById("nextActionHeadline");
+  const nextActionSideEl = document.getElementById("nextActionSide");
   const stepDetailEl = document.getElementById("stepDetail");
   const stepDetailTitleEl = document.getElementById("stepDetailTitle");
   const stepDetailMetaEl = document.getElementById("stepDetailMeta");
@@ -1390,7 +1417,8 @@
   // 받아써서 같은 판정을 두 번 하지 않는다(로드맵 목록과 다른 숫자를
   // 말하면 안 된다는 기존 원칙, renderNextAction 주석 참고).
   function renderSummaryCards(steps, countable, currentIdx) {
-    // 요약 카드
+    // 상단 % 행 오른쪽 압축 요약 - intake.html에서 이미 확인시킨 값이라
+    // 사이드 패널에 큰 카드로 중복 표시하지 않는다(2026-08-05 피드백).
     const bizTypeLabel = bizType || "업종 미입력";
     const addressLabel = lastAddress || "주소 미입력";
     const actTypeLabel = caseTypeResult || caseFacts.act_type || "판정 전";
@@ -1400,19 +1428,14 @@
       totalMin += min;
       totalMax += max;
     });
-    summaryCardEl.innerHTML = `
-      <div class="card-title">내 로드맵 요약</div>
-      <div class="summary-grid">
-        <div><span class="summary-label">업종</span><span class="summary-value">${bizTypeLabel}</span></div>
-        <div><span class="summary-label">주소</span><span class="summary-value">${addressLabel}</span></div>
-        <div><span class="summary-label">건축 유형</span><span class="summary-value">${actTypeLabel}</span></div>
-        <div><span class="summary-label">관할 기관</span><span class="summary-value">관할 시ᆞ군ᆞ구청 건축과</span></div>
-        <div><span class="summary-label">예상 총 소요기간</span><span class="summary-value">약 ${formatDurationDays([totalMin, totalMax])}(창업 준비 병행 가능)</span></div>
-      </div>
-      <div class="summary-notice">⚠ 참고용 추정치입니다 - 관할 기관에서 최종 확인하세요.</div>
+    nextActionSideEl.innerHTML = `
+      <div class="next-action-summary-line" title="${addressLabel}">🏪 ${bizTypeLabel} ᆞ 📍 ${addressLabel} ᆞ 🏗 ${actTypeLabel}</div>
+      <div class="next-action-summary-sub">예상 총 소요기간 약 ${formatDurationDays([totalMin, totalMax])}</div>
     `;
 
-    // 진행률 카드 - Step 5개 기준 완료ᆞ진행중ᆞ대기 집계(전체 %는 project_status.progress를 그대로 씀).
+    // 완료ᆞ진행중ᆞ대기 건수 - Step 5개 기준 집계, 상단 % 바로 아래 붙인다
+    // (예전엔 사이드 패널 "전체 진행률" 카드에 따로 있었는데, 상단 %와 같은
+    // 값을 중복 표시하는 카드라 없애고 건수만 옮겼다, 2026-08-05 피드백).
     let done = 0, inProgress = 0, waiting = 0;
     steps.forEach((step, idx) => {
       const items = countable(step);
@@ -1421,17 +1444,7 @@
       else if (doneCount > 0 || idx === currentIdx) inProgress++;
       else waiting++;
     });
-    const pct = latestProjectStatus?.progress ?? 0;
-    progressCardEl.innerHTML = `
-      <div class="card-title">전체 진행률</div>
-      <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-      <div class="progress-pct">${pct}%</div>
-      <div class="progress-stats">
-        <div><span class="stat-num">${done}</span><span class="stat-label">완료</span></div>
-        <div><span class="stat-num">${inProgress}</span><span class="stat-label">진행 중</span></div>
-        <div><span class="stat-num">${waiting}</span><span class="stat-label">대기</span></div>
-      </div>
-    `;
+    nextActionStatsEl.textContent = `완료 ${done} ᆞ 진행 ${inProgress} ᆞ 대기 ${waiting}`;
 
     // 다음에 해야 할 단계 카드 - project_status의 트랙별 next_action을 그대로 반영만.
     const tracks = latestProjectStatus
@@ -1469,7 +1482,8 @@
   // 반영만 한다.
   function renderNextAction(status) {
     latestProjectStatus = status; // renderSummaryCards()가 재계산 없이 재사용
-    if (!status) { nextActionEl.innerHTML = ""; return; }
+    if (!status) { nextActionEl.classList.add("is-hidden"); return; }
+    nextActionEl.classList.remove("is-hidden");
     const pct = status.progress ?? 0;
     const tracks = [
       { label: "건축", data: status.construction_track },
@@ -1487,15 +1501,9 @@
     const headline = trackParts.length
       ? `👉 다음 할 일 — ${trackParts.join(" · ")}`
       : "🎉 모든 절차를 완료했어요!";
-    nextActionEl.innerHTML = `
-      <div class="next-action-pct">${pct}%</div>
-      <div class="next-action-body">
-        <div class="next-action-progress">
-          <div class="next-action-bar"><div class="next-action-fill" style="width:${pct}%"></div></div>
-        </div>
-        <div class="next-action-headline">${headline}</div>
-      </div>
-    `;
+    nextActionPctEl.textContent = `${pct}%`;
+    nextActionFillEl.style.width = `${pct}%`;
+    nextActionHeadlineEl.innerHTML = headline;
   }
 
   function restoreStageIndicator() {

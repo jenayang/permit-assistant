@@ -259,7 +259,10 @@ def submit_facts(
     # 넘긴다(_derive_ledger_facility_group이 방금 persist한 lookup_building_ledger
     # ToolMessage를 실제로 찾아야 하므로).
     state = graph.get_state(config_dict).values
-    classify_update = classify_node(state)
+    # auto_search=False: 폼 제출은 응답을 즉시 돌려줘야 해서 판정 직후 rerank
+    # 검색을 생략한다(classify_node/run_classifier 주석 참고, 2026-08-05 피드백 -
+    # intake 폼에서 여러 도메인이 한 번에 판정될 때 rerank가 순차로 겹쳐 느렸음).
+    classify_update = classify_node(state, auto_search=False)
     if classify_update:
         graph.update_state(config_dict, classify_update)
 

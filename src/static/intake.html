@@ -50,6 +50,10 @@
   #result dd { margin: 2px 0 0; font-size: 14px; }
   #resultLink { display: inline-block; margin-top: 14px; background: var(--accent); color: var(--accent-text); padding: 10px 16px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600; }
   #formError { color: var(--error); font-size: 13px; margin-top: 8px; display: none; }
+  .field-hint { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
+  .area-input-row { display: flex; gap: 8px; }
+  .area-input-row input { flex: 1; }
+  .area-input-row select { padding: 10px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 14px; }
 </style>
 </head>
 <body>
@@ -85,6 +89,7 @@
           <button type="button" data-value="true">예</button>
           <button type="button" data-value="false">아니오</button>
         </div>
+        <div class="field-hint">공사 없이 지금 있는 건물을 용도만 바꿔 쓰면 "예"를 선택하세요(용도변경으로 자동 판정됩니다). 새로 짓거나(신축ᆞ증축) 구조를 바꾸는 공사(대수선)가 필요하면 "아니오"를 선택하세요 - 이 경우는 판정이 더 복잡해 채팅으로 이어서 확인합니다.</div>
       </div>
 
       <div class="field" id="bizTypeUnknownField" style="display:none;">
@@ -93,6 +98,7 @@
           <button type="button" data-value="true">예</button>
           <button type="button" data-value="false">아니오</button>
         </div>
+        <div class="field-hint">카페ᆞ식당처럼 음식을 조리ᆞ판매하면 "예", 사무실ᆞ미용실 등 음식과 무관한 업종이면 "아니오"를 선택하세요.</div>
       </div>
 
       <div class="food-block" id="foodBlock">
@@ -102,6 +108,7 @@
             <button type="button" data-value="true">예</button>
             <button type="button" data-value="false">아니오</button>
           </div>
+          <div class="field-hint">커피를 내리거나 음식을 조리하는 등 매장에서 직접 만들어 팔면 "예"를 선택하세요. 포장된 완제품(캔 음료ᆞ과자 등)만 진열해서 되팔면 "아니오"를 선택하세요(이 경우 아래 면적으로 판정이 갈립니다).</div>
         </div>
         <div class="field">
           <label>주로 빵ᆞ과자를 만들어 파는 제과점인가요?</label>
@@ -109,6 +116,7 @@
             <button type="button" data-value="true">예</button>
             <button type="button" data-value="false">아니오</button>
           </div>
+          <div class="field-hint">위 질문과는 다른 질문입니다 - 판매 품목이 대부분 직접 만든 빵ᆞ떡ᆞ과자라면 "예"를 선택하세요(다른 답변과 무관하게 제과점영업으로 바로 판정됩니다). 카페ᆞ식당처럼 빵이 메뉴 일부일 뿐이면 "아니오"를 선택하세요.</div>
         </div>
         <div class="field">
           <label>주류를 판매하시나요?</label>
@@ -116,10 +124,19 @@
             <button type="button" data-value="true">예</button>
             <button type="button" data-value="false">아니오</button>
           </div>
+          <div class="field-hint">식사와 함께 술을 팔면 "예"(일반음식점), 팔지 않으면 "아니오"(휴게음식점)를 선택하세요.</div>
         </div>
         <div class="field">
-          <label for="store_area_sqm">영업장 면적(㎡)</label>
-          <input id="store_area_sqm" type="number" step="0.1">
+          <label for="store_area_sqm">영업장 면적</label>
+          <div class="area-input-row">
+            <input id="store_area_sqm" type="number" step="0.1" placeholder="예: 33">
+            <select id="areaUnit">
+              <option value="sqm">㎡</option>
+              <option value="pyeong">평</option>
+            </select>
+          </div>
+          <div class="field-hint" id="areaConvertedHint"></div>
+          <div class="field-hint">완제품만 판매하는 경우에만 판정에 쓰입니다(300㎡ 기준) - 위에서 "직접 조리ᆞ제조"에 "예"를 선택했거나 면적을 아직 모르면 비워두고 진행해도 됩니다.</div>
         </div>
       </div>
     </div>
@@ -158,6 +175,23 @@
 
   const answers = {}; // 토글 버튼 선택값 저장 (key -> true/false)
   let lookupCaseFacts = {}; // 1단계 주소 자동조회로 받은 case_facts(land_zone/current_facility_group)
+
+  // 영업장 면적 ㎡ᆞ평 변환(1평=3.305785㎡, 한국국토정보공사 고시 환산율) - 사용자가
+  // 어느 단위로 입력해도 제출 시 store_area_sqm(㎡)로 변환해서 보낸다.
+  const PYEONG_TO_SQM = 3.305785;
+  const areaInputEl = document.getElementById("store_area_sqm");
+  const areaUnitEl = document.getElementById("areaUnit");
+  const areaConvertedHintEl = document.getElementById("areaConvertedHint");
+  function updateAreaConvertedHint() {
+    const raw = areaInputEl.value;
+    if (raw === "" || Number.isNaN(Number(raw))) { areaConvertedHintEl.textContent = ""; return; }
+    const num = Number(raw);
+    areaConvertedHintEl.textContent = areaUnitEl.value === "pyeong"
+      ? `≈ ${(num * PYEONG_TO_SQM).toFixed(1)}㎡`
+      : `≈ ${(num / PYEONG_TO_SQM).toFixed(1)}평`;
+  }
+  areaInputEl.addEventListener("input", updateAreaConvertedHint);
+  areaUnitEl.addEventListener("change", updateAreaConvertedHint);
 
   document.querySelectorAll(".toggle").forEach((group) => {
     const key = group.dataset.key;
@@ -253,8 +287,12 @@
         for (const k of ["manufactures_or_cooks", "primarily_bakery", "serves_alcohol"]) {
           if (answers[k] !== undefined) body.food_facts[k] = answers[k];
         }
-        const area = document.getElementById("store_area_sqm").value;
-        if (area !== "") body.food_facts.store_area_sqm = Number(area);
+        const area = areaInputEl.value;
+        if (area !== "") {
+          body.food_facts.store_area_sqm = areaUnitEl.value === "pyeong"
+            ? Math.round(Number(area) * PYEONG_TO_SQM * 100) / 100
+            : Number(area);
+        }
       }
     } else if (bizType === "기타" && answers.serves_food === false) {
       body.food_facts = { serves_food: false };
