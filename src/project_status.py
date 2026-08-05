@@ -7,10 +7,23 @@ agent.py의 _roadmap_status_summary()가 LLM 프롬프트에 넣을 "순차/병�
 논의)에 따라, progress/completed/트랙별 상태/summary를 이 함수 한 곳에서만
 계산하고 화면들은 그 결과만 갖다 쓴다(직접 상태를 재해석하지 않는다).
 
-완료 판정 기준은 src/static/index.html의 renderRoadmap()/buildChecklists()가
-쓰는 기준과 반드시 같아야 한다(판정 도메인은 case_facts/permit_result/
-food_result/fire_result/signage_result, task_progress 도메인은 사용자
-자기보고) - 안 그러면 로드맵 UI와 이 API가 서로 다른 진행률을 말하게 된다.
+완료 판정 기준은 src/roadmap_model.py의 compute_roadmap_steps()가 계산한
+Step1~9 결과에서 그대로 가져온다(2026-08-05, Phase 2 - 예전엔 이 파일이
+case_facts/permit_result/... 등에서 직접 자체적으로 판정 bool을 재계산해서
+src/static/index.html의 판정과 어긋날 위험이 있었다. 이제 둘 다
+roadmap_model.py 하나만 참조하므로 구조적으로 어긋날 수 없다).
+
+이 파일이 쓰는 5그룹(STEP_LABELS)은 Step1~9보다 훨씬 거친 축약이다 - 예를
+들어 "건축 인허가" 한 그룹이 실제로는 Step2~5(신고ᆞ허가 판단ᆞ건축사
+선정ᆞ사전검토ᆞ신청접수)를 합친 것이다. 그리고 이 5그룹의 15개 항목은
+Step1~9의 모든 substep(약 21개, info 참고용 제외)을 다 세지 않고 그중
+task_progress 필드가 있는 항목(사용자가 실제로 체크하는 것)만 골라 쓴다 -
+Step1의 "사업 예정지 주소 확인"처럼 아직 어떤 서버 도구도 값을 채우지 않는
+substep(알려진 공백, roadmap_model.py 모듈 docstring 참고)을 그대로
+분모에 넣으면 그 항목이 영원히 못 채워져 progress%가 100%에 절대 도달 못하는
+회귀가 생긴다 - 그래서 이 파일은 기존에 실제로 쓰던 15개 항목 구성을
+그대로 유지한 채(라벨ᆞ개수 불변), "그 항목들의 완료 여부를 어디서 읽어오는지"
+만 roadmap_model.py의 단일 소스로 바꿨다.
 
 트랙 분리(2026-07-28 수정): 처음엔 Step 0~4를 하나의 순서로 훑어서
 current_step 하나만 계산했는데, 실사용 세션(79430043)에서 문제가 드러났다 -
@@ -25,7 +38,7 @@ current_step 하나만 계산했는데, 실사용 세션(79430043)에서 문제�
 """
 from __future__ import annotations
 
-from src.agents.permit import requires_licensed_architect
+from src.roadmap_model import Step, compute_roadmap_steps
 
 STEP_LABELS = ["건축 유형 확인", "건축 인허가", "공사", "창업 행정", "오픈 준비"]
 
@@ -36,44 +49,50 @@ _CONSTRUCTION_TRACK_INDICES = (0, 1, 2)
 _STARTUP_TRACK_INDICES = (3, 4)
 
 
-def _step_substeps(state: dict) -> list[list[tuple[str, bool]]]:
-    """Step 0~4 각각의 [(라벨, 완료여부), ...]."""
-    case_facts = state.get("case_facts") or {}
-    permit_result = state.get("permit_result")
-    food_result = state.get("food_result")
-    signage_result = state.get("signage_result")
-    tp = state.get("task_progress") or {}
-    interior_only = bool(tp.get("interior_only"))
+def _step_substeps(roadmap_steps: list[Step]) -> list[list[tuple[str, bool]]]:
+    """Step 0~4(5그룹) 각각의 [(라벨, 완료여부), ...] - compute_roadmap_steps()가
+    이미 계산한 Step1~9의 substep을 위치로 찾아 done을 그대로 재사용한다(중복
+    판정 없음). 각 튜플 옆 주석은 roadmap_steps에서의 출처(1-based Step
+    번호ᆞ0-based substep 인덱스) - roadmap_model.py의 substep 순서가 바뀌면
+    이 위치 참조도 같이 갱신해야 한다(tests/test_project_status.py가 어긋나면
+    바로 드러남)."""
+    s = roadmap_steps
+
+    def done_or_na(step_idx: int, sub_idx: int) -> bool:
+        # 인테리어 전용(interior_only) 공사는 착공신고ᆞ시공 substep 자체가
+        # notApplicable로 닫히고 done은 영원히 False로 남는다(roadmap_model.py
+        # 모듈 docstring 참고) - "완료됐거나 애초에 해당 없음"을 완료로 친다.
+        sub = s[step_idx].substeps[sub_idx]
+        return sub.done or sub.not_applicable
 
     return [
         [
-            ("행위 유형 확인", bool(case_facts.get("act_type"))),
-            ("허가ᆞ신고ᆞ기재변경 대상 판정", bool(permit_result)),
+            ("행위 유형 확인", s[0].substeps[1].done),  # Step1 substep[1]
+            ("허가ᆞ신고ᆞ기재변경 대상 판정", s[1].substeps[0].done),  # Step2 substep[0]
         ],
         [
-            ("사전 검토", bool(tp.get("pre_diagnosis_checked"))),
-            ("설계ᆞ서류 준비", bool(tp.get("documents_prepared"))),
-            ("신청ᆞ접수", bool(tp.get("application_submitted"))),
+            ("사전 검토", s[3].substeps[-1].done),  # Step4 마지막 substep(사전 검토 확인 완료)
+            ("설계ᆞ서류 준비", s[2].substeps[-1].done),  # Step3 마지막 substep(설계ᆞ서류 준비 완료 확인)
+            ("신청ᆞ접수", s[4].substeps[2].done),  # Step5 substep[2](접수)
         ],
         [
-            ("착공신고", interior_only or bool(tp.get("construction_notice"))),
-            ("공사(시공)", interior_only or bool(tp.get("construction"))),
-            ("사용승인", bool(tp.get("use_approval"))),
+            ("착공신고", done_or_na(5, 1)),  # Step6 substep[1](착공신고 완료 확인)
+            ("공사(시공)", done_or_na(5, 3)),  # Step6 substep[3](시공 완료 확인)
+            ("사용승인", s[6].substeps[3].done),  # Step7 substep[3](사용승인 완료 확인)
         ],
         [
-            ("식품위생 영업신고 확인", food_result is not None),
-            ("간판ᆞ옥외광고물 확인", signage_result is not None),
-            ("사업자등록", bool(tp.get("business_registration"))),
-            ("위생교육 이수", bool(tp.get("hygiene_education"))),
+            ("식품위생 영업신고 확인", s[7].substeps[0].done),  # Step8 substep[0]
+            ("간판ᆞ옥외광고물 확인", s[8].substeps[0].done),  # Step9 substep[0]
+            ("사업자등록", s[7].substeps[3].done),  # Step8 substep[3]
+            ("위생교육 이수", s[7].substeps[4].done),  # Step8 substep[4]
         ],
         [
-            ("인테리어ᆞ장비 설치", bool(tp.get("interior_equipment"))),
+            ("인테리어ᆞ장비 설치", s[5].substeps[4].done),  # Step6 substep[4]
             # 직원을 안 두는 1인ᆞ가족 운영 사업자는 4대보험 가입 신고 자체가
-            # 대상이 아니다 - hires_staff=False로 명시되면 이 항목이 영원히
-            # 미완료로 남아 진행률이 100%를 못 채우는 문제가 있었다
-            # (2026-07-28, 세션 2cda4d67류에서 신고).
-            ("직원 등록(4대보험 가입)", bool(tp.get("staff_registration")) or tp.get("hires_staff") is False),
-            ("영업 시작", bool(tp.get("opened"))),
+            # 대상이 아니다 - roadmap_model.py의 이 substep은 이미
+            # hires_staff=False 우회를 done에 반영해 계산한다.
+            ("직원 등록(4대보험 가입)", s[8].substeps[2].done),  # Step9 substep[2]
+            ("영업 시작", s[8].substeps[4].done),  # Step9 substep[4]
         ],
     ]
 
@@ -107,7 +126,8 @@ def compute_project_status(state: dict) -> dict:
          "startup_track": {"current_step", "next_action"},
          "summary": str}
     """
-    steps = _step_substeps(state)
+    roadmap_steps = compute_roadmap_steps(state)
+    steps = _step_substeps(roadmap_steps)
 
     construction = _track_status(steps, _CONSTRUCTION_TRACK_INDICES)
     startup = _track_status(steps, _STARTUP_TRACK_INDICES)
@@ -148,9 +168,9 @@ def compute_project_status(state: dict) -> dict:
 
     # 건축법 제23조ᆞ제19조6항: 이 케이스가 건축사사무소 설계 의무 대상인지.
     # True=대행 필요, False=개인 직접 가능, None=정보 부족. 판정은 규칙 엔진이
-    # 하고(permit.py) 여기선 그 결과만 실어 내려보낸다 - 프론트가 JS로 다시
-    # 계산하지 않게(단일 소스).
-    requires_architect = requires_licensed_architect(state.get("case_facts") or {})
+    # 하고(permit.py) roadmap_steps[2](Step3ᆞ건축사사무소 선정)가 이미 그
+    # 결과를 실어뒀으니 여기서 다시 계산하지 않고 그대로 재사용한다(단일 소스).
+    requires_architect = roadmap_steps[2].architect
 
     return {
         "progress": progress,
