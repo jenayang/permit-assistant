@@ -223,32 +223,6 @@
     text-wrap: balance;
   }
   .next-action-headline strong { color: var(--accent); font-weight: 700; }
-  /* "내 로드맵 요약" 압축판 - intake.html에서 이미 사용자가 확인한 값이라
-     사이드 패널에 큰 카드로 다시 안 보여주고, 상단 % 행 오른쪽에 참고용
-     태그 한 줄로만 둔다(2026-08-05 피드백). */
-  .next-action-side {
-    flex-shrink: 0;
-    max-width: 280px;
-    text-align: right;
-  }
-  .next-action-summary-line {
-    font-size: 11.5px;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .next-action-summary-sub {
-    font-size: 10.5px;
-    color: var(--text-muted);
-    margin-top: 2px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  @media (max-width: 720px) {
-    .next-action-side { display: none; }
-  }
   /* 전체 창업 로드맵(9단계) - "AI가 확인된 사실만 진행률에 반영한다"는
      원칙에 따라, 판정(permit_result/food_result/fire_result/signage_result)이
      난 항목과 사용자가 완료를 직접 말한 항목(task_progress)만 체크된다 -
@@ -307,7 +281,7 @@
   .step-detail-status {
     font-size: 12px;
     font-weight: 600;
-    color: var(--accent);
+    color: var(--text-muted);
     border: 1px solid var(--border);
     border-radius: 999px;
     padding: 2px 10px;
@@ -323,16 +297,19 @@
     grid-template-columns: 3fr 2fr;
     gap: 32px;
   }
+  /* 참조 이미지(2026-08-05 피드백) 스타일 - 항목 사이를 개별 구분선으로
+     나누지 않고, 박스 하나(.step-checklist의 외곽선)로만 감싸 "연결된"
+     느낌을 준다. 필수ᆞ권장 태그도 완전 우측 정렬이 아니라 텍스트 바로
+     옆(고정 여백)에 붙인다 - 예전엔 label에 flex:1을 줘서 태그가 항상 행
+     끝까지 밀려났다. */
   .step-checklist { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .step-checklist-item {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
     font-size: 13px;
   }
-  .step-checklist-item:last-child { border-bottom: none; }
   .step-checklist-item.muted { color: var(--text-muted); }
   .step-checklist-item input[type="checkbox"] {
     width: 14px;
@@ -341,12 +318,14 @@
     cursor: pointer;
     flex-shrink: 0;
   }
-  .step-checklist-bullet { flex-shrink: 0; font-weight: 700; }
-  .step-checklist-item label { flex: 1; cursor: pointer; }
-  .step-checklist-item span:nth-last-child(2) { flex: 1; }
+  /* 판정 축ᆞ참고용 나열ᆞ선행조건 미충족 행 - 항상 disabled 체크박스라
+     "누를 수 없다"는 걸 커서로도 알 수 있게. */
+  .step-checklist-item input[type="checkbox"]:disabled { cursor: default; opacity: 0.75; }
+  .step-checklist-item label { cursor: pointer; }
   .step-checklist-tag {
     font-size: 11px;
     color: var(--text-muted);
+    margin-left: 18px;
     flex-shrink: 0;
   }
   .step-doc-card, .step-agency-card {
@@ -374,14 +353,19 @@
     font-weight: 600;
   }
   .roadmap-step-title { flex: 1; min-width: 0; }
+  /* 대기ᆞ진행중ᆞ완료 상태를 색으로 구분하던 걸 원형 테두리 배지 하나로
+     통일(2026-08-05 피드백: "모든 상태는 동일하게 색깔 통일, 상태는 동그라미
+     테두리 넣기") - 상세 화면의 .step-detail-status와 같은 pill 모양으로
+     맞춰 두 화면이 같은 시각 언어를 쓰게 한다. */
   .roadmap-step-status-text {
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 600;
     color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 10px;
     flex-shrink: 0;
   }
-  .roadmap-step.current .roadmap-step-status-text { color: var(--accent); }
-  .roadmap-step.done .roadmap-step-status-text { color: var(--done); }
   .roadmap-step-subtitle {
     font-size: 12px;
     color: var(--text-muted);
@@ -733,7 +717,6 @@
       </div>
       <div class="next-action-headline" id="nextActionHeadline"></div>
     </div>
-    <div class="next-action-side" id="nextActionSide"></div>
   </div>
 
   <div class="main-grid">
@@ -814,7 +797,6 @@
   const nextActionStatsEl = document.getElementById("nextActionStats");
   const nextActionFillEl = document.getElementById("nextActionFill");
   const nextActionHeadlineEl = document.getElementById("nextActionHeadline");
-  const nextActionSideEl = document.getElementById("nextActionSide");
   const stepDetailEl = document.getElementById("stepDetail");
   const stepDetailTitleEl = document.getElementById("stepDetailTitle");
   const stepDetailMetaEl = document.getElementById("stepDetailMeta");
@@ -889,6 +871,11 @@
   // lastAddress)만 반영한다.
   function renderStatusTags() {
     const parts = [];
+    // 업종(intake.html에서 고른 카페ᆞ음식점ᆞ사무실ᆞ기타) - 예전엔 상단 진행률
+    // 바 우측(next-action-side)에만 있었는데, 좌측 상황 태그와 겹치는 주소ᆞ
+    // 판정은 삭제하고 유일하게 안 겹치던 이 값만 좌측으로 옮겼다(2026-08-05
+    // 피드백: "우측 상단 내용 삭제, 중복 없는 내용만 좌측에").
+    if (bizType) parts.push(`🏪 ${bizType}`);
     if (latestFoodResult && latestFoodResult !== "해당없음") parts.push(latestFoodResult);
     const actType = caseFacts.act_type;
     if (actType) {
@@ -1123,19 +1110,26 @@
     const permitNotNeeded = (latestPermitResult?.permit_type || caseTypeResult) === "인허가불필요";
 
     // Step 3 · 인허가 사전 검토
+    // 개별 항목(diag)은 여전히 info:true(진행률 집계에서 제외)로 남지만,
+    // done을 그 Step의 실제 필드(pre_diagnosis_checked)에 mirror시켜서 체크
+    // 여부가 아래 "확인 완료" 체크박스와 항상 같이 움직이게 한다 - 새 필드를
+    // 늘리지 않고도(스키마 확장 없음, 2026-08-05 설계 결정) 항목별 체크박스
+    // 모양은 통일하기 위함(개별 항목을 따로 클릭할 순 없고, 맨 아래 실제
+    // 체크박스 하나가 전체를 대표한다).
     const preReviewSubsteps = [];
     if (diag.length) {
-      diag.forEach((d) => preReviewSubsteps.push({ text: `🔍 ${d}`, info: true }));
+      diag.forEach((d) => preReviewSubsteps.push({ text: d, info: true, done: !!taskProgress.pre_diagnosis_checked }));
       preReviewSubsteps.push({ text: "사전 검토 확인 완료", done: !!taskProgress.pre_diagnosis_checked, field: "pre_diagnosis_checked" });
     } else {
       preReviewSubsteps.push({ text: "사전 검토", done: false, notApplicable: permitNotNeeded, naReason: "인허가 대상이 아니라 사전 검토가 필요 없습니다" });
     }
 
-    // Step 4 · 건축사사무소 선정 및 도면 작성
+    // Step 4 · 건축사사무소 선정 및 도면 작성 - 위와 동일한 이유로 개별
+    // 서류(docs)의 done을 documents_prepared에 mirror.
     const designDocsSubsteps = [];
     if (docs.length) {
-      docs.forEach((d) => designDocsSubsteps.push({ text: `📄 ${d}`, info: true }));
-      designDocsSubsteps.push({ text: "설계ᆞ서류 준비", done: !!taskProgress.documents_prepared, field: "documents_prepared" });
+      docs.forEach((d) => designDocsSubsteps.push({ text: d, info: true, done: !!taskProgress.documents_prepared }));
+      designDocsSubsteps.push({ text: "설계ᆞ서류 준비 완료 확인", done: !!taskProgress.documents_prepared, field: "documents_prepared" });
     } else {
       designDocsSubsteps.push({ text: "설계ᆞ서류 준비", done: false, notApplicable: permitNotNeeded, naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다" });
     }
@@ -1211,20 +1205,44 @@
       },
       {
         title: "착공신고 및 공사",
-        subtitle: "예상 4~8주 ᆞ 착공신고서, 시공사 계약, 인테리어 공사",
+        subtitle: "예상 4~8주 ᆞ 착공신고서, 공사감리, 소방시설, 인테리어ᆞ장비 설치",
+        // 2026-08-05 전면 개편: 기존엔 "착공신고"/"시공" 한 줄씩뿐이었는데,
+        // 실무적으로 뭘 챙겨야 하는지가 안 보인다는 피드백으로 세부 항목을
+        // 추가했다(건축법ᆞ소방시설법 근거, construction.py get_construction_guide
+        // 조사 결과 반영). 새 세부 항목은 새 task_progress 필드를 만들지 않고
+        // 같은 그룹의 기존 필드(construction_notice/construction)에 done을
+        // mirror시킨다 - 개별로 따로 체크하는 게 아니라 그룹 맨 아래 실제
+        // 체크박스 하나가 그룹 전체를 대표(2026-08-05 설계 결정, 스키마 확장 없음).
         substeps: [
           {
-            text: "착공신고", done: !!taskProgress.construction_notice, field: "construction_notice",
+            text: "착공신고서ᆞ설계도서 제출, 공사감리자 지정 여부 확인(관할 구청 건축과ᆞ건축법)",
+            info: true,
+            done: !!taskProgress.construction_notice,
+            notApplicable: !!taskProgress.interior_only,
+            naReason: "구조 공사 없이 인테리어만 진행하는 경우라 착공신고 대상이 아닙니다",
+          },
+          {
+            text: "착공신고 완료 확인",
+            done: !!taskProgress.construction_notice,
+            field: "construction_notice",
             // 구조 공사 없이 인테리어만 하는 경우 착공신고 자체가 대상이 아니다.
             notApplicable: !!taskProgress.interior_only,
             naReason: "구조 공사 없이 인테리어만 진행하는 경우라 착공신고 대상이 아닙니다",
           },
           {
-            text: "시공", done: !!taskProgress.construction, field: "construction",
+            text: "소방시설공사업자를 통한 소방시설 설치, 완공검사증명서 발급ᆞ보관(소방시설법)",
+            info: true,
+            done: !!taskProgress.construction,
             notApplicable: !!taskProgress.interior_only,
             naReason: "구조 공사 없이 인테리어만 진행하는 경우라 해당 없습니다",
           },
-          { text: "인테리어ᆞ장비 설치", done: !!taskProgress.interior_equipment, field: "interior_equipment" },
+          {
+            text: "시공 완료 확인",
+            done: !!taskProgress.construction, field: "construction",
+            notApplicable: !!taskProgress.interior_only,
+            naReason: "구조 공사 없이 인테리어만 진행하는 경우라 해당 없습니다",
+          },
+          { text: "인테리어ᆞ주방기기ᆞ결제단말기 설치(법령 근거 없음ᆞ실무 관행)", done: !!taskProgress.interior_equipment, field: "interior_equipment" },
         ],
       },
       {
@@ -1243,7 +1261,17 @@
             locked: !taskProgress.construction && !taskProgress.interior_only,
             lockReason: "공사(시공) 완료 후 설치ᆞ확인 가능",
           },
-          { text: "사용승인", done: !!taskProgress.use_approval, field: "use_approval" },
+          {
+            text: "사용승인 신청서 제출(관할 구청 건축과ᆞ건축법)",
+            info: true,
+            done: !!taskProgress.use_approval,
+          },
+          {
+            text: "정화조 설치ᆞ처리대상인원 확인, 건축물대장 반영 확인(정화조: 환경부고시 / 건축물대장: 법령 근거 없음ᆞ실무 관행)",
+            info: true,
+            done: !!taskProgress.use_approval,
+          },
+          { text: "사용승인 완료 확인", done: !!taskProgress.use_approval, field: "use_approval" },
         ],
       },
       {
@@ -1272,9 +1300,24 @@
           // 실제로는 임대차계약서(임차인 서류, documents_prepared에 포함) +
           // 영업신고 종류 판정(식품위생법상 대상 여부까지 확정)이 나온 뒤에야
           // 진행 가능하다(2026-07-28 피드백: "임대차계약서ᆞ영업신고 나온
-          // 후에 진행할 수 있으니까").
+          // 후에 진행할 수 있으니까"). 아래 두 세부 항목도 같은 잠금 조건ᆞ
+          // 같은 필드(business_registration)를 공유한다.
           {
-            text: "사업자등록",
+            text: "필요서류 준비(임대차계약서 사본, 영업신고증 사본 등 - 부가가치세법ᆞ실무 관행 혼합)",
+            info: true,
+            done: !!taskProgress.business_registration,
+            locked: !((taskProgress.documents_prepared || permitNotNeeded) && latestFoodResult != null),
+            lockReason: "임대차계약서ᆞ영업신고 확인 후 진행 가능",
+          },
+          {
+            text: "간이ᆞ일반과세자 여부 확인(관할 세무서ᆞ세무사 상담 권장, 부가가치세법)",
+            info: true,
+            done: !!taskProgress.business_registration,
+            locked: !((taskProgress.documents_prepared || permitNotNeeded) && latestFoodResult != null),
+            lockReason: "임대차계약서ᆞ영업신고 확인 후 진행 가능",
+          },
+          {
+            text: "사업자등록 신청 완료 확인(관할 세무서, 사업 개시일로부터 20일 이내ᆞ부가가치세법)",
             done: !!taskProgress.business_registration,
             field: "business_registration",
             // 인허가불필요 케이스(예: 일반수선)는 서류 준비 자체가 없어
@@ -1286,7 +1329,7 @@
             lockReason: "임대차계약서ᆞ영업신고 확인 후 진행 가능",
           },
           {
-            text: "위생교육",
+            text: "위생교육 이수(사전교육 6시간, 원격교육 가능ᆞ식품위생법 시행령 제21조제8호)",
             done: !!taskProgress.hygiene_education,
             field: "hygiene_education",
             // 위생교육 의무는 식품위생법상 영업자ᆞ종업원 대상 - 식품위생법
@@ -1299,7 +1342,7 @@
       },
       {
         title: "간판신고 및 오픈 준비",
-        subtitle: "예상 1주 ᆞ 옥외광고물 신고, 결제 단말기, 최종 점검",
+        subtitle: "예상 1주 ᆞ 옥외광고물 신고, 직원 등록, 최종 점검",
         substeps: [
           {
             text: latestSignageResult ? `간판: ${latestSignageResult}` : "간판ᆞ옥외광고물",
@@ -1313,13 +1356,20 @@
             locked: !taskProgress.construction && !taskProgress.interior_only,
             lockReason: "공사(시공) 완료 후 설치 가능",
           },
+          {
+            text: "서울시 옥외광고물 조례상 세부 규격 확인(설치 전, 조례 제9조의2)",
+            info: true,
+            done: latestSignageResult != null,
+            locked: !taskProgress.construction && !taskProgress.interior_only,
+            lockReason: "공사(시공) 완료 후 설치 가능",
+          },
           // 1인ᆞ가족 운영이라 직원을 안 두면(hires_staff=False) 4대보험
           // 가입 신고 자체가 대상이 아니다 - 계속 미완료로 남아 진행률이
           // 100%를 못 채우는 문제가 있었다(2026-07-28, project_status.py와
           // 동일 기준). 실제 채용ᆞ근무 시작 시점에 하는 절차라, 최소한
           // 사업자등록이 끝난 뒤에나 진행 가능하다(2026-07-28 확인).
           {
-            text: "직원 등록(4대보험 가입)",
+            text: "직원 등록(4대보험 가입 - 국민연금법ᆞ국민건강보험법ᆞ고용보험법ᆞ고용산재보험료징수법)",
             done: !!taskProgress.staff_registration || taskProgress.hires_staff === false,
             // 직원을 안 두면(1인ᆞ가족 운영) 4대보험 가입 대상이 아니라 ✕로 닫는다.
             notApplicable: taskProgress.hires_staff === false,
@@ -1327,6 +1377,13 @@
             field: "staff_registration",
             locked: !taskProgress.business_registration,
             lockReason: "사업자등록 완료 후 진행 가능",
+          },
+          {
+            text: "최종 점검(사업자등록증ᆞ영업신고증 게시 등 - 법령 근거 없음ᆞ실무 관행)",
+            info: true,
+            done: !!taskProgress.opened,
+            locked: !step3AllDone,
+            lockReason: "식품위생ᆞ간판ᆞ사업자등록ᆞ위생교육 완료 후 가능",
           },
           // 영업 시작은 로드맵의 마지막 관문 - 식품위생ᆞ간판ᆞ사업자등록ᆞ
           // 위생교육이 전부 끝나야 실제로 열 수 있다(2026-07-28). 소방시설은
@@ -1357,6 +1414,21 @@
     // 완료 여부 개념이 없으니 done/total 집계에서 제외한다 - 안 그러면
     // "나열됨"이 "완료됨"으로 잘못 집계되는 문제가 재발한다.
     const countable = (step) => step.substeps.filter((s) => !s.info);
+
+    // "병렬 진행 가능" 배지(2026-08-05 피드백) - project_status.py가 이미
+    // 나누고 있는 "건축 트랙(순차, Step0~착공/공사)ᆞ창업 준비 트랙(병렬,
+    // 사업자등록ᆞ위생교육/간판ᆞ오픈준비)" 경계를 그대로 재사용한다. 건축
+    // 트랙의 마지막 단계(steps[5] "착공신고 및 공사")가 아직 안 끝났으면,
+    // 창업 준비 트랙에 속한 steps[7]("사업자등록 및 위생교육")ᆞsteps[8]
+    // ("간판신고 및 오픈 준비")은 지금부터 병행 진행이 가능하다고 표시한다.
+    const constructionStep = steps[5];
+    const constructionDone = constructionStep
+      ? countable(constructionStep).every((s) => s.done)
+      : false;
+    if (!constructionDone) {
+      [7, 8].forEach((i) => { if (steps[i]) steps[i].parallel = true; });
+    }
+
     let currentIdx = steps.findIndex((step) => {
       const items = countable(step);
       const doneCount = items.filter((s) => s.done).length;
@@ -1390,8 +1462,14 @@
       const architectBadge = step.architect === true
         ? `<span class="roadmap-architect-badge needed" title="건축법 제23조: 건축사 설계 의무 대상">🏛 건축사사무소 대행</span>`
         : "";
+      // 이미 다 끝난 스텝은 "병렬로 진행하세요"라고 말할 이유가 없으니
+      // allDone이면 배지를 숨긴다(steps[7]/steps[8]에 parallel=true가 찍혀
+      // 있어도 그 스텝 자체가 이미 완료됐으면 무의미).
+      const parallelBadge = (step.parallel && !allDone)
+        ? `<span class="roadmap-parallel-badge" title="건축(공사) 트랙이 아직 진행 중이어도 이 스텝은 지금부터 병행 진행 가능합니다">⇄ 병렬 진행 가능</span>`
+        : "";
       const statusWord = allDone ? "완료" : (isCurrent || hasProgress) ? "진행 중" : "대기";
-      head.innerHTML = `<span class="roadmap-step-title">STEP ${idx + 1} ᆞ ${step.title}</span>${architectBadge}<span class="roadmap-step-status-text">${statusWord}</span>`;
+      head.innerHTML = `<span class="roadmap-step-title">STEP ${idx + 1} ᆞ ${step.title}</span>${architectBadge}${parallelBadge}<span class="roadmap-step-status-text">${statusWord}</span>`;
       stepEl.appendChild(head);
 
       // 한 줄 부제 - 예전엔 substep 텍스트를 그대로 이어붙였는데, 9단계로
@@ -1404,9 +1482,13 @@
       subtitle.textContent = step.subtitle || "";
       stepEl.appendChild(subtitle);
 
-      // 지금 단계(진행 중)에만 참조 이미지처럼 별도 텍스트 링크를 보여준다 -
-      // 나머지는 카드 전체 클릭으로 충분(위 stepEl 클릭 핸들러).
-      if (isCurrent) {
+      // "진행 중"으로 표시되는 모든 스텝(공식 current 하나뿐 아니라, 순서를
+      // 벗어나 먼저 일부 체크된 스텝도 포함)에 별도 텍스트 링크를 보여준다 -
+      // 예전엔 currentIdx 하나에만 링크가 있어서 "진행 중" 배지가 붙은
+      // 다른 스텝은 카드를 통째로 눌러야만 상세로 들어갈 수 있었다
+      // (2026-08-05 피드백: "진행중이면 단계 상세보기 다 보이게"). 나머지
+      // (대기ᆞ완료)는 카드 전체 클릭으로 충분(위 stepEl 클릭 핸들러).
+      if (isCurrent || hasProgress) {
         const link = document.createElement("button");
         link.type = "button";
         link.className = "roadmap-step-detail-link";
@@ -1436,21 +1518,11 @@
   // 받아써서 같은 판정을 두 번 하지 않는다(로드맵 목록과 다른 숫자를
   // 말하면 안 된다는 기존 원칙, renderNextAction 주석 참고).
   function renderSummaryCards(steps, countable, currentIdx) {
-    // 상단 % 행 오른쪽 압축 요약 - intake.html에서 이미 확인시킨 값이라
-    // 사이드 패널에 큰 카드로 중복 표시하지 않는다(2026-08-05 피드백).
-    const bizTypeLabel = bizType || "업종 미입력";
-    const addressLabel = lastAddress || "주소 미입력";
-    const actTypeLabel = caseTypeResult || caseFacts.act_type || "판정 전";
-    // 9단계 전체 예상 기간 합산(1~3단계는 0일이라 더해도 영향 없음).
-    let totalMin = 0, totalMax = 0;
-    STEP_DURATION_DAYS.forEach(([min, max]) => {
-      totalMin += min;
-      totalMax += max;
-    });
-    nextActionSideEl.innerHTML = `
-      <div class="next-action-summary-line" title="${addressLabel}">🏪 ${bizTypeLabel} ᆞ 📍 ${addressLabel} ᆞ 🏗 ${actTypeLabel}</div>
-      <div class="next-action-summary-sub">예상 총 소요기간 약 ${formatDurationDays([totalMin, totalMax])}</div>
-    `;
+    // 업종ᆞ주소ᆞ판정ᆞ예상기간을 상단 % 행 오른쪽에 압축 요약으로 따로
+    // 보여주던 블록(next-action-side)은 제목 아래 상황 태그(header-tags,
+    // renderStatusTags)와 내용이 겹쳐서 삭제했다(2026-08-05 피드백:
+    // "우측 상단 내용 삭제 - 좌측 상단과 중복"). 겹치지 않던 업종만
+    // renderStatusTags로 옮겼다.
 
     // 완료ᆞ진행중ᆞ대기 건수 - Step 5개 기준 집계, 상단 % 바로 아래 붙인다
     // (예전엔 사이드 패널 "전체 진행률" 카드에 따로 있었는데, 상단 %와 같은
@@ -1892,10 +1964,17 @@
     if (agencies.length) metaParts.push(`관할 기관: ${agencies.join(", ")}`);
     stepDetailMetaEl.textContent = metaParts.join(" ᆞ ");
 
-    // 체크리스트 - info(참고용 서류ᆞ사전진단 나열) 줄은 아래 "필요 서류"
-    // 카드에서 따로 보여주므로 여기선 뺀다.
+    // 체크리스트 - 예전엔 사용자가 직접 누를 수 있는 항목(field 있음)만
+    // 체크박스였고, 판정 축ᆞ참고용 나열 줄(info)은 ✓/🔒/○ 기호로 따로
+    // 표시해서 모양이 제각각이었다. 2026-08-05 피드백("전부 체크박스 형태로
+    // 통일")에 따라 모든 행을 체크박스 모양으로 그리되, 사용자가 실제로
+    // 누를 수 있는 건 여전히 field가 있고 잠기지 않은 행뿐이다(CLAUDE.md
+    // 원칙 - 판정 축은 시스템이 결정, 사용자가 못 뒤집음ᆞ자동 체크는 채팅으로
+    // 확인된 내용만 반영 - 은 그대로 유지, 시각적 통일만 한 것). info 행도
+    // 이제 여기서 같이 그린다(예전엔 "필요 서류" 카드에서만 보여줬는데, 그
+    // 카드는 latestPermitResult를 독립적으로 다시 읽으므로 내용은 안 겹친다).
     stepChecklistEl.innerHTML = "";
-    step.substeps.filter((s) => !s.info).forEach((sub) => {
+    step.substeps.forEach((sub) => {
       const row = document.createElement("div");
       row.className = "step-checklist-item";
       const lockedNow = sub.locked && !sub.done;
@@ -1903,12 +1982,13 @@
       if (sub.notApplicable) tag = "해당없음";
       else if (lockedNow) tag = "선행조건 필요";
 
-      if (sub.field && !lockedNow) {
+      const interactive = sub.field && !lockedNow;
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = !!sub.done;
+      if (interactive) {
         const checkboxId = `step-check-${sub.field}`;
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
         checkbox.id = checkboxId;
-        checkbox.checked = sub.done;
         checkbox.disabled = !!sub.notApplicable;
         checkbox.addEventListener("change", () => toggleTaskProgress(sub.field, checkbox.checked));
         const label = document.createElement("label");
@@ -1917,12 +1997,13 @@
         row.appendChild(checkbox);
         row.appendChild(label);
       } else {
-        const bullet = document.createElement("span");
-        bullet.className = "step-checklist-bullet";
-        bullet.textContent = sub.done ? "✓" : lockedNow ? "🔒" : "○";
+        // 판정 축(시스템이 결정)ᆞ참고용 나열ᆞ선행조건 미충족 행은 항상
+        // disabled - 사용자가 못 누르고, 실제 필드가 채워지면 자동으로만
+        // 체크 표시가 바뀐다.
+        checkbox.disabled = true;
         const text = document.createElement("span");
         text.textContent = sub.text;
-        row.appendChild(bullet);
+        row.appendChild(checkbox);
         row.appendChild(text);
       }
       if (sub.notApplicable || lockedNow) row.classList.add("muted");

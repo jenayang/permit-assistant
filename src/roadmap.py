@@ -422,3 +422,96 @@ def _should_force_construction_guide(state: "AgentState") -> bool:
         return False
     prior_text = extract_text(messages[-2].content)
     return any(kw in prior_text for kw in _STEP2_KEYWORDS)
+
+
+# 2026-08-05: "간판(Step9) 얘기를 먼저 꺼내면 챗봇이 어떻게 반응해야 하나"는
+# 사용자 피드백에서 나온 원칙 - 판정(food/fire/signage)은 2026-07-27 결정대로
+# 대화 순서와 무관하게 즉답하되(_roadmap_status_summary 219~238행 참고), 그
+# 뒤에 "실제로 언제 진행하면 좋은지"(병렬 가능하면 지금 진행 유도, 아니면
+# 선행 단계 명시)를 덧붙인다. 여기 적힌 잠금 조건ᆞ이유 문구는 src/static/
+# index.html의 renderRoadmap() 안 lockReason 문자열과 반드시 같은 사실을
+# 가리켜야 한다(단, 프론트가 아는 UI 문구를 그대로 복붙하는 게 아니라 채팅
+# 톤에 맞게 다시 쓴 것 - STEP_AGENCY_FALLBACK처럼 의도적으로 중복 유지되는
+# 표, 2026-08-04 선례와 동일 패턴).
+def _fire_signage_unlocked(task_progress: dict) -> bool:
+    """소방시설ᆞ간판 실제 설치가 가능해졌는지 - index.html의 소방ᆞ간판 항목
+    lockReason("공사(시공) 완료 후 설치 가능")과 동일 조건."""
+    return bool(task_progress.get("construction") or task_progress.get("interior_only"))
+
+
+def _food_report_unlocked(task_progress: dict) -> bool:
+    """식품위생 영업신고 실제 접수가 가능해졌는지 - index.html의
+    lockReason("사용승인 완료 후 신고 가능")과 동일 조건."""
+    return bool(task_progress.get("use_approval"))
+
+
+def domain_timing_directive(state: "AgentState") -> str | None:
+    """판정이 끝난 도메인(소방ᆞ간판ᆞ식품위생ᆞ위생교육ᆞ사업자등록)에 대해,
+    "지금 실제로 진행해도 되는지ᆞ아직 뭘 기다려야 하는지"를 결정론적으로
+    계산해 SystemMessage로 얹는다. permit_phase_directive와 같은 패턴 -
+    사실은 여기서 코드가 계산하고, LLM은 그 사실을 옮겨 답변에 반영하기만
+    한다(CLAUDE.md 원칙: 판정ᆞ사실 계산은 코드, 설명은 LLM).
+
+    프롬프트가 매 턴 비대해지지 않도록, 결과가 존재하는(판정이 끝난) 도메인만
+    골라 한두 줄씩만 담는다 - 판정 자체가 없는 도메인은 아예 언급하지 않는다.
+    """
+    task_progress = state.get("task_progress") or {}
+    food_result = state.get("food_result")
+    fire_result = state.get("fire_result")
+    signage_result = state.get("signage_result")
+    permit_result = state.get("permit_result")
+
+    lines: list[str] = []
+
+    if fire_result is not None or signage_result is not None:
+        if _fire_signage_unlocked(task_progress):
+            lines.append(
+                "소방시설ᆞ간판: 공사(시공)가 이미 끝났으니 지금 바로 설치를 "
+                "진행하셔도 됩니다."
+            )
+        else:
+            lines.append(
+                "소방시설ᆞ간판: 종류ᆞ대상 판정은 지금 확인해드릴 수 있지만, "
+                "실제 설치는 공사(시공)가 끝난 뒤에 하시면 됩니다 - 미리 "
+                "판정만 확인해두고 시공 마무리 즈음에 진행하시라고 안내하세요."
+            )
+
+    if food_result is not None:
+        if _food_report_unlocked(task_progress):
+            lines.append(
+                "식품위생 영업신고: 사용승인이 이미 끝났으니 지금 바로 "
+                "관할 보건소에 신고 접수를 진행하셔도 됩니다."
+            )
+        else:
+            lines.append(
+                "식품위생 영업신고: 어떤 영업 종류인지 판정은 지금 확인해드릴 "
+                "수 있지만, 실제 신고 접수는 사용승인이 끝난 뒤에 가능합니다 - "
+                "그 전까지는 병렬로 준비만 해두시라고 안내하세요."
+            )
+        lines.append(
+            "위생교육: 사업 진행 단계와 무관하게 언제든 미리 이수하실 수 "
+            "있습니다(병렬 진행 가능) - 공사가 진행되는 동안 미리 받아두시길 "
+            "권해도 됩니다."
+        )
+
+    if permit_result is not None:
+        permit_type = getattr(permit_result, "permit_type", None)
+        permit_not_needed = permit_type == "인허가불필요"
+        docs_ready = bool(task_progress.get("documents_prepared")) or permit_not_needed
+        if docs_ready and food_result is not None:
+            lines.append(
+                "사업자등록: 임대차계약서 등 서류ᆞ영업신고 종류가 이미 확인됐으니 "
+                "지금 바로 관할 세무서에 신청하셔도 됩니다(공사 완료를 기다릴 "
+                "필요 없음, 병렬 진행 가능)."
+            )
+        elif food_result is not None:
+            lines.append(
+                "사업자등록: 임대차계약서 등 서류ᆞ영업신고 종류 확인이 끝나야 "
+                "진행할 수 있습니다 - 공사(시공) 완료를 기다릴 필요는 없고, "
+                "그 두 가지만 준비되면 공사 중이라도 바로 신청 가능하다고 "
+                "안내하세요."
+            )
+
+    if not lines:
+        return None
+    return "[실행 시점 참고 - 사용자가 순서를 벗어나 물어봐도 이 사실 그대로 반영] " + " ".join(lines)

@@ -234,7 +234,9 @@ def _fire_signage_gap_violations(state: "AgentState", messages) -> list[str]:
             "사용자가 소방시설에 대해 직접 물었는데 아직 판정(fire_result)이 안 됐습니다. "
             "연면적(size_sqm) 등 필요한 사실을 이미 알고 있으면 지금 record_fire_facts를 "
             "호출해 판정하고, 부족하면 무엇이 더 필요한지 구체적으로 되물으세요 - "
-            "일반적인 지식으로 답하고 넘어가지 마세요."
+            "일반적인 지식으로 답하고 넘어가지 마세요. 판정 후에는 실행 시점(공사 진행 중 "
+            "여부에 따라 지금 진행 가능한지, 아니면 시공 완료 후인지)도 함께 안내하세요 - "
+            "이 사실은 [실행 시점 참고] SystemMessage로 별도 제공됩니다."
         )
     if (
         any(kw in last_human for kw in ("간판", "옥외광고"))
@@ -245,7 +247,9 @@ def _fire_signage_gap_violations(state: "AgentState", messages) -> list[str]:
             "사용자가 간판ᆞ옥외광고물에 대해 직접 물었는데 아직 판정(signage_result)이 "
             "안 됐습니다. sign_type 등 필요한 사실을 이미 알고 있으면 지금 "
             "record_signage_facts를 호출해 판정하고, 부족하면 무엇이 더 필요한지 "
-            "구체적으로 되물으세요 - 일반적인 지식으로 답하고 넘어가지 마세요."
+            "구체적으로 되물으세요 - 일반적인 지식으로 답하고 넘어가지 마세요. 판정 후에는 "
+            "실행 시점(공사 진행 중 여부에 따라 지금 설치 가능한지, 아니면 시공 완료 후인지)도 "
+            "함께 안내하세요 - 이 사실은 [실행 시점 참고] SystemMessage로 별도 제공됩니다."
         )
     return violations
 

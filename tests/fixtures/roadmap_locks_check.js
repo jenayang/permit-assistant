@@ -189,8 +189,11 @@ function check(label, passed) {
 // "사용승인ᆞ완공검사"에, 간판은 "간판신고 및 오픈 준비"에 재배치)
 {
   let steps = buildSteps({ ...commonArgs, latestFoodResult: null, latestFireResult: [], latestSignageResult: null, taskProgress: { interior_only: true } });
-  check("interior_only: 착공신고 해당없음", !!findSub(steps, "착공신고 및 공사", "착공신고").notApplicable);
-  check("interior_only: 시공 해당없음", !!findSub(steps, "착공신고 및 공사", "시공").notApplicable);
+  // "착공신고"만 접두어로 쓰면 2026-08-05에 추가된 참고용 안내 줄
+  // ("착공신고서ᆞ설계도서 제출...")도 같은 접두어라 find()가 그쪽을 먼저
+  // 집을 수 있다 - 실제 토글 대상 행("착공신고 완료 확인")을 명시적으로 지정.
+  check("interior_only: 착공신고 해당없음", !!findSub(steps, "착공신고 및 공사", "착공신고 완료 확인").notApplicable);
+  check("interior_only: 시공 해당없음", !!findSub(steps, "착공신고 및 공사", "시공 완료 확인").notApplicable);
 
   steps = buildSteps({ ...commonArgs, latestFoodResult: null, latestFireResult: ["소화기구"], latestSignageResult: null, taskProgress: { interior_only: true } });
   check("interior_only: 소방시설은 construction 없이도 잠금 해제", !isVisuallyLocked(findSub(steps, "사용승인ᆞ완공검사", "소방시설")));

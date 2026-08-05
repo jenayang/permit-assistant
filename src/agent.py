@@ -312,6 +312,7 @@ def _get_cerebras_llm_with_tools(tool_choice: str | None = None):
 from src.roadmap import (  # noqa: E402
     _roadmap_status_summary,
     _should_force_construction_guide,
+    domain_timing_directive,
     permit_phase_directive,
 )
 from src.guard import _CITATION_PATTERN  # noqa: E402
@@ -450,6 +451,9 @@ def agent_node(state: AgentState) -> dict:
     directive = permit_phase_directive(state)
     if directive:
         prefix.append(SystemMessage(content=directive))
+    timing_directive = domain_timing_directive(state)
+    if timing_directive:
+        prefix.append(SystemMessage(content=timing_directive))
     messages = prefix + _fit_context(prefix, list(state["messages"]), _gemini_quota_exhausted)
 
     # 공사 안내 강제가 우선 - Step1→2 전환은 그 턴에 반드시 짚어야 하는 지점이라,

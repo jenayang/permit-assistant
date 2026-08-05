@@ -19,6 +19,7 @@ from src.roadmap import (
     _mentioned_construction_stages,
     _pending_stage2_confirmation,
     _should_force_construction_guide,
+    domain_timing_directive,
     permit_phase_directive,
 )
 
@@ -711,6 +712,52 @@ def test_guard_allows_step1_3_after_step1_2_confirmed():
     assert not any(
         isinstance(m, ToolMessage) and m.name == "_answer_guard" for m in update.get("messages", [])
     )
+
+
+# 2026-08-05: "간판(Step9)을 먼저 물어봐도 판정은 즉답하되, 실행 시점
+# (병렬 가능ᆞ선행 단계)도 같이 안내하라"는 사용자 피드백에서 나온
+# domain_timing_directive - 판정 여부와 무관하게 아무것도 없으면 None,
+# 판정된 도메인이 있으면 시공ᆞ사용승인 완료 여부에 따라 문구가 갈린다.
+def test_domain_timing_directive_none_when_no_domain_results():
+    state = _base_state()
+    assert domain_timing_directive(state) is None
+
+
+def test_domain_timing_directive_fire_signage_locked_before_construction():
+    state = _base_state()
+    state["fire_result"] = ["소화기구"]
+    state["signage_result"] = "신고"
+    state["task_progress"] = {}
+    directive = domain_timing_directive(state)
+    assert directive is not None
+    assert "시공" in directive and "끝난 뒤" in directive
+
+
+def test_domain_timing_directive_fire_signage_unlocked_after_construction():
+    state = _base_state()
+    state["fire_result"] = ["소화기구"]
+    state["signage_result"] = "신고"
+    state["task_progress"] = {"construction": True}
+    directive = domain_timing_directive(state)
+    assert "지금 바로 설치를 진행" in directive
+
+
+def test_domain_timing_directive_food_report_locked_before_use_approval():
+    state = _base_state()
+    state["food_result"] = "일반음식점"
+    state["task_progress"] = {}
+    directive = domain_timing_directive(state)
+    assert "사용승인이 끝난 뒤" in directive
+    # 위생교육은 언제든 가능하다는 안내가 항상 같이 붙는다(병렬 진행 가능).
+    assert "위생교육" in directive and "병렬 진행 가능" in directive
+
+
+def test_domain_timing_directive_food_report_unlocked_after_use_approval():
+    state = _base_state()
+    state["food_result"] = "일반음식점"
+    state["task_progress"] = {"use_approval": True}
+    directive = domain_timing_directive(state)
+    assert "지금 바로" in directive and "신고 접수를 진행" in directive
 
 
 def test_correction_omission_ignores_without_prior_numeric_facts():
