@@ -33,8 +33,9 @@ function buildSteps({
   applyStepTitle = "허가ᆞ신고 신청ᆞ접수",
   // 2026-08-05: Step1 체크리스트가 lastAddress/caseFacts를 직접 참조하도록
   // 바뀌면서 새로 필요해진 자유변수 - 이 테스트는 Step1 자체를 검증하지
-  // 않으므로 기본값만 준다.
-  lastAddress = null, caseFacts = {},
+  // 않으므로 기본값만 준다. itemChecks는 개별 항목 로컬 체크(체크박스
+  // 비활성화 버그 수정, Task16) 도입으로 추가.
+  lastAddress = null, caseFacts = {}, itemChecks = {},
 }) {
   // renderRoadmap()의 classified(buildChecklists()와 동일 정의)를 그대로
   // 재현 - "신고ᆞ허가 대상 판단" Step의 substep이 참조한다.
@@ -43,19 +44,27 @@ function buildSteps({
     "latestFoodResult", "latestFireResult", "latestSignageResult", "taskProgress",
     "actType", "latestPermitResult", "caseTypeResult", "requiresArchitect", "permitNotNeeded", "classified",
     "factInfoLines", "preReviewSubsteps", "designDocsSubsteps", "applicationSubsteps", "applyStepTitle",
-    "lastAddress", "caseFacts",
+    "lastAddress", "caseFacts", "itemChecks",
     block + "\nreturn steps;"
   );
   return fn(
     latestFoodResult, latestFireResult, latestSignageResult, taskProgress,
     actType, latestPermitResult, caseTypeResult, requiresArchitect, permitNotNeeded, classified,
     factInfoLines, preReviewSubsteps, designDocsSubsteps, applicationSubsteps, applyStepTitle,
-    lastAddress, caseFacts
+    lastAddress, caseFacts, itemChecks
   );
 }
 
-// renderRoadmap()의 실제 분기(sub.field가 있으면 locked&&!done일 때만 잠금
-// 표시, 없으면 locked만으로 잠금 표시)를 그대로 흉내낸다.
+// renderStepDetail()의 실제 계산(const lockedNow = sub.locked && !sub.done)을
+// 그대로 쓰되, 판정 축 행(소방시설ᆞ간판ᆞ식품위생 등)은 "done=판정 여부"와
+// "locked=설치ᆞ신고 가능 여부"가 서로 다른 뜻인데 같은 substep에 얹혀 있어
+// done이 true가 되는 순간 lockedNow가 항상 false로 죽어버리는 기존 설계
+// 특성이 있다(2026-08-05 확인 - 이번 작업 범위 밖이라 손대지 않음, 이
+// 헬퍼는 그 특성을 무시하고 "locked 플래그가 올바른 선행조건에 걸려있는지"
+// 자체만 검증하기 위해 done을 안 본다). checkKey로 새로 개별 체크 가능해진
+// info 행(Step8/9 세부 항목)은 done(itemChecks)과 locked(진짜 선행조건)가
+// 독립적이라 이 근사가 필요 없지만, 지금 그 행들을 잠금 기준으로 검증하는
+// 테스트가 없어 당장은 무해하다.
 function isVisuallyLocked(sub) {
   if (sub.info) return false;
   if (sub.notApplicable) return false;  // 해당없음(✕)이 잠금보다 우선 - 실제 렌더와 동일

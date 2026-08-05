@@ -925,6 +925,14 @@
   let latestFireResult = null; // /query 응답의 fire_result(필요 소방시설 목록, 배열)를 그대로 보관
   let latestSignageResult = null; // /query 응답의 signage_result(간판ᆞ옥외광고물 허가/신고 판정)를 그대로 보관
   let taskProgress = {}; // /query 응답의 task_progress(사용자가 실제로 완료했다고 밝힌 항목)를 그대로 보관
+  // 체크리스트의 세부 항목(문서 목록ᆞ실무 디테일 줄)을 사용자가 개별로
+  // 체크할 수 있게 하는 로컬 전용 상태(2026-08-05 피드백: "비활성화된
+  // 체크박스는 왜 그런지, 사용자가 다 체크할 수 있게 열어두고"). task_progress
+  // (백엔드ᆞ잠금 계산의 단일 소스)와는 분리된 "개인 할 일 표시" 용도라
+  // localStorage에만 저장하고 서버에 보내지 않는다 - 어떤 항목을 체크했는지가
+  // 잠금 해제ᆞ진행률 계산에 영향을 주면 안 되기 때문(그건 여전히 각 단계의
+  // 실제 field 체크박스ᆞ판정 축만 담당).
+  let itemChecks = {};
   let requiresArchitect = null; // project_status.requires_architect(건축법 제23조 건축사 설계 의무 대상 여부). true=대행 필요, false=개인 직접 가능, null=정보부족. 백엔드 규칙 엔진 계산값을 그대로 보관(프론트에서 재계산 안 함)
   // case_facts엔 주소가 없다(record_case_facts 파라미터에 address가 없음) -
   // lookup_building_ledger/lookup_land_zone 호출 인자에서 가장 최근 주소를
@@ -1162,6 +1170,15 @@
     renderRoadmap();
   }
 
+  // itemChecks 토글 - 서버 호출 없이 로컬에만 저장하고 즉시 다시 그린다.
+  // toggleTaskProgress와 달리 실패할 API 호출이 없으니 낙관적 갱신ᆞ롤백
+  // 로직이 필요 없다.
+  function toggleItemCheck(key) {
+    itemChecks = { ...itemChecks, [key]: !itemChecks[key] };
+    localStorage.setItem("permit_assistant_item_checks", JSON.stringify(itemChecks));
+    renderRoadmap();
+  }
+
   // 전체 창업 로드맵(9단계) 요약 - 판정(permit_result/food_result/
   // fire_result/signage_result)이 난 항목과 사용자가 완료를 직접 말한 항목
   // (task_progress)만 체크한다. 판정 축 항목은 시스템이 근거를 갖고 확인한
@@ -1191,45 +1208,59 @@
     // 별도 Step(3ᆞ4ᆞ5)으로 분리 - 항목 자체와 판정 로직은 그대로, 배치만 바꿈.)
     const permitNotNeeded = (latestPermitResult?.permit_type || caseTypeResult) === "인허가불필요";
 
-    // Step 3 · 인허가 사전 검토
-    // 개별 항목(diag)은 여전히 info:true(진행률 집계에서 제외)로 남지만,
-    // done을 그 Step의 실제 필드(pre_diagnosis_checked)에 mirror시켜서 체크
-    // 여부가 아래 "확인 완료" 체크박스와 항상 같이 움직이게 한다 - 새 필드를
-    // 늘리지 않고도(스키마 확장 없음, 2026-08-05 설계 결정) 항목별 체크박스
-    // 모양은 통일하기 위함(개별 항목을 따로 클릭할 순 없고, 맨 아래 실제
-    // 체크박스 하나가 전체를 대표한다).
+    // Step 3 · 인허가 사전 검토 - 개별 항목(diag)은 여전히 info:true(진행률
+    // 집계에서 제외)지만, 2026-08-05부터 done을 공유 필드에 mirror하는
+    // 대신 checkKey로 로컬에서 독립적으로 체크 가능하게 바꿨다(피드백:
+    // "비활성화된 체크박스는 왜 그런지, 사용자가 다 체크할 수 있게 열어두고").
+    // "없음" 폴백 줄에도 실제 field를 달아준다 - 예전엔 diag가 비어있으면
+    // notApplicable이 아닌 이상 영원히 체크 불가능한 죽은 체크박스였다(세션
+    // b846cc22에서 신고된 "Step3 다 막혀있음" 버그의 원인).
     const preReviewSubsteps = [];
     if (diag.length) {
-      diag.forEach((d) => preReviewSubsteps.push({ text: d, info: true, done: !!taskProgress.pre_diagnosis_checked }));
-      preReviewSubsteps.push({ text: "사전 검토 확인 완료", done: !!taskProgress.pre_diagnosis_checked, field: "pre_diagnosis_checked" });
-    } else {
-      preReviewSubsteps.push({ text: "사전 검토", done: false, notApplicable: permitNotNeeded, naReason: "인허가 대상이 아니라 사전 검토가 필요 없습니다" });
+      diag.forEach((d, i) => preReviewSubsteps.push({ text: d, info: true, checkKey: `pre_diag:${i}:${d}`, done: !!itemChecks[`pre_diag:${i}:${d}`] }));
     }
+    preReviewSubsteps.push({ text: "사전 검토 확인 완료", done: !!taskProgress.pre_diagnosis_checked, field: "pre_diagnosis_checked", notApplicable: permitNotNeeded, naReason: "인허가 대상이 아니라 사전 검토가 필요 없습니다" });
 
     // Step 4 · 건축사사무소 선정 및 도면 작성 - 위와 동일한 이유로 개별
-    // 서류(docs)의 done을 documents_prepared에 mirror.
-    const designDocsSubsteps = [];
+    // 서류(docs)를 checkKey로 독립 체크 가능하게. "건축사사무소 선정"은
+    // architect_selected/uses_agency(이미 백엔드에 있던 필드, 2026-08-04
+    // 건축사 게이트용으로 도입됐지만 로드맵 UI엔 반영된 적이 없었음)를
+    // 실제 체크박스로 노출한다 - docs/roadmap_step_checklist.md에서
+    // 확인된 가장 큰 공백.
+    const designDocsSubsteps = [
+      {
+        text: "건축사사무소 의뢰 및 계약 체결(직접 진행 시 진행 방식 확정)",
+        done: !!taskProgress.architect_selected,
+        field: "architect_selected",
+        notApplicable: taskProgress.uses_agency === false,
+        naReason: "직접 진행하기로 하셔서 건축사사무소 선정이 필요 없습니다",
+      },
+      { text: "구조 검토(2층 이상ᆞ연면적 200㎡ 초과 등 해당 시 - 건축법 시행령 제32조)", info: true, checkKey: "design:structure_review", done: !!itemChecks["design:structure_review"] },
+    ];
     if (docs.length) {
-      docs.forEach((d) => designDocsSubsteps.push({ text: d, info: true, done: !!taskProgress.documents_prepared }));
-      designDocsSubsteps.push({ text: "설계ᆞ서류 준비 완료 확인", done: !!taskProgress.documents_prepared, field: "documents_prepared" });
-    } else {
-      designDocsSubsteps.push({ text: "설계ᆞ서류 준비", done: false, notApplicable: permitNotNeeded, naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다" });
+      docs.forEach((d, i) => designDocsSubsteps.push({ text: d, info: true, checkKey: `docs:${i}:${d}`, done: !!itemChecks[`docs:${i}:${d}`] }));
     }
+    designDocsSubsteps.push({ text: "설계ᆞ서류 준비 완료 확인", done: !!taskProgress.documents_prepared, field: "documents_prepared", notApplicable: permitNotNeeded, naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다" });
 
-    // Step 5 · 허가ᆞ신고 신청ᆞ접수
-    const applicationSubsteps = [{
-      text: "신청ᆞ접수",
-      done: !!taskProgress.application_submitted,
-      field: "application_submitted",
-      notApplicable: permitNotNeeded,
-      naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다",
-    }];
-    // 확정된 판정 종류(허가/신고/기재변경)가 있으면 Step5 제목에 그대로
-    // 반영한다 - "신청"이라는 말이 신고 케이스엔 어색할 수 있지만("신고
-    // 신청") ᆞ로 이어붙여 기존 "신청ᆞ접수" 표기와 톤을 맞춘다.
+    // Step 5 · 허가ᆞ신고 신청ᆞ접수 - 예전엔 "신청ᆞ접수" 한 줄뿐이었는데,
+    // 참조 이미지(2026-08-05)처럼 신청서 작성ᆞ서류 취합ᆞ접수ᆞ처리기간
+    // 확인ᆞ보완 대응까지 실제 절차 순서대로 나열한다.
     const applyStepTitle = (latestPermitResult?.permit_type && latestPermitResult.permit_type !== "인허가불필요")
       ? `${latestPermitResult.permit_type} 신청ᆞ접수`
       : "허가ᆞ신고 신청ᆞ접수";
+    const applicationSubsteps = [
+      { text: "신청서 작성 및 서명", info: true, checkKey: "apply:form", done: !!itemChecks["apply:form"], notApplicable: permitNotNeeded, naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다" },
+      { text: "서류 취합(도면ᆞ대지사용권원 등 준비된 서류 정리)", info: true, checkKey: "apply:gather", done: !!itemChecks["apply:gather"], notApplicable: permitNotNeeded, naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다" },
+      {
+        text: "관할 구청 건축과 방문 또는 온라인(세움터) 접수",
+        done: !!taskProgress.application_submitted,
+        field: "application_submitted",
+        notApplicable: permitNotNeeded,
+        naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다",
+      },
+      { text: "처리 기간 확인(허가 15~20일ᆞ신고 3~5일ᆞ기재변경 3~7일 - 참고용)", info: true, checkKey: "apply:duration", done: !!itemChecks["apply:duration"], notApplicable: permitNotNeeded, naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다" },
+      { text: "보완 요청 시 서류 보완 대응(법령 근거 없음ᆞ실무 관행)", info: true, checkKey: "apply:supplement", done: !!itemChecks["apply:supplement"], notApplicable: permitNotNeeded, naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다" },
+    ];
 
     // Step 4 "영업 시작" 잠금 기준 - 소방시설은 Step2로 옮겨갔으므로
     // step3AllDone에서 제외(이중 게이트 방지, 2026-08-04). 나머지 4항목
@@ -1279,6 +1310,18 @@
             done: classified,
             required: true,
           },
+          // 건축사 설계 의무 여부는 requiresArchitect(백엔드 규칙 엔진
+          // 계산값)가 나오면 자동으로 확인되는 시스템 판정이라 Step1의
+          // 3항목과 같은 방식(field 없이 required로 "필수" 표시, 사용자가
+          // 못 뒤집음)을 쓴다 - 다음 Step(건축사사무소 선정)에서 바로 쓰임.
+          {
+            text: requiresArchitect === true ? "건축사사무소 설계 의무 대상(건축법 제23조)"
+              : requiresArchitect === false ? "건축사사무소 설계 의무 없음(직접 진행 가능)"
+              : "건축사사무소 설계 의무 대상 여부 확인(건축법 제23조)",
+            done: requiresArchitect !== null,
+            required: true,
+          },
+          { text: "건폐율ᆞ용적률 법정 상한 이내 확인", info: true, checkKey: "classify:coverage_ratio", done: !!itemChecks["classify:coverage_ratio"] },
         ],
       },
       {
@@ -1322,7 +1365,8 @@
           {
             text: "착공신고서ᆞ설계도서 제출, 공사감리자 지정 여부 확인(관할 구청 건축과ᆞ건축법)",
             info: true,
-            done: !!taskProgress.construction_notice,
+            checkKey: "construction:notice_detail",
+            done: !!itemChecks["construction:notice_detail"],
             notApplicable: !!taskProgress.interior_only,
             naReason: "구조 공사 없이 인테리어만 진행하는 경우라 착공신고 대상이 아닙니다",
           },
@@ -1337,7 +1381,8 @@
           {
             text: "소방시설공사업자를 통한 소방시설 설치, 완공검사증명서 발급ᆞ보관(소방시설법)",
             info: true,
-            done: !!taskProgress.construction,
+            checkKey: "construction:fire_detail",
+            done: !!itemChecks["construction:fire_detail"],
             notApplicable: !!taskProgress.interior_only,
             naReason: "구조 공사 없이 인테리어만 진행하는 경우라 해당 없습니다",
           },
@@ -1369,12 +1414,14 @@
           {
             text: "사용승인 신청서 제출(관할 구청 건축과ᆞ건축법)",
             info: true,
-            done: !!taskProgress.use_approval,
+            checkKey: "use_approval:apply_detail",
+            done: !!itemChecks["use_approval:apply_detail"],
           },
           {
             text: "정화조 설치ᆞ처리대상인원 확인, 건축물대장 반영 확인(정화조: 환경부고시 / 건축물대장: 법령 근거 없음ᆞ실무 관행)",
             info: true,
-            done: !!taskProgress.use_approval,
+            checkKey: "use_approval:septic_detail",
+            done: !!itemChecks["use_approval:septic_detail"],
           },
           { text: "사용승인 완료 확인", done: !!taskProgress.use_approval, field: "use_approval" },
         ],
@@ -1410,14 +1457,16 @@
           {
             text: "필요서류 준비(임대차계약서 사본, 영업신고증 사본 등 - 부가가치세법ᆞ실무 관행 혼합)",
             info: true,
-            done: !!taskProgress.business_registration,
+            checkKey: "bizreg:docs_detail",
+            done: !!itemChecks["bizreg:docs_detail"],
             locked: !((taskProgress.documents_prepared || permitNotNeeded) && latestFoodResult != null),
             lockReason: "임대차계약서ᆞ영업신고 확인 후 진행 가능",
           },
           {
             text: "간이ᆞ일반과세자 여부 확인(관할 세무서ᆞ세무사 상담 권장, 부가가치세법)",
             info: true,
-            done: !!taskProgress.business_registration,
+            checkKey: "bizreg:tax_type_detail",
+            done: !!itemChecks["bizreg:tax_type_detail"],
             locked: !((taskProgress.documents_prepared || permitNotNeeded) && latestFoodResult != null),
             lockReason: "임대차계약서ᆞ영업신고 확인 후 진행 가능",
           },
@@ -1464,7 +1513,8 @@
           {
             text: "서울시 옥외광고물 조례상 세부 규격 확인(설치 전, 조례 제9조의2)",
             info: true,
-            done: latestSignageResult != null,
+            checkKey: "signage:ordinance_detail",
+            done: !!itemChecks["signage:ordinance_detail"],
             locked: !taskProgress.construction && !taskProgress.interior_only,
             lockReason: "공사(시공) 완료 후 설치 가능",
           },
@@ -1486,7 +1536,8 @@
           {
             text: "최종 점검(사업자등록증ᆞ영업신고증 게시 등 - 법령 근거 없음ᆞ실무 관행)",
             info: true,
-            done: !!taskProgress.opened,
+            checkKey: "opening:final_check_detail",
+            done: !!itemChecks["opening:final_check_detail"],
             locked: !step3AllDone,
             lockReason: "식품위생ᆞ간판ᆞ사업자등록ᆞ위생교육 완료 후 가능",
           },
@@ -1732,6 +1783,10 @@
     }
     lastAddress = localStorage.getItem("permit_assistant_address");
     bizType = localStorage.getItem("permit_assistant_biz_type");
+    const savedItemChecks = localStorage.getItem("permit_assistant_item_checks");
+    if (savedItemChecks) {
+      try { itemChecks = JSON.parse(savedItemChecks); } catch (err) { itemChecks = {}; }
+    }
 
     renderRoadmap();
   }
@@ -1747,9 +1802,11 @@
     requiresArchitect = null;
     lastAddress = null;
     bizType = null;
+    itemChecks = {};
     localStorage.removeItem("permit_assistant_address");
     localStorage.removeItem("permit_assistant_biz_type");
     localStorage.removeItem("permit_assistant_requires_architect");
+    localStorage.removeItem("permit_assistant_item_checks");
     renderRoadmap();
     renderNextAction(null);
   }
@@ -2130,7 +2187,7 @@
     // 이제 여기서 같이 그린다(예전엔 "필요 서류" 카드에서만 보여줬는데, 그
     // 카드는 latestPermitResult를 독립적으로 다시 읽으므로 내용은 안 겹친다).
     stepChecklistEl.innerHTML = "";
-    step.substeps.forEach((sub) => {
+    step.substeps.forEach((sub, subIdx) => {
       const row = document.createElement("div");
       row.className = "step-checklist-item";
       const lockedNow = sub.locked && !sub.done;
@@ -2143,6 +2200,11 @@
       else if (lockedNow) tag = "선행조건 필요";
 
       const interactive = sub.field && !lockedNow;
+      // checkKey가 있는 행(문서 목록ᆞ실무 디테일 줄)은 백엔드 field는
+      // 없지만 사용자가 직접 체크할 수 있어야 한다(2026-08-05 피드백:
+      // "비활성화된 체크박스는 왜 그런지, 사용자가 다 체크할 수 있게 열어두고") -
+      // 실제 선행조건(locked)ᆞ해당없음(notApplicable)이 있을 때만 잠근다.
+      const localCheckable = !!sub.checkKey && !lockedNow && !sub.notApplicable;
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.checked = !!sub.done;
@@ -2156,9 +2218,18 @@
         label.textContent = sub.text;
         row.appendChild(checkbox);
         row.appendChild(label);
+      } else if (localCheckable) {
+        const checkboxId = `step-check-local-${subIdx}`;
+        checkbox.id = checkboxId;
+        checkbox.addEventListener("change", () => toggleItemCheck(sub.checkKey));
+        const label = document.createElement("label");
+        label.htmlFor = checkboxId;
+        label.textContent = sub.text;
+        row.appendChild(checkbox);
+        row.appendChild(label);
       } else {
-        // 판정 축(시스템이 결정)ᆞ참고용 나열ᆞ선행조건 미충족 행은 항상
-        // disabled - 사용자가 못 누르고, 실제 필드가 채워지면 자동으로만
+        // 판정 축(시스템이 결정)ᆞ선행조건 미충족 행만 disabled - 사용자가
+        // 못 누르고, 실제 필드가 채워지거나 선행조건이 풀리면 자동으로만
         // 체크 표시가 바뀐다.
         checkbox.disabled = true;
         const text = document.createElement("span");

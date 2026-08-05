@@ -117,23 +117,34 @@ def compute_project_status(state: dict) -> dict:
     total_all = sum(len(s) for s in steps)
     progress = round(total_done / total_all * 100) if total_all else 0
 
-    track_phrases = []
-    if construction["current_step"]:
-        track_phrases.append(f"건축 트랙은 '{construction['current_step']}' 단계(다음 할 일: '{construction['next_action']}')")
-    if startup["current_step"]:
-        track_phrases.append(f"창업 준비 트랙은 '{startup['current_step']}' 단계(다음 할 일: '{startup['next_action']}')")
+    # 2026-08-05: "다음 할 일" 위젯이 건축 트랙이 막 시작한 시점에도 계속
+    # "창업 준비 트랙: 식품위생 영업신고 확인"을 먼저 알려줘서 혼란을 준다는
+    # 신고 - startup_track의 current_step/next_action은 건축 트랙이 "공사"
+    # 단계에 진입한 뒤(또는 건축 트랙 자체가 이미 끝난 뒤)에만 노출한다.
+    # completed 집계ᆞ전체 progress%는 그대로 실제 완료 사실을 반영해야 하니
+    # 건드리지 않는다 - 여기서 숨기는 건 "먼저 권하는 다음 행동" 노출뿐.
+    construction_reached_construction_phase = construction["current_step"] in ("공사", None)
+    startup_current_step = startup["current_step"] if construction_reached_construction_phase else None
+    startup_next_action = startup["next_action"] if construction_reached_construction_phase else None
+
+    # "다음 하셔야 할 일"을 먼저 말하도록 재구성(2026-08-05 피드백: "로드맵
+    # 결과 단계로 들어오자마자 챗봇이 사용자가 해야할 일을 바로 알려줘 -
+    # 현재 안내는 현재 어느 단계인지 확인하는 역할만 함"). 예전엔 "현재 OO
+    # 단계입니다"처럼 상태 리캡이 먼저였는데, 지금 뭘 해야 하는지(다음 할
+    # 일)를 문장 맨 앞으로 옮기고 지난 완료 내역은 참고로 뒤에 붙인다.
+    action_phrases = []
+    if construction["current_step"] and construction["next_action"]:
+        action_phrases.append(f"건축: {construction['next_action']}")
+    if startup_current_step and startup_next_action:
+        action_phrases.append(f"창업 준비: {startup_next_action}")
 
     if total_done == 0:
         summary = "아직 시작 전이에요. 창업 준비 중인 업종ᆞ장소를 알려주시면 진행 상황을 기록해드릴게요."
-    elif not track_phrases:
+    elif not action_phrases:
         summary = "모든 절차를 완료하셨어요! 🎉"
-    elif not completed:
-        summary = "현재 " + ", ".join(track_phrases) + "입니다."
     else:
-        summary = (
-            f"지난번에는 {', '.join(completed)}까지 완료하셨어요(진행률 {progress}%). "
-            + ", ".join(track_phrases) + "입니다."
-        )
+        completed_note = f" (지금까지 {', '.join(completed)} 완료, 진행률 {progress}%)" if completed else ""
+        summary = f"지금 하셔야 할 일은 {' · '.join(action_phrases)}입니다.{completed_note}"
 
     # 건축법 제23조ᆞ제19조6항: 이 케이스가 건축사사무소 설계 의무 대상인지.
     # True=대행 필요, False=개인 직접 가능, None=정보 부족. 판정은 규칙 엔진이
@@ -145,7 +156,7 @@ def compute_project_status(state: dict) -> dict:
         "progress": progress,
         "completed": completed,
         "construction_track": {"current_step": construction["current_step"], "next_action": construction["next_action"]},
-        "startup_track": {"current_step": startup["current_step"], "next_action": startup["next_action"]},
+        "startup_track": {"current_step": startup_current_step, "next_action": startup_next_action},
         "summary": summary,
         "requires_architect": requires_architect,
     }
