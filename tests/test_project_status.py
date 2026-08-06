@@ -28,20 +28,24 @@ def test_construction_track_progress_does_not_leak_into_startup_track():
     서로 독립적으로 계산돼야 한다."""
     state = {"food_result": "일반음식점영업"}
     result = compute_project_status(state)
-    # 창업 트랙은 식품위생이 확인됐으니 다음 항목(소방시설)으로 넘어가 있어야 하고
+    # 창업 트랙은 식품위생이 확인됐으니 다음 항목(간판ᆞ옥외광고물)으로 넘어가
+    # 있어야 한다(2026-08-04: 소방시설은 Step2ᆞ공사로 옮겨가 이 트랙에서 빠짐).
     assert result["startup_track"]["current_step"] == "창업 행정"
-    assert result["startup_track"]["next_action"] == "소방시설 확인"
+    assert result["startup_track"]["next_action"] == "간판ᆞ옥외광고물 확인"
     # 건축 트랙은 여전히 맨 처음(행위 유형 확인)이어야 한다 - "Step1"에
     # 멈춰 있던 옛날 버그처럼 창업 트랙 진행 상황에 영향받으면 안 된다.
     assert result["construction_track"]["current_step"] == "건축 유형 확인"
 
 
 def test_step_completion_moves_current_step_forward_within_track():
+    # Step0(건축 유형 확인)은 2026-08-04부터 substep이 2개(행위 유형ᆞ대상
+    # 판정)라, act_type만 채워지고 판정(permit_result)이 아직 없으면 Step0
+    # 자체가 아직 진행 중이다(완료로 안 넘어감).
     state = {"case_facts": {"act_type": "신축"}}
     result = compute_project_status(state)
-    assert "건축 유형 확인" in result["completed"]
-    assert result["construction_track"]["current_step"] == "건축 인허가"
-    assert result["construction_track"]["next_action"] == "허가ᆞ신고 대상 판정"
+    assert "건축 유형 확인" not in result["completed"]
+    assert result["construction_track"]["current_step"] == "건축 유형 확인"
+    assert result["construction_track"]["next_action"] == "허가ᆞ신고ᆞ기재변경 대상 판정"
 
 
 def test_construction_track_fully_done_has_no_current_step():
@@ -49,7 +53,7 @@ def test_construction_track_fully_done_has_no_current_step():
         "case_facts": {"act_type": "신축"},
         "permit_result": {"permit_type": "건축신고"},
         "task_progress": {
-            "documents_prepared": True, "pre_diagnosis_checked": True,
+            "pre_diagnosis_checked": True, "documents_prepared": True, "application_submitted": True,
             "construction_notice": True, "construction": True, "use_approval": True,
         },
     }
@@ -70,7 +74,7 @@ def test_all_steps_done_reaches_full_progress_and_celebration_summary():
         "fire_result": [],
         "signage_result": "허가ᆞ신고 불필요",
         "task_progress": {
-            "documents_prepared": True, "pre_diagnosis_checked": True,
+            "pre_diagnosis_checked": True, "documents_prepared": True, "application_submitted": True,
             "construction_notice": True, "construction": True, "use_approval": True,
             "business_registration": True, "hygiene_education": True,
             "interior_equipment": True, "staff_registration": True, "opened": True,
@@ -103,7 +107,8 @@ def test_hires_staff_false_counts_staff_registration_as_done():
 
 
 def test_progress_percentage_rounds_to_nearest_integer():
-    # 총 15개 하위 항목 중 8개 완료 -> 8/15*100 = 53.33... -> 반올림 53
+    # 총 15개 하위 항목(2026-08-04: Step0 2ᆞStep1 3ᆞStep2 3ᆞStep3 4ᆞStep4 3)
+    # 중 8개 완료 -> 8/15*100 = 53.33 -> 반올림 53
     state = {
         "case_facts": {"act_type": "신축"},
         "permit_result": {"permit_type": "건축신고"},
@@ -111,7 +116,7 @@ def test_progress_percentage_rounds_to_nearest_integer():
         "fire_result": [],
         "signage_result": "허가ᆞ신고 불필요",
         "task_progress": {
-            "documents_prepared": True, "pre_diagnosis_checked": True,
+            "pre_diagnosis_checked": True, "documents_prepared": True, "application_submitted": True,
             "construction_notice": True,
         },
     }

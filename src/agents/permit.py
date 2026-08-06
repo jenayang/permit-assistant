@@ -171,6 +171,26 @@ FACILITY_GROUPS = {
 }
 
 
+def facility_group_from_use_name(use_name: str) -> int | None:
+    """건축물대장 주용도코드명(예: "제1종근린생활시설")을 시설군 번호(1~9)로
+    매핑. 못 찾으면 None.
+
+    FACILITY_GROUPS의 세부용도 목록과 대조하되 공백을 무시한다 - 대장은
+    "제1종근린생활시설"(붙여씀), 표는 "제1종 근린생활시설"(띄어씀)이라 그대로는
+    안 맞는다. 항목의 괄호 앞부분(핵심어)이 주용도명에 포함되면 그 시설군으로
+    본다(단방향 포함만 - "제2종근린생활시설"이 group5의 "제2종 근린생활시설 중
+    다중생활시설"에 역포함돼 오분류되는 걸 막기 위함)."""
+    if not use_name:
+        return None
+    norm = use_name.replace(" ", "")
+    for num, (_group_name, items) in FACILITY_GROUPS.items():
+        for item in items:
+            core = item.split("(")[0].replace(" ", "")  # "업무시설(사무실 등)" → "업무시설"
+            if core and core in norm:
+                return num
+    return None
+
+
 def _missing_fields(act_type: str, facts: dict) -> list[str]:
     return [f for f in REQUIRED_FIELDS.get(act_type, []) if facts.get(f) is None]
 
@@ -240,6 +260,76 @@ def classify_case(facts: dict) -> str | None:
     return None
 
 
+def requires_licensed_architect(facts: dict) -> bool | None:
+    """이 케이스가 건축사 설계 의무 대상인지 판정. 정보 부족하면 None.
+
+    건축법 제23조1항: 건축허가(제11조)ᆞ건축신고(제14조) 대상 건축물의 설계는
+    원칙적으로 건축사만 할 수 있으나 다음은 예외 -
+      1호. 바닥면적 합계 85㎡ 미만 증축ᆞ개축ᆞ재축
+      2호. 연면적 200㎡ 미만이고 층수 3층 미만인 대수선
+    용도변경은 제19조6항이 별도로 규정 - "허가 대상(상위군 이동)이면서 용도변경
+    부분 바닥면적 500㎡ 이상"인 경우에만 제23조를 준용한다.
+
+    반환값:
+      True  = 건축사사무소 설계가 필요(대행 대상)
+      False = 개인이 직접 설계ᆞ진행 가능(제23조 예외이거나 제23조 비대상 행위)
+      None  = 판정에 필요한 사실 부족
+
+    주의: 제23조1항3호("그 밖에 대통령령으로 정하는 건축물")와 제23조4항
+    (표준설계도서)은 시행령ᆞ국토부 고시가 있어야 확정되는데 현재 인덱스에 없어
+    반영하지 않았다 - 그래서 "예외에 더 걸려 실제로는 건축사 불필요"인 케이스를
+    True로 볼 여지가 남는다(안전한 방향의 과대판정). 또 용도변경의 바닥면적은
+    facts에 별도 필드가 없어 size_sqm을 대용으로 쓴다 - "용도변경 부분"이 아니라
+    건물 연면적일 수 있어 경계(500㎡) 부근에서 부정확할 수 있다.
+    """
+    act_type = facts.get("act_type")
+    if act_type is None:
+        return None
+    thresholds = get_thresholds()
+
+    if act_type == "신축":
+        return True  # 제23조 예외 목록에 신축 없음 - 규모 무관 건축사 필요
+
+    if act_type in ("증축", "개축", "재축"):
+        ext = facts.get("extension_size_sqm")
+        if ext is None:
+            return None
+        # 제23조1항1호: 85㎡ 미만이면 예외(건축사 불필요), 이상이면 필요
+        return ext >= thresholds["증축개축재축_신고_상한_바닥면적_sqm"]
+
+    if act_type == "이전":
+        return True  # 건축허가 대상, 제23조 예외 없음
+
+    if act_type == "대수선":
+        if not facts.get("renovation_scope"):
+            return False  # 대수선 아님(인허가불필요) - 제23조 비대상
+        size, floors = facts.get("size_sqm"), facts.get("floors")
+        if size is None or floors is None:
+            return None
+        renov = thresholds["대수선_신고"]
+        # 제23조1항2호: 200㎡ 미만 & 3층 미만이면 예외(건축사 불필요)
+        return not (size < renov["연면적_미만_sqm"] and floors < renov["층수_미만"])
+
+    if act_type == "용도변경":
+        cur, dst = facts.get("current_facility_group"), facts.get("desired_facility_group")
+        if cur is None or dst is None:
+            return None
+        if dst >= cur:
+            return False  # 신고 대상(하위군)ᆞ기재변경(동일군) - 제23조 준용 안 됨
+        # 허가 대상(상위군): 제19조6항 - 바닥면적 500㎡ 이상만 제23조 준용
+        area = facts.get("size_sqm")
+        if area is None:
+            return None
+        return area >= thresholds["용도변경_건축사설계준용_상한_바닥면적_sqm"]
+
+    if act_type in ("일반수선", "가설건축물"):
+        # 일반수선은 허가ᆞ신고 대상 행위가 아니고, 가설건축물은 제20조 별도라
+        # 둘 다 제23조(제11조ᆞ제14조 대상) 설계 의무 대상이 아니다.
+        return False
+
+    return None
+
+
 # --- 구조화 출력 경계 (PermitResult) --------------------------------------
 # 멀티 에이전트 설계서가 제안하는 Permit Agent의 구조화 출력 형태를 준비해두되,
 # 아직 agent.py/api.py 어디에도 연결하지 않는다(Phase 2 - 내부 모델만 추가,
@@ -259,6 +349,9 @@ class PermitResult(BaseModel):
         default_factory=list, description="사전 진단 항목(주차ᆞ정화조ᆞ소방 등) 목록 - 아직 미채움"
     )
     related_laws: list[str] = Field(default_factory=list, description="근거 법령 목록 - 아직 미채움")
+    related_agencies: list[str] = Field(
+        default_factory=list, description="협의ᆞ접수 관련 기관 목록 - record_permit_synthesis(related_agencies=[...])로 LLM이 기록"
+    )
     explanation: str = Field(default="", description="LLM이 생성할 설명 텍스트 - 아직 미채움")
 
 
@@ -332,29 +425,134 @@ def _facility_group_reason(result_type: str, facts: dict) -> str:
     return ""
 
 
+def _act_type_reason(result_type: str, facts: dict) -> str:
+    """용도변경 외 나머지 act_type(신축ᆞ증축ᆞ개축ᆞ재축ᆞ이전ᆞ대수선ᆞ일반수선ᆞ
+    가설건축물)의 판정 사유를 문장으로 서술한다. _facility_group_reason과 같은
+    원칙 - classify_case()가 이미 확정한 result_type을 다시 판정하지 않고
+    사유만 서술한다. 숫자는 get_thresholds()를 그대로 참조해서 법정 임계값이
+    바뀌어도 이 함수를 따로 안 고쳐도 되고, 비교 부등호(<, <=)는 classify_case()
+    와 반드시 같은 방향으로 맞춰뒀다(재-비교이므로 어긋나면 사유와 판정이
+    서로 다른 말을 하게 됨 - 단일 진실 공급원 원칙, _facility_group_reason 참고).
+
+    2026-07-29: 지금까지 용도변경만 "왜?" 사유 문장이 있었고 나머지 act_type은
+    LLM이 즉흥적으로 설명해야 했다(RAG 활용도 점검 중 사용자 피드백으로 발견) -
+    판정 신뢰성 원칙을 전체 act_type으로 넓힌다.
+    """
+    act_type = facts.get("act_type")
+    thresholds = get_thresholds()
+
+    if act_type in ("증축", "개축", "재축"):
+        limit = thresholds["증축개축재축_신고_상한_바닥면적_sqm"]
+        size = facts.get("extension_size_sqm")
+        if size is None:
+            return ""
+        if size <= limit:
+            return f" (사유: {act_type} 대상 부분 바닥면적 {size}㎡가 {limit}㎡ 이내)"
+        return f" (사유: {act_type} 대상 부분 바닥면적 {size}㎡가 {limit}㎡ 초과)"
+
+    if act_type == "신축":
+        new_build = thresholds["신축_신고"]
+        zone = facts.get("land_zone")
+        size, floors = facts.get("size_sqm"), facts.get("floors")
+        if zone not in new_build["대상_용도지역"]:
+            # "관리지역"ᆞ"농림지역"ᆞ"자연환경보전지역"은 받침 있음(은), "기타"는
+            # 받침 없음(는) - Literal 값 4개 중 "기타"만 예외라 하드코딩 분기.
+            particle = "는" if zone == "기타" else "은"
+            return f" (사유: 용도지역 '{zone}'{particle} 관리ᆞ농림ᆞ자연환경보전지역이 아니라 신고 예외 대상이 아님)"
+        if size is None or floors is None:
+            return ""
+        limit_size, limit_floors = new_build["연면적_미만_sqm"], new_build["층수_미만"]
+        if size < limit_size and floors < limit_floors:
+            return f" (사유: {zone}이고 연면적 {size}㎡ᆞ{floors}층이 각각 {limit_size}㎡ᆞ{limit_floors}층 미만 기준을 충족)"
+        return f" (사유: {zone}이지만 연면적ᆞ층수 기준({limit_size}㎡ᆞ{limit_floors}층 미만) 중 하나 이상을 초과)"
+
+    if act_type == "이전":
+        return " (사유: 건축법 제14조 신고 예외 목록에 '이전'이 없어 원칙(제11조)대로 허가 대상)"
+
+    if act_type == "대수선":
+        if facts.get("renovation_scope") is False:
+            return " (사유: 대수선 정의(시행령 제3조의2 8개 기준) 중 어디에도 해당하지 않음)"
+        renov = thresholds["대수선_신고"]
+        size, floors = facts.get("size_sqm"), facts.get("floors")
+        if size is None or floors is None:
+            return ""
+        limit_size, limit_floors = renov["연면적_미만_sqm"], renov["층수_미만"]
+        if size < limit_size and floors < limit_floors:
+            return f" (사유: 대수선 정의에 해당하고 연면적 {size}㎡ᆞ{floors}층이 각각 {limit_size}㎡ᆞ{limit_floors}층 미만 기준을 충족)"
+        return f" (사유: 대수선 정의에 해당하지만 연면적ᆞ층수 기준({limit_size}㎡ᆞ{limit_floors}층 미만) 중 하나 이상을 초과)"
+
+    if act_type == "일반수선":
+        return " (사유: 일반수선은 대수선ᆞ신고ᆞ허가 대상 행위에 해당하지 않음)"
+
+    if act_type == "가설건축물":
+        temp = thresholds["가설건축물"]
+        purpose = facts.get("temporary_purpose")
+        duration = facts.get("temporary_duration_years")
+        is_concrete = facts.get("temporary_is_concrete")
+        if purpose in temp["신고_목적_예외"]:
+            return f" (사유: '{purpose}' 목적은 존치기간ᆞ구조와 무관하게 신고 대상(시행령 제15조 예외 목적))"
+        if duration is None or is_concrete is None:
+            return ""
+        limit_years = temp["신고_존치기간_이하_년"]
+        if duration <= limit_years and not is_concrete:
+            return f" (사유: 존치기간 {duration}년이 {limit_years}년 이내이고 비철근콘크리트ᆞ철골조라 신고 요건 충족)"
+        if duration > limit_years:
+            return f" (사유: 존치기간 {duration}년이 {limit_years}년을 초과해 신고 요건 미충족)"
+        return " (사유: 철근콘크리트ᆞ철골조라 신고 요건(비철콘조) 미충족)"
+
+    return ""
+
+
+# 설계도서(평면도 등)가 실제로 필요한 판정 결과 - 이 경우에만 건축사 의무ᆞ실무
+# 도움 안내가 의미 있다(인허가불필요ᆞ기재변경 등엔 도면 부담이 없어 제외).
+_RESULTS_NEEDING_DESIGN_DOCS = frozenset({
+    "건축신고", "건축허가", "용도변경신고", "용도변경허가",
+})
+
+
+def _architect_note(result_type: str, facts: dict) -> str:
+    """도구 응답에 실어보낼 건축사 설계 의무 안내(결정론적). LLM은 이 문장을
+    새로 판단하지 않고 그대로 전달만 한다 - 판정은 코드, 설명은 LLM 원칙.
+    설계도서가 필요없는 결과이거나 정보가 부족하면 빈 문자열."""
+    if result_type not in _RESULTS_NEEDING_DESIGN_DOCS:
+        return ""
+    verdict = requires_licensed_architect(facts)
+    if verdict is None:
+        return ""
+    if verdict:
+        return " 설계도서는 건축법 제23조에 따라 건축사사무소에서 작성해야 합니다(건축사 설계 의무 대상)."
+    return (
+        " 건축사 설계 의무 대상은 아니어서 법적으로는 개인이 직접 진행할 수 있으나, "
+        "평면도 등 설계도서 준비가 필요해 실무에서는 인테리어 업체나 행정사의 도움을 "
+        "받는 경우가 많습니다."
+    )
+
+
 def procedure_stage_message(result_type: str, node_id: str, facts: dict | None = None) -> str:
     """(result_type, node_id)에 해당하는 안내 문구를 만든다.
 
     LLM이 직접 부르는 도구가 아니라, agent.py의 classify_case 그래프 노드가
     분류 결과를 답변에 반영할 때 참고용으로 쓰는 헬퍼 함수 - 허가/신고 판정
     자체는 이제 규칙 기반이라 LLM이 이 판단을 직접 할 필요가 없어졌다.
-    판정 사유(예: 용도변경의 시설군 이동 방향)까지 이미 확정된 result_type
-    기준으로 미리 문장을 만들어 같이 넘긴다(facts 전체를 받는 이유는
-    _facility_group_reason 참고).
+    판정 사유(예: 용도변경의 시설군 이동 방향, 신축/대수선의 규모 기준 충족
+    여부 등)까지 이미 확정된 result_type 기준으로 미리 문장을 만들어 같이
+    넘긴다(facts 전체를 받는 이유는 _facility_group_reason 참고). 용도변경은
+    _facility_group_reason이, 나머지 act_type은 _act_type_reason이 담당한다.
     """
     tree = PROCEDURE_TREE.get(result_type)
     if tree is None or node_id not in tree["nodes"]:
         return f"'{node_id}'는 {result_type} 트리에 없는 노드입니다."
 
-    reason = _facility_group_reason(result_type, facts or {})
+    reason = _facility_group_reason(result_type, facts or {}) or _act_type_reason(result_type, facts or {})
+    architect = _architect_note(result_type, facts or {})
     node = tree["nodes"][node_id]
     if node["type"] == "branch":
         options = ", ".join(node["options"].keys())
         return (
             f'현재 절차 결과: {result_type}{reason}. 다음을 사용자에게 물어보세요: '
-            f'"{node["question"]}" (선택지: {options})'
+            f'"{node["question"]}" (선택지: {options}){architect}'
         )
-    return f"현재 절차 결과: {result_type}{reason} - {node['label']}."
+    return f"현재 절차 결과: {result_type}{reason} - {node['label']}.{architect}"
 
 
 def generate_mermaid(tree: dict = PROCEDURE_TREE) -> str:
@@ -448,10 +646,10 @@ def record_permit_synthesis(
       이전에 기록한 값 위에 누적됩니다.
     - 아직 검색을 안 해서 모르면, 먼저 search_regulations/search_by_term으로
       근거를 확보한 뒤에 호출하세요 - 추측해서 채우지 마세요.
-    - pre_diagnosis_items: [3단계: 사전 진단]에서 안내한 항목(예: "주차대수
+    - pre_diagnosis_items: [Step 1-2: 사전 검토]에서 안내한 항목(예: "주차대수
       기준 확인", "정화조 용량 확인")을 답변과 동일한 문구로 기록하세요 -
-      프론트엔드가 이 목록의 존재 여부로 3단계 완료를 판단합니다(빈 목록이면
-      아직 3단계 진행 중으로 취급됨).
+      프론트엔드가 이 목록의 존재 여부로 해당 단계 완료를 판단합니다(빈
+      목록이면 아직 진행 중으로 취급됨).
     """
     logger.info("[도구] record_permit_synthesis(%r)", {
         k: v for k, v in locals().items() if v is not None

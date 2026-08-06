@@ -16,19 +16,51 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src import config
-from src.pipeline import get_project_status, ingest, query, update_task_progress
-from src.retriever import count_documents
+from src.pipeline import get_project_status, ingest, query, submit_facts, update_task_progress
+from src.agent import ContextOverflowError
+from src.rag.retriever import count_documents, find_unindexed_sources
 from src.agents.permit import PROCEDURE_TREE, PermitResult
 
 logger = logging.getLogger(__name__)
 
 
 # === Lifecycle: 앱 시작 시 초기화 ===
+def _warn_if_index_stale() -> None:
+    """data/에 있는데 아직 인덱싱 안 된 파일이 있으면 시작 시 경고한다.
+
+    인덱싱을 잊으면 검색이 에러를 내는 게 아니라 "가장 비슷한" 무관한 조문을
+    조용히 돌려줘서, 답변은 그럴듯한데 근거만 틀린 상태가 된다 - 눈치채기
+    가장 어려운 종류의 고장이라 시작할 때 눈에 띄게 알린다(2026-08-02에 실제로
+    법령 6종이 누락된 채 운영되고 있었다, retriever.find_unindexed_sources 참고).
+
+    경고만 하고 起動은 막지 않는다 - 일부 파일이 빠져도 나머지 기능은 정상이고,
+    이 환경처럼 hwp5html이 없어 .hwp를 못 읽는 경우까지 서버를 못 뜨게 하면
+    과한 조치다.
+    """
+    try:
+        missing = find_unindexed_sources()
+    except Exception as exc:  # DB가 아직 없을 수도 있음 - 점검 실패로 起動을 막지 않는다
+        logger.warning("인덱스 최신성 점검을 건너뜁니다: %s", exc)
+        return
+    if not missing:
+        return
+    logger.warning(
+        "인덱싱되지 않은 문서 %d건이 있습니다. 아직 인제스천을 안 돌렸다면 "
+        "`uv run python -m src.pipeline --ingest`를 실행하세요 - 그래도 남는 파일은 "
+        "추출할 본문이 없는 서식ᆞ이미지일 수 있고, 그 경우는 검색에서 빠지는 게 "
+        "정상입니다(로그의 '→ 0 청크' 확인):\n%s",
+        len(missing),
+        "\n".join(f"  - {s}" for s in missing[:10])
+        + (f"\n  ... 외 {len(missing) - 10}건" if len(missing) > 10 else ""),
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # lifespan - 앱 생명주기 관리
     """앱 시작 시 설정 검증."""
     config.setup_logging()  # 로깅 설정
     config.validate()       # 검증(API키 확인)
+    _warn_if_index_stale()
     logger.info("RAG API 시작 완료")
     yield
     logger.info("RAG API 종료")
@@ -84,6 +116,9 @@ class ProjectStatusResponse(BaseModel):
     construction_track: TrackStatus
     startup_track: TrackStatus
     summary: str
+    # 건축사 설계 의무 대상 여부(건축법 제23조). True=대행 필요, False=개인 직접
+    # 가능, None=정보 부족. compute_project_status()가 규칙 엔진 결과를 그대로 실음.
+    requires_architect: Optional[bool] = None
 
 
 class TaskProgressUpdateRequest(BaseModel):
@@ -94,6 +129,37 @@ class TaskProgressUpdateRequest(BaseModel):
 
 class TaskProgressUpdateResponse(BaseModel):
     task_progress: dict
+
+
+class FactsSubmitRequest(BaseModel):
+    """폼(intake.html) 제출용 - 채팅 없이 case_facts 등을 직접 채운다.
+
+    각 *_facts는 대응하는 record_*_facts 도구(src/agents/*.py)와 동일한
+    필드명을 그대로 받는 느슨한 dict다 - 도메인별 필드가 20개 가까이 돼서
+    여기 각각을 다시 타입 선언하지 않는다(그 필드 계약의 단일 진실 공급원은
+    record_*_facts 도구 시그니처).
+    """
+    user_id: str = Field(..., description="세션 ID")
+    address: Optional[str] = Field(None, description="사업장 주소(입력 시 용도지역ᆞ건축물대장 자동조회)")
+    case_facts: Optional[dict] = None
+    food_facts: Optional[dict] = None
+    fire_facts: Optional[dict] = None
+    signage_facts: Optional[dict] = None
+
+
+class FactsSubmitResponse(BaseModel):
+    case_facts: dict
+    food_facts: dict
+    fire_facts: dict
+    signage_facts: dict
+    # build_permit_result()의 결정론적 미리보기(permit_type + procedures만) -
+    # required_documents 등 LLM 종합이 필요한 필드는 비어 있다(finalize_node
+    # 몫, 폼 흐름에는 안 걸림).
+    permit_preview: Optional[PermitResult] = None
+    food_result: Optional[str] = None
+    fire_result: Optional[list[str]] = None
+    signage_result: Optional[str] = None
+    project_status: dict
 
 
 class IngestResponse(BaseModel):
@@ -163,6 +229,17 @@ def query_endpoint(req: QueryRequest) -> QueryResponse:
 
     except ValueError as e: # 400 클라이언트 잘못(빈 질문 등)
         raise HTTPException(status_code=400, detail=str(e))
+    except ContextOverflowError as e:
+        # 프로바이더 원본 에러(영문 스택)를 그대로 노출하면 사용자가 무엇을
+        # 해야 할지 알 수 없다. 지금까지의 판정 결과는 이미 상태에 남아 있으니
+        # 새 대화로 이어가면 처음부터 다시 할 필요가 없다는 점을 안내한다.
+        logger.error("컨텍스트 한도 초과: %s", e)
+        raise HTTPException(
+            status_code=413,
+            detail="대화가 너무 길어져 한 번에 처리할 수 있는 분량을 넘었습니다. "
+                   "새 대화를 시작해 주세요 - 지금까지 확인된 판정 결과는 "
+                   "로드맵에 저장되어 있습니다.",
+        )
     except Exception as e:  # 500 서버 잘못(LLM호출 실패 등)
         logger.error("질의 실패: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"답변 생성 실패: {e}")
@@ -198,6 +275,30 @@ def task_progress_endpoint(req: TaskProgressUpdateRequest) -> TaskProgressUpdate
     except Exception as e:
         logger.error("진행상황 갱신 실패: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"진행상황 갱신 실패: {e}")
+
+
+@app.post("/facts", response_model=FactsSubmitResponse, tags=["로드맵"])
+def facts_endpoint(req: FactsSubmitRequest) -> FactsSubmitResponse:
+    """intake.html 폼 제출 - 채팅 없이 case_facts 등을 직접 반영하고 판정한다.
+
+    /task-progress와 같은 원칙(LLM 호출 없음, 그래프 상태를 직접 patch) -
+    다만 이쪽은 patch 후 classify_node까지 재사용해 판정 결과도 함께 낸다.
+    """
+    try:
+        result = submit_facts(
+            user_id=req.user_id,
+            address=req.address,
+            case_facts=req.case_facts,
+            food_facts=req.food_facts,
+            fire_facts=req.fire_facts,
+            signage_facts=req.signage_facts,
+        )
+        return FactsSubmitResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("폼 제출 처리 실패: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"폼 제출 처리 실패: {e}")
 
 
 @app.post("/ingest", response_model=IngestResponse, tags=["인덱싱"])

@@ -52,6 +52,7 @@
 | 4 | 직원 등록(4대보험)ᆞ영업 시작 | 창업 준비(병렬) |
 
 개발 진행 이력ᆞ현재 알려진 한계ᆞ다음 우선순위는 [`docs/phase1_roadmap.md`](docs/phase1_roadmap.md) 참고.
+그 외 문서는 어느 걸 봐야 하는지 [`docs/README.md`](docs/README.md)에 정리해뒀다.
 
 ## 에이전트 구성 (`src/agents/`)
 

@@ -25,6 +25,8 @@ current_step 하나만 계산했는데, 실사용 세션(79430043)에서 문제�
 """
 from __future__ import annotations
 
+from src.agents.permit import requires_licensed_architect
+
 STEP_LABELS = ["건축 유형 확인", "건축 인허가", "공사", "창업 행정", "오픈 준비"]
 
 # 건축 트랙(Step 0~2, 실제로 순서가 있는 절차)과 창업 준비 트랙(Step 3~4,
@@ -39,25 +41,27 @@ def _step_substeps(state: dict) -> list[list[tuple[str, bool]]]:
     case_facts = state.get("case_facts") or {}
     permit_result = state.get("permit_result")
     food_result = state.get("food_result")
-    fire_result = state.get("fire_result")
     signage_result = state.get("signage_result")
     tp = state.get("task_progress") or {}
+    interior_only = bool(tp.get("interior_only"))
 
     return [
-        [("행위 유형 확인", bool(case_facts.get("act_type")))],
         [
-            ("허가ᆞ신고 대상 판정", bool(permit_result)),
-            ("필요 서류 준비", bool(tp.get("documents_prepared"))),
-            ("사전 진단 확인", bool(tp.get("pre_diagnosis_checked"))),
+            ("행위 유형 확인", bool(case_facts.get("act_type"))),
+            ("허가ᆞ신고ᆞ기재변경 대상 판정", bool(permit_result)),
         ],
         [
-            ("착공신고", bool(tp.get("construction_notice"))),
-            ("공사(시공)", bool(tp.get("construction"))),
+            ("사전 검토", bool(tp.get("pre_diagnosis_checked"))),
+            ("설계ᆞ서류 준비", bool(tp.get("documents_prepared"))),
+            ("신청ᆞ접수", bool(tp.get("application_submitted"))),
+        ],
+        [
+            ("착공신고", interior_only or bool(tp.get("construction_notice"))),
+            ("공사(시공)", interior_only or bool(tp.get("construction"))),
             ("사용승인", bool(tp.get("use_approval"))),
         ],
         [
             ("식품위생 영업신고 확인", food_result is not None),
-            ("소방시설 확인", fire_result is not None),
             ("간판ᆞ옥외광고물 확인", signage_result is not None),
             ("사업자등록", bool(tp.get("business_registration"))),
             ("위생교육 이수", bool(tp.get("hygiene_education"))),
@@ -131,10 +135,17 @@ def compute_project_status(state: dict) -> dict:
             + ", ".join(track_phrases) + "입니다."
         )
 
+    # 건축법 제23조ᆞ제19조6항: 이 케이스가 건축사사무소 설계 의무 대상인지.
+    # True=대행 필요, False=개인 직접 가능, None=정보 부족. 판정은 규칙 엔진이
+    # 하고(permit.py) 여기선 그 결과만 실어 내려보낸다 - 프론트가 JS로 다시
+    # 계산하지 않게(단일 소스).
+    requires_architect = requires_licensed_architect(state.get("case_facts") or {})
+
     return {
         "progress": progress,
         "completed": completed,
         "construction_track": {"current_step": construction["current_step"], "next_action": construction["next_action"]},
         "startup_track": {"current_step": startup["current_step"], "next_action": startup["next_action"]},
         "summary": summary,
+        "requires_architect": requires_architect,
     }

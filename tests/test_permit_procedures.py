@@ -13,9 +13,12 @@ from __future__ import annotations
 
 from src.agents.permit import (
     PermitResult,
+    _act_type_reason,
+    _architect_note,
     _facility_group_reason,
     _walk_procedures,
     build_permit_result,
+    procedure_stage_message,
 )
 
 
@@ -96,3 +99,121 @@ def test_same_group_reason_mentions_no_direction():
 def test_reason_empty_when_facility_group_missing():
     assert _facility_group_reason("용도변경허가", {}) == ""
     assert _facility_group_reason("용도변경허가", {"current_facility_group": 7}) == ""
+
+
+# --- _act_type_reason: 용도변경 외 나머지 act_type의 "왜?" 사유 문장 --------
+# (2026-07-29, RAG 활용도 점검 중 사용자 피드백으로 용도변경 전용이던 사유
+# 문장을 전체 act_type으로 확장) - classify_case()의 boundary 케이스
+# (test_permit_classify.py)와 같은 facts를 재사용해서, 사유 문구의 방향
+# (이내/초과, 충족/미충족)이 실제 판정과 항상 같은 쪽을 가리키는지 확인한다.
+
+def test_extension_reason_within_limit():
+    reason = _act_type_reason("건축신고", {"act_type": "증축", "extension_size_sqm": 85})
+    assert "85" in reason and "이내" in reason
+
+
+def test_extension_reason_over_limit():
+    reason = _act_type_reason("건축허가", {"act_type": "재축", "extension_size_sqm": 200})
+    assert "200" in reason and "초과" in reason
+
+
+def test_new_build_reason_outside_special_zone():
+    reason = _act_type_reason(
+        "건축허가", {"act_type": "신축", "land_zone": "기타", "size_sqm": 50, "floors": 1}
+    )
+    assert "기타" in reason and "신고 예외 대상이 아님" in reason
+
+
+def test_new_build_reason_meets_report_criteria():
+    reason = _act_type_reason(
+        "건축신고", {"act_type": "신축", "land_zone": "관리지역", "size_sqm": 199, "floors": 2}
+    )
+    assert "충족" in reason
+
+
+def test_new_build_reason_exceeds_criteria_despite_special_zone():
+    reason = _act_type_reason(
+        "건축허가", {"act_type": "신축", "land_zone": "관리지역", "size_sqm": 200, "floors": 2}
+    )
+    assert "초과" in reason
+
+
+def test_relocation_reason_is_fixed():
+    assert "제11조" in _act_type_reason("건축허가", {"act_type": "이전"})
+
+
+def test_renovation_reason_out_of_scope():
+    reason = _act_type_reason("인허가불필요", {"act_type": "대수선", "renovation_scope": False})
+    assert "8개 기준" in reason
+
+
+def test_renovation_reason_meets_report_criteria():
+    reason = _act_type_reason(
+        "건축신고",
+        {"act_type": "대수선", "renovation_scope": True, "size_sqm": 199, "floors": 2},
+    )
+    assert "충족" in reason
+
+
+def test_general_repair_reason_is_fixed():
+    reason = _act_type_reason("인허가불필요", {"act_type": "일반수선"})
+    assert "대수선ᆞ신고ᆞ허가 대상 행위에 해당하지 않음" in reason
+
+
+def test_temporary_building_reason_purpose_exception():
+    reason = _act_type_reason(
+        "가설건축물신고",
+        {"act_type": "가설건축물", "temporary_purpose": "공사용",
+         "temporary_duration_years": 1, "temporary_is_concrete": False},
+    )
+    assert "예외 목적" in reason
+
+
+def test_temporary_building_reason_exceeds_duration():
+    reason = _act_type_reason(
+        "가설건축물허가",
+        {"act_type": "가설건축물", "temporary_purpose": "창고",
+         "temporary_duration_years": 3.01, "temporary_is_concrete": False},
+    )
+    assert "초과" in reason
+
+
+def test_reason_dispatch_prefers_facility_group_then_falls_back():
+    """procedure_stage_message가 실제로 쓰는 결합 방식(둘 중 먼저 값이 있는
+    쪽) - 용도변경 facts가 있으면 그쪽이 먼저 나오고, 없으면 act_type 사유로
+    자연스럽게 넘어가야 한다."""
+    facts_usechange = {"current_facility_group": 5, "desired_facility_group": 7}
+    assert _facility_group_reason("용도변경신고", facts_usechange) != ""
+
+    facts_new_build = {"act_type": "신축", "land_zone": "기타", "size_sqm": 50, "floors": 1}
+    assert _facility_group_reason("건축허가", facts_new_build) == ""
+    assert _act_type_reason("건축허가", facts_new_build) != ""
+
+
+# --- _architect_note (건축사 의무 안내를 도구 응답에 실어보냄) ----------------
+
+def test_architect_note_needed_for_new_build():
+    # 신축은 규모 무관 건축사 의무 → "건축사사무소" 안내
+    note = _architect_note("건축허가", {"act_type": "신축"})
+    assert "건축사사무소" in note and "제23조" in note
+
+
+def test_architect_note_diy_with_practice_nuance():
+    # 소규모 증축(85㎡ 미만)은 건축사 예외 → "개인 직접 가능 + 실무 도움" 뉘앙스
+    note = _architect_note("건축신고", {"act_type": "증축", "extension_size_sqm": 30})
+    assert "개인이 직접" in note and ("인테리어" in note or "행정사" in note)
+
+
+def test_architect_note_empty_for_non_design_results():
+    # 설계도서가 필요없는 결과(인허가불필요ᆞ기재변경)엔 안내를 붙이지 않는다
+    assert _architect_note("인허가불필요", {"act_type": "일반수선"}) == ""
+    assert _architect_note("건축물대장기재변경", {"act_type": "용도변경",
+                            "current_facility_group": 7, "desired_facility_group": 7}) == ""
+
+
+def test_procedure_stage_message_includes_architect_note():
+    # procedure_stage_message가 건축사 안내를 실제 문구에 이어붙이는지
+    from src.agents.permit import PROCEDURE_TREE
+    root = PROCEDURE_TREE["건축허가"]["root"]
+    msg = procedure_stage_message("건축허가", root, {"act_type": "신축"})
+    assert "건축사사무소" in msg
