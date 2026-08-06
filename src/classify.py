@@ -110,12 +110,23 @@ def _classify_permit(facts: dict) -> ClassificationOutput | None:
     result_type = classify_case(facts)
     if result_type is None:
         return None
-    root_node_id = PROCEDURE_TREE[result_type]["root"]
+    tree = PROCEDURE_TREE[result_type]
+    nodes = tree["nodes"]
+    node_id = tree["root"]
+    node = nodes[node_id]
+    # 이미 알고 있는 사실(ownership)로 풀리는 분기(owner_check 등)는 되묻지
+    # 않고 자동으로 다음 노드까지 미리 진행한다 - permit.py의 _walk_procedures
+    # (PermitResult.procedures 계산)는 이미 이렇게 하는데, 이 tool_message
+    # 경로만 안 그래서 사용자가 폼ᆞ채팅에서 이미 답한 소유/임차 여부를 판정
+    # 직후 다시 묻는 버그로 이어졌다(2026-08-06 재신고, 세션 75280711).
+    while node["type"] == "branch" and facts.get("ownership") in node["options"]:
+        node_id = node["options"][facts["ownership"]]
+        node = nodes[node_id]
     return ClassificationOutput(
         raw_result=result_type,
         tool_name="set_procedure_stage",
-        tool_args={"case_type": result_type, "node_id": root_node_id},
-        tool_message=procedure_stage_message(result_type, root_node_id, facts=facts),
+        tool_args={"case_type": result_type, "node_id": node_id},
+        tool_message=procedure_stage_message(result_type, node_id, facts=facts),
         rag_query=None if result_type == "인허가불필요" else f"{result_type} 절차 및 필요 서류",
     )
 
