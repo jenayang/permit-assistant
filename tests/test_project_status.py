@@ -77,7 +77,10 @@ def test_construction_track_fully_done_has_no_current_step():
         "task_progress": {
             # architect_selected/interior_equipment(2026-08-06 드리프트 수정 -
             # ROADMAP_STEPS에 건축사선정이 Step1로, 인테리어ᆞ장비 설치가
-            # Step2로 새로 추가됨)도 채워야 두 트랙이 실제로 "완료"로 잡힌다.
+            # Step2로 새로 추가됨)ᆞowner_confirmed(2026-08-06 - 건축주 여부
+            # 확인이 Step0 정식 substep으로 추가됨)도 채워야 두 트랙이 실제로
+            # "완료"로 잡힌다.
+            "owner_confirmed": True,
             "architect_selected": True,
             "pre_diagnosis_checked": True, "documents_prepared": True, "application_submitted": True,
             "construction_notice": True, "construction": True, "interior_equipment": True, "use_approval": True,
@@ -100,6 +103,7 @@ def test_all_steps_done_reaches_full_progress_and_celebration_summary():
         "fire_result": [],
         "signage_result": "허가ᆞ신고 불필요",
         "task_progress": {
+            "owner_confirmed": True,
             "architect_selected": True,
             "pre_diagnosis_checked": True, "documents_prepared": True, "application_submitted": True,
             "construction_notice": True, "construction": True, "use_approval": True,
@@ -135,10 +139,10 @@ def test_hires_staff_false_counts_staff_registration_as_done():
 
 
 def test_progress_percentage_rounds_to_nearest_integer():
-    # 총 16개 하위 항목(2026-08-06: Step0 2ᆞStep1 4(건축사선정 포함)ᆞ
-    # Step2 4(인테리어ᆞ장비 설치 포함)ᆞStep3 4ᆞStep4 2(인테리어는 Step2로 이동))
-    # 중 8개 완료(architect_selected 미기록이라 건축사선정은 미완료로 집계) ->
-    # 8/16*100 = 50
+    # 총 17개 하위 항목(2026-08-06: Step0 3(건축주 여부 확인 포함)ᆞStep1 4
+    # (건축사선정 포함)ᆞStep2 4(인테리어ᆞ장비 설치 포함)ᆞStep3 4ᆞStep4 2
+    # (인테리어는 Step2로 이동)) 중 8개 완료(architect_selected/owner_confirmed
+    # 미기록이라 둘 다 미완료로 집계) -> 8/17*100 = 47.05... -> 반올림 47
     state = {
         "case_facts": {"act_type": "신축"},
         "permit_result": PermitResult(permit_type="건축신고", procedures=[]),
@@ -151,4 +155,4 @@ def test_progress_percentage_rounds_to_nearest_integer():
         },
     }
     result = compute_project_status(state)
-    assert result["progress"] == 50
+    assert result["progress"] == 47

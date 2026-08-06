@@ -1179,29 +1179,27 @@
       // 아니라 별도 참고 줄로 유지 - 첫 substep으로 안 넣고 info 줄로만.
       step1Substeps.push({ text: factInfoLines.join(" · "), info: true });
     }
-    if (diag.length) {
-      diag.forEach((d) => step1Substeps.push({ text: `🔍 ${d}`, info: true }));
-      step1Substeps.push({
-        text: "사전 검토 확인 완료",
-        done: !!taskProgress.pre_diagnosis_checked,
-        field: "pre_diagnosis_checked",
-        actorNote: "위 항목(주차ᆞ정화조ᆞ피난 등)은 건축사사무소가 설계도서에 반영합니다 - 건축주는 결과를 확인만 하면 됩니다.",
-      });
-    } else {
-      step1Substeps.push({ text: "사전 검토", done: false, notApplicable: permitNotNeeded, naReason: "인허가 대상이 아니라 사전 검토가 필요 없습니다" });
-    }
     // 설계 착수 전 건축사사무소 선정ᆞ계약이 실제로 2~4주 걸리는 병목이라는
     // GPT 피드백(2026-08-06) - "설계ᆞ서류 준비" 한 항목에 뭉쳐 있던 걸
     // 별도 substep으로 분리. uses_agency/architect_selected는 이미 채팅
     // 쪽(roadmap.py _pending_stage1_confirmation ᆞ permit_phase_directive)이
     // 쓰는 실제 상태 필드 - 여기서 새 필드를 또 만들지 않고 그대로 재사용해서
     // 채팅에서 "선정했다"고 답한 게 로드맵 체크에도 그대로 반영되게 한다.
+    // 사전검토ᆞ설계서류 준비는 실제로 건축사사무소(대행 시)가 수행하는
+    // 하위 실무라 선정이 먼저 와야 한다는 지적(2026-08-06) - 사전검토보다
+    // 앞으로 옮겼다(백엔드 src/roadmap_steps.py의 ROADMAP_STEPS[1] 순서와
+    // 동일하게 맞춤: 선정 → 사전검토 → 서류준비 → 신청접수).
+    const architectSelectionChildren = [
+      { text: "상담ᆞ견적 비교", actor: "건축주" },
+      { text: "계약서 체결", actor: "건축주" },
+    ];
     if (requiresArchitect === true) {
       step1Substeps.push({
         text: "건축사사무소 선정ᆞ설계 계약",
         done: !!taskProgress.architect_selected,
         field: "architect_selected",
         actorNote: "건축법 제23조상 설계 의무 대상 - 건축주가 건축사사무소와 계약합니다.",
+        children: architectSelectionChildren,
       });
     } else if (requiresArchitect === false && taskProgress.uses_agency === false) {
       step1Substeps.push({
@@ -1216,6 +1214,7 @@
         done: !!taskProgress.architect_selected,
         field: "architect_selected",
         actorNote: "설계 의무 대상은 아니지만 대행을 선택하셨습니다 - 건축주가 업체와 계약합니다.",
+        children: architectSelectionChildren,
       });
     } else {
       step1Substeps.push({
@@ -1223,7 +1222,19 @@
         done: !!taskProgress.architect_selected,
         field: "architect_selected",
         actorNote: "법적 의무는 아닙니다(개인이 직접 진행 가능) - 직접 하실지 대행업체를 쓰실지는 채팅으로 말씀해주시면 이 항목에 반영됩니다.",
+        children: architectSelectionChildren,
       });
+    }
+    if (diag.length) {
+      diag.forEach((d) => step1Substeps.push({ text: `🔍 ${d}`, info: true }));
+      step1Substeps.push({
+        text: "사전 검토 확인 완료",
+        done: !!taskProgress.pre_diagnosis_checked,
+        field: "pre_diagnosis_checked",
+        actorNote: "위 항목(주차ᆞ정화조ᆞ피난 등)은 건축사사무소가 설계도서에 반영합니다 - 건축주는 결과를 확인만 하면 됩니다.",
+      });
+    } else {
+      step1Substeps.push({ text: "사전 검토", done: false, notApplicable: permitNotNeeded, naReason: "인허가 대상이 아니라 사전 검토가 필요 없습니다" });
     }
     // "설계ᆞ서류 준비" 하위 실제 작업(GPT 피드백 2026-08-06) - 사용자가 직접
     // 하는 일이 아니라 건축사사무소(대행 시) 몫이라 체크박스 없이 담당자만

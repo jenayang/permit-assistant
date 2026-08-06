@@ -130,11 +130,21 @@ def _disclosure_text(step: StepDef, substep: SubstepDef, index: int | None, resu
 
     NeedsInput: 다른 건 안 묻고 그 질문 하나만 낸다.
     ResolvedSubstep(done=False): "[라벨] 안내까지 끝났습니다 → (주체ᆞ법적근거) →
-    완료 여부 확인 질문 → record_task_progress(key=True)로 기록" 순서로 조립한다.
+    (내용 안내 지시문, content_guide) → 완료 여부 확인 질문 →
+    record_task_progress(key=True)로 기록" 순서로 조립한다.
     step.hard_gate=True(Step1ᆞ2)면 라벨을 [Step {marker}-{index}] 마커로 감싸고
     "다음 마커로 넘어가지 마세요" 캡을 건다(guard.py의 하드 차단과 같은 결론을
     가리키게 함). hard_gate=False(Step3ᆞ4)면 마커 대신 "사용자가 다른 항목을
-    직접 물으면 그건 바로 답해도 됩니다"로 대체(병렬 트랙 원칙 유지)."""
+    직접 물으면 그건 바로 답해도 됩니다"로 대체(병렬 트랙 원칙 유지).
+
+    content_guide(Phase6, 2026-08-06)는 이 항목의 실제 내용(법적 근거ᆞ서류
+    목록ᆞ작성주체 등)을 어떻게 설명해야 하는지에 대한 상세 지시문 - 예전엔
+    prompts.py의 _ANSWER_PERMIT_STAGES에 Step 1-N별로 정적 산문 4개가
+    하드코딩돼 있어서, Step1 substep 순서ᆞ분기가 바뀌면 그 산문도 손으로
+    맞춰줘야 하는 드리프트 위험이 있었다(실제로 프론트 index.html의 순서와
+    어긋난 적 있음). 이제 매 턴 "지금 필요한 그 항목의" content_guide만
+    동적으로 주입하므로, ROADMAP_STEPS 쪽만 고치면 챗봇 안내도 자동으로
+    맞는다 - 항상 켜져 있던 정적 4개 블록보다 토큰도 적게 든다."""
     if isinstance(result, NeedsInput):
         return f"[진행 상태] {result.question}"
 
@@ -146,6 +156,8 @@ def _disclosure_text(step: StepDef, substep: SubstepDef, index: int | None, resu
         parts = [f"[진행 상태] {label_tag} 안내까지 끝났습니다."]
         if result.actor_note:
             parts.append(result.actor_note)
+        if result.content_guide:
+            parts.append(result.content_guide)
         parts.append(
             f"이번 턴에는 {next_tag}{_euro(next_num)} 넘어가지 말고 \"{question}\"처럼 완료 여부부터 확인하세요."
         )
@@ -157,6 +169,8 @@ def _disclosure_text(step: StepDef, substep: SubstepDef, index: int | None, resu
         parts = [f"[진행 상태] '{result.label}' 안내까지 끝났습니다."]
         if result.actor_note:
             parts.append(result.actor_note)
+        if result.content_guide:
+            parts.append(result.content_guide)
         parts.append(
             f"이번 턴에는 다음으로 넘어가지 말고 \"{question}\"처럼 완료 여부부터 확인하세요. "
             "사용자가 다른 항목을 직접 물으면 그건 바로 답해도 됩니다."

@@ -35,6 +35,14 @@ class ResolvedSubstep:
     question: str | None = None
     locked: bool = False
     lock_reason: str | None = None
+    # 이 항목의 실제 내용(법적 근거ᆞ서류 목록ᆞ작성주체 등)을 어떻게 설명해야
+    # 하는지에 대한 상세 지시문 - Phase6(2026-08-06)에서 prompts.py의
+    # _ANSWER_PERMIT_STAGES에 하드코딩돼 있던 Step 1-N별 정적 산문을 여기로
+    # 옮겼다. 프론트(index.html)ᆞproject_status.py가 이미 label/actor_note를
+    # 단일 소스로 보는 것과 같은 이유 - 순서ᆞ분기가 바뀌어도 챗봇 안내
+    # 문구가 따로 놀지 않게. actor_note(한 줄 요약)보다 길고 구체적인 경우만
+    # 채운다(짧은 항목은 None으로 비워도 됨).
+    content_guide: str | None = None
 
 
 @dataclass
@@ -79,6 +87,15 @@ def _resolve_permit_classified(state: dict) -> ResolvedSubstep:
     )
 
 
+def _resolve_owner_confirmed(state: dict) -> ResolvedSubstep:
+    task_progress = state.get("task_progress") or {}
+    return ResolvedSubstep(
+        label="건축주 여부 확인(임차 시 계약서 준비)",
+        done=bool(task_progress.get("owner_confirmed")),
+        question="건축주이신가요, 임차인이신가요? 임차인이면 임대차계약서를 준비해두시면 좋아요.",
+    )
+
+
 # === Step 1: 건축 인허가 실무 ===
 # 건축사사무소 선정(1-1)은 requires_licensed_architect 판정에 따라 3갈래로
 # 갈리는 진짜 업무 로직이라 별도 조건부-DSL 없이 이 함수 하나로 남긴다(스펙
@@ -97,6 +114,15 @@ def _resolve_architect_selection(state: dict) -> ResolvedSubstep | NeedsInput | 
             done=bool(task_progress.get("architect_selected")),
             actor_note="건축법 제23조상 설계 의무 대상 - 건축주가 건축사사무소와 계약합니다.",
             question="건축사사무소는 선정하셨어요?",
+            content_guide=(
+                "판정 결과(허가/신고/기재변경 등)ᆞ관할기관은 이미 Step0(행위 유형 확인) "
+                "시점에 전달했으니 여기서 다시 설명하지 마세요 - 이 단계는 오직 건축사사무소를 "
+                "선정해야 하는지ᆞ어떻게 하는지만 다룹니다. 설계 의무 대상이라 설계도서를 "
+                "건축사사무소가 작성해야 한다는 점을 한 줄로 짚고(당신이 규모ᆞ공사 범위를 "
+                "보고 재판단하거나 \"필요할 수도 있다\"처럼 흐리게 말하지 마세요) 선정을 "
+                "안내하세요. 건축사사무소 선정 여부는 이후 사전검토ᆞ서류 준비 안내 방식"
+                "(누가 진행하는지)에 계속 영향을 줍니다."
+            ),
         )
 
     # verdict is False - 법적 의무는 아님(직접 가능)
@@ -112,27 +138,101 @@ def _resolve_architect_selection(state: dict) -> ResolvedSubstep | NeedsInput | 
             done=bool(task_progress.get("architect_selected")),
             actor_note="설계 의무 대상은 아니지만 대행을 선택하셨습니다 - 건축주가 업체와 계약합니다.",
             question="그 업체는 선정하셨어요?",
+            content_guide=(
+                "판정 결과ᆞ관할기관은 이미 Step0에서 전달했으니 다시 설명하지 마세요. "
+                "\"법적 의무는 아닙니다\"라고 명확히 밝힌 뒤, 대행업체(건축사사무소ᆞ행정사) "
+                "도움을 받기로 하셨으니 그 업체 선정ᆞ계약 진행을 안내하세요. 건축사사무소 "
+                "선정 여부는 이후 사전검토ᆞ서류 준비 안내 방식(누가 진행하는지)에 계속 "
+                "영향을 줍니다."
+            ),
         )
     # 직접 진행 - 선정할 대상이 없어 바로 통과
     return ResolvedSubstep(label="건축사사무소 선정ᆞ설계 계약", done=True)
 
 
 def _resolve_pre_diagnosis(state: dict) -> ResolvedSubstep:
+    case_facts = state.get("case_facts") or {}
     task_progress = state.get("task_progress") or {}
+    verdict = requires_licensed_architect(case_facts)
+    if verdict is True:
+        agency_note = (
+            "설계 의무 대상이면, 통상 그 건축사사무소가 설계와 함께 사전검토도 진행하니 "
+            "사용자가 별도로 확인할 필요는 적다고 안내하세요."
+        )
+    else:
+        agency_note = (
+            "설계 의무 대상이 아니어도 주차대수ᆞ정화조 용량ᆞ소방시설 기준은 관할 구청 "
+            "건축과나 소방서에 도면ᆞ현황을 지참해 사전 상담을 받는 게 실무적으로 "
+            "안전하다고 안내하세요."
+        )
     return ResolvedSubstep(
         label="사전 검토",
         done=bool(task_progress.get("pre_diagnosis_checked")),
         actor_note="위 항목(주차ᆞ정화조ᆞ피난 등)은 건축사사무소가 설계도서에 반영합니다 - 건축주는 결과를 확인만 하면 됩니다.",
         question="사전 검토 항목은 확인해 보셨어요?",
+        content_guide=(
+            "\"설계 전에 법적 기준(주차ᆞ소방 등)을 먼저 확인하는 단계입니다 - 여기서 "
+            "문제가 나오면 설계를 수정해야 하므로 서류 준비 전에 끝내는 게 좋습니다\"처럼 "
+            "왜 지금 이 단계를 하는지 한 줄로 먼저 짚은 뒤, 주차대수ᆞ정화조 용량ᆞ소방시설ᆞ"
+            "장애인 편의시설ᆞ위생요구사항 중 실제 해당하는 것만 1~2줄+근거와 함께 안내하세요. "
+            "이 항목들은 일반인이 스스로 판단하기 어려운 경우가 많으니, 항목 나열로 끝내지 "
+            "말고 \"이걸 개인이 직접 확인할 수 있는지 vs 전문가ᆞ관공서 확인이 필요한지\"와 "
+            "\"실제로 어떻게 확인하는지\"를 함께 안내하세요 - \"확인해 보셨어요?\"라고 완료 "
+            f"여부만 묻고 끝내면 안 됩니다. {agency_note} 검색 결과에 구체적인 확인 절차"
+            "(예: 사전 상담 창구, 필요 서류)가 있으면 그대로 전달하고, 없으면 \"관할 구청 "
+            "건축과ᆞ소방서에 문의\"처럼 일반적인 확인 경로만 안내하세요 - 없는 절차를 "
+            "지어내지 마세요. 안내한 항목들을 record_permit_synthesis(pre_diagnosis_items=[...])"
+            "에 답변과 동일한 문구로 반드시 기록하세요 - 프론트엔드 진행 표시가 이 목록의 "
+            "존재 여부로 단계 완료를 판단합니다."
+        ),
     )
 
 
 def _resolve_documents_prepared(state: dict) -> ResolvedSubstep:
+    case_facts = state.get("case_facts") or {}
     task_progress = state.get("task_progress") or {}
+    verdict = requires_licensed_architect(case_facts)
+    uses_agency = verdict is True or bool(task_progress.get("uses_agency"))
+    if uses_agency:
+        example = (
+            "예시 구조(대행업체 이용인 경우 - 문구는 상황에 맞게):\n"
+            "**[건축주가 준비]**\n"
+            "- 대지 소유ᆞ사용권원 서류(등기부등본ᆞ임대차계약서 등, 대행업체가 대신 "
+            "발급받을 수 없는 본인 명의 서류)\n"
+            "**[대행업체(건축사사무소ᆞ행정사)가 작성ᆞ대행]**\n"
+            "- 신고ᆞ신청서(별지 서식) - 법적 명의자는 건축주지만 작성ᆞ제출은 대행업체가 "
+            "진행, 건축주는 서명만\n"
+            "- 평면도ᆞ배치도ᆞ내화ᆞ방화ᆞ피난ᆞ설비 도서 등 설계도서\n"
+            "**[관공서 자체 확인]**\n"
+            "- 용도변경 시 변경 전 평면도는 관공서가 건축물대장으로 직접 확인하므로 "
+            "본인이 준비할 필요 없음"
+        )
+    else:
+        example = (
+            "예시 구조(직접 진행인 경우 - 문구는 상황에 맞게):\n"
+            "**[본인이 직접 작성ᆞ준비]**\n"
+            "- 신고ᆞ신청서(별지 서식)\n"
+            "- 대지 소유ᆞ사용권원 서류(등기부등본ᆞ임대차계약서 등)\n"
+            "- 평면도ᆞ배치도 등 설계도서(건축사 의무 대상이 아니므로 직접 작성 가능, "
+            "부담되면 인테리어 업체ᆞ행정사에 맡기는 경우도 있음)"
+        )
     return ResolvedSubstep(
         label="설계ᆞ서류 준비",
         done=bool(task_progress.get("documents_prepared")),
         question="설계도서ᆞ서류 준비는 다 되셨어요?",
+        content_guide=(
+            "\"설계도서 작성은 건축사사무소와 상담해서 준비하는 과정이라 보통 몇 주가 "
+            "걸립니다\"처럼 시간이 걸리는 단계라는 감각을 먼저 준 뒤, \"어디에 무엇을 "
+            "제출할 것인지 위한 서류\"를 실제 작성 주체 중심으로 안내하세요. 법적 명의자는 "
+            "항상 건축주(신청인)이지만, 실제로 누가 작성하는지는 직접/대행 여부에 따라 "
+            "다릅니다 - \"건축사사무소가 대행해준다\"는 법적 요건이 아니라 대행을 선택했을 "
+            "때만 해당하는 실무 관행입니다(법조문은 \"신청서를 제출하는 자\"만 규정하고 "
+            "작성 주체는 명시하지 않음 - 임의로 \"보통 대행해준다\"고 단정하지 마세요). "
+            "필요 서류를 하위 항목으로 나열하되, 단순 나열이 아니라 각 서류 옆에 실제 작성 "
+            f"주체를 함께 표시하세요. 다른 단계와 같은 마크다운 서식(굵게 **소제목**, 목록은 "
+            f"- 불릿)을 그대로 쓰세요. {example}\n"
+            "record_permit_synthesis(required_documents=[...])를 반드시 호출해 기록하세요."
+        ),
     )
 
 
@@ -142,6 +242,17 @@ def _resolve_application_submitted(state: dict) -> ResolvedSubstep:
         label="신청ᆞ접수",
         done=bool(task_progress.get("application_submitted")),
         question="신청서 접수는 다 하셨어요?",
+        content_guide=(
+            "\"서류가 준비되면 실제로 접수해 허가/신고 수리를 받는 단계입니다\"처럼 짚은 뒤, "
+            "관할 시ᆞ군ᆞ구청에 신청ᆞ신고서(별지 서식)와 준비한 서류를 제출(전자문서ᆞ온라인 "
+            "접수 가능)하고, 관계 법령상 협의가 필요하면 협의기관 검토를 거쳐 허가/신고가 "
+            "수리된다는 흐름을 한두 줄로 안내하세요(협의기관이 확인되면 "
+            "record_permit_synthesis(related_agencies=[...])). 안내를 마치면서, 예상 소요 "
+            "기간(허가 15~20일ᆞ신고 3~5일ᆞ기재변경 3~7일 등 통상적으로 알려진 수준)을 "
+            "별도 헤더 없이 자연스러운 한 문장으로 덧붙이세요. search_regulations로 실제 "
+            "처리기한을 확인했으면 그 값을 우선 쓰고, 못 찾았으면 위 통상치를 참고로만 "
+            "안내하며 \"정확한 기간은 관할 구청에 확인하라\"고 덧붙이세요."
+        ),
     )
 
 
@@ -272,6 +383,7 @@ ROADMAP_STEPS: list[StepDef] = [
         substeps=[
             SubstepDef(key="act_type", resolve=_resolve_act_type),
             SubstepDef(key="permit_result", resolve=_resolve_permit_classified),
+            SubstepDef(key="owner_confirmed", resolve=_resolve_owner_confirmed),
         ],
     ),
     StepDef(

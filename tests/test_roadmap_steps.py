@@ -9,7 +9,11 @@ from src.agents.permit import PermitResult
 from src.roadmap import _next_pending_substep
 from src.roadmap_steps import ROADMAP_STEPS, NeedsInput, ResolvedSubstep
 
+_OWNER_CONFIRMED = ROADMAP_STEPS[0].substeps[2]  # 건축주 여부 확인
 _ARCHITECT = ROADMAP_STEPS[1].substeps[0]  # 건축사사무소 선정
+_PRE_DIAGNOSIS = ROADMAP_STEPS[1].substeps[1]  # 사전 검토
+_DOCUMENTS_PREPARED = ROADMAP_STEPS[1].substeps[2]  # 설계ᆞ서류 준비
+_APPLICATION_SUBMITTED = ROADMAP_STEPS[1].substeps[3]  # 신청ᆞ접수
 _CONSTRUCTION_NOTICE = ROADMAP_STEPS[2].substeps[0]
 _CONSTRUCTION = ROADMAP_STEPS[2].substeps[1]
 _FOOD = ROADMAP_STEPS[3].substeps[0]
@@ -22,6 +26,21 @@ def _state(case_facts=None, task_progress=None, **extra) -> dict:
     return {"case_facts": case_facts or {}, "task_progress": task_progress or {}, **extra}
 
 
+# === Step0 건축주 여부 확인 - task_progress 자기보고 ===
+
+def test_owner_confirmed_not_yet_reported():
+    result = _OWNER_CONFIRMED.resolve(_state())
+    assert isinstance(result, ResolvedSubstep)
+    assert result.done is False
+    assert "임대차계약서" in result.question
+
+
+def test_owner_confirmed_reported():
+    result = _OWNER_CONFIRMED.resolve(_state(task_progress={"owner_confirmed": True}))
+    assert isinstance(result, ResolvedSubstep)
+    assert result.done is True
+
+
 # === Step1 건축사사무소 선정 - 3갈래 + None ===
 
 def test_architect_mandatory_not_selected():
@@ -30,6 +49,7 @@ def test_architect_mandatory_not_selected():
     assert result.done is False
     assert result.question == "건축사사무소는 선정하셨어요?"
     assert "제23조" in result.actor_note
+    assert result.content_guide is not None
 
 
 def test_architect_mandatory_already_selected():
@@ -53,6 +73,49 @@ def test_architect_optional_agency_selected_pending():
     assert isinstance(result, ResolvedSubstep)
     assert result.done is False
     assert result.question == "그 업체는 선정하셨어요?"
+    assert result.content_guide is not None
+
+
+def test_architect_optional_self_managed_has_no_content_guide():
+    # 선정할 대상 자체가 없어 즉시 통과되는 분기 - 안내할 내용이 없다.
+    result = _ARCHITECT.resolve(
+        _state(case_facts={"act_type": "일반수선"}, task_progress={"uses_agency": False})
+    )
+    assert result.content_guide is None
+
+
+# === Step1 사전 검토 - 건축사 의무 여부에 따라 안내 문구가 갈린다 ===
+
+def test_pre_diagnosis_mentions_architect_handles_it_when_mandatory():
+    result = _PRE_DIAGNOSIS.resolve(_state(case_facts={"act_type": "신축"}))
+    assert "설계와 함께 사전검토도 진행" in result.content_guide
+
+
+def test_pre_diagnosis_mentions_self_consultation_when_not_mandatory():
+    result = _PRE_DIAGNOSIS.resolve(_state(case_facts={"act_type": "일반수선"}))
+    assert "사전 상담" in result.content_guide
+
+
+# === Step1 설계ᆞ서류 준비 - 대행 여부에 따라 예시 서식이 갈린다 ===
+
+def test_documents_prepared_shows_agency_example_when_mandatory():
+    result = _DOCUMENTS_PREPARED.resolve(_state(case_facts={"act_type": "신축"}))
+    assert "대행업체(건축사사무소ᆞ행정사)가 작성ᆞ대행" in result.content_guide
+
+
+def test_documents_prepared_shows_direct_example_when_self_managed():
+    result = _DOCUMENTS_PREPARED.resolve(
+        _state(case_facts={"act_type": "일반수선"}, task_progress={"uses_agency": False})
+    )
+    assert "본인이 직접 작성ᆞ준비" in result.content_guide
+
+
+# === Step1 신청ᆞ접수 ===
+
+def test_application_submitted_has_content_guide():
+    result = _APPLICATION_SUBMITTED.resolve(_state())
+    assert result.content_guide is not None
+    assert "record_permit_synthesis" in result.content_guide
 
 
 def test_architect_optional_agency_and_selected_done():
