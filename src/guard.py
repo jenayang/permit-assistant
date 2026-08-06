@@ -27,6 +27,7 @@ from src.roadmap import (
     _mentioned_stages,
     _pending_stage1_confirmation,
 )
+from src.roadmap_steps import ROADMAP_STEPS, ResolvedSubstep
 
 if TYPE_CHECKING:
     from src.agent import AgentState
@@ -250,6 +251,73 @@ def _fire_signage_gap_violations(state: "AgentState", messages) -> list[str]:
     return violations
 
 
+# 식품위생ᆞ간판을 별도 섹션(헤더)으로 통째로 설명했는지 판별하는 신호 - 실제
+# 관측된 두 위반(세션 f9766c33ᆞ8f1ff65f, 2026-08-06/07)이 전부
+# "### 2. 식품위생 영업신고"/"### 2. 식품위생 영업신고 단계"처럼 줄 시작에
+# 헤더나 굵게 표시로 소제목을 달았다 - 판정 결과를 답변 중간에 한 줄만
+# 언급하는 것(허용됨, _ANSWER_PERMIT_STAGES 지시)과 구분하기 위해 "소제목
+# 형태로 등장했는지"만 신호로 쓴다(일반 문장 어디에나 "식품위생"이 나오면
+# 오탐이 너무 잦다).
+_FOOD_SECTION_PATTERN = re.compile(r"^\s*(?:#{1,4}\s*\d*\.?\s*|\*\*\d*\.?\s*)식품위생", re.MULTILINE)
+_SIGNAGE_SECTION_PATTERN = re.compile(r"^\s*(?:#{1,4}\s*\d*\.?\s*|\*\*\d*\.?\s*)간판", re.MULTILINE)
+_FOOD_DIRECT_ASK_KEYWORDS = ("식품위생", "영업신고", "보건소", "위생교육")
+_SIGNAGE_DIRECT_ASK_KEYWORDS = ("간판", "옥외광고")
+
+
+def _domain_mixing_violations(state: "AgentState", last_text: str, messages) -> list[str]:
+    """건축 인허가([Step 1-N] 등) 안내 도중, 아직 잠겨 있는(locked) 식품위생
+    영업신고ᆞ간판을 별도 섹션으로 통째로 설명하는 경우를 잡는다.
+
+    _ANSWER_COMMON이 "서로 다른 도메인을 한 턴에 섞지 말라"고 프롬프트로
+    지시하지만, 판정 직후 ToolMessage(예: "관할 보건소에 영업신고가
+    필요합니다")가 컨텍스트에 무조건형 문장으로 남아있어서, LLM이 "지금 뭐
+    해야 돼?" 같은 범용 질문에 그 문구를 다시 꺼내 별도 섹션으로 설명해버리는
+    사례가 실측으로 두 번 확인됐다(세션 f9766c33ᆞ8f1ff65f) - 아직 사용승인
+    전이라 신고 자체가 법적으로 불가능한 시점인데도 절차(보건소 제출ᆞ위생교육
+    등)를 통째로 안내함. done/locked 판정(roadmap_steps.py)을 고쳐도 이
+    답변 생성 자체는 안 막혀서 별도 하드 체크로 승격한다.
+
+    사용자가 식품위생ᆞ간판을 **직접** 물어본 턴은 대상에서 뺀다 - 그때는
+    "아직 이르지만 이런 절차입니다"처럼 전체 설명이 오히려 유용하고 정상적인
+    응답이다. 대상은 어디까지나 (지금 뭐 해야 하는지 같은) 범용 질문에
+    끼워 넣은 조기 노출뿐이다."""
+    last_human = None
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage):
+            last_human = extract_text(m.content)
+            break
+
+    violations = []
+    food_substep = ROADMAP_STEPS[3].substeps[0].resolve(state)
+    if (
+        isinstance(food_substep, ResolvedSubstep)
+        and food_substep.locked
+        and _FOOD_SECTION_PATTERN.search(last_text)
+        and not (last_human and any(kw in last_human for kw in _FOOD_DIRECT_ASK_KEYWORDS))
+    ):
+        violations.append(
+            "이번 답변이 식품위생 영업신고를 건축 인허가와 별도 섹션(헤더)으로 통째로 "
+            f"안내했는데, 아직 {food_substep.lock_reason}(잠겨 있는 상태)입니다. 사용자가 "
+            "식품위생을 직접 물어본 게 아니라면, 그 절차(보건소 제출ᆞ위생교육 등)를 "
+            "지금 설명하지 말고 판정 결과만 \"~로 판정됐고, 사용승인 후 신고 가능합니다\"처럼 "
+            "한 줄만 언급한 뒤 지금 안내 중인 단계에만 집중하세요."
+        )
+    signage_substep = ROADMAP_STEPS[3].substeps[1].resolve(state)
+    if (
+        isinstance(signage_substep, ResolvedSubstep)
+        and signage_substep.locked
+        and _SIGNAGE_SECTION_PATTERN.search(last_text)
+        and not (last_human and any(kw in last_human for kw in _SIGNAGE_DIRECT_ASK_KEYWORDS))
+    ):
+        violations.append(
+            "이번 답변이 간판ᆞ옥외광고물을 건축 인허가와 별도 섹션(헤더)으로 통째로 "
+            f"안내했는데, 아직 {signage_substep.lock_reason}(잠겨 있는 상태)입니다. 사용자가 "
+            "간판을 직접 물어본 게 아니라면, 그 절차를 지금 설명하지 말고 판정 결과만 "
+            "한 줄로 언급한 뒤 지금 안내 중인 단계에만 집중하세요."
+        )
+    return violations
+
+
 def _construction_guide_gap_violations(state: "AgentState", last_text: str, messages) -> list[str]:
     """Step 1 안내가 다 끝났는데(permit_phase_directive가 get_construction_guide
     호출을 지시하는 시점) 그 지시를 무시하고 Step 2 내용을 텍스트로만 설명한
@@ -374,6 +442,11 @@ def guard_node(state: "AgentState") -> dict:
        옛 값이 남아 잘못된 판정으로 직결될 수 있어 다른 위반들보다 오분류
        리스크가 크다(_correction_omission_violations 참고, 2026-07-31 검토ᆞ
        2026-08-01 구현).
+    8. 아직 잠겨 있는(locked) 식품위생 영업신고ᆞ간판을 건축 인허가 안내와
+       같은 턴에 별도 섹션으로 통째로 설명한 경우 - 사용승인 전인데도 신고
+       절차(보건소 제출ᆞ위생교육 등)를 안내해버리는 실제 사례가 두 번
+       확인됨(_domain_mixing_violations 참고, 세션 f9766c33ᆞ8f1ff65f,
+       2026-08-06/07).
 
     같은 사용자 턴 안에서 최대 1회만 재시도를 유도한다(무한 루프 방지) - 그
     이상 반복되면 프롬프트만으로는 못 막는 한계로 보고 그냥 통과시킨다.
@@ -434,6 +507,7 @@ def guard_node(state: "AgentState") -> dict:
     violations.extend(_construction_guide_gap_violations(state, last_text, messages))
     violations.extend(_correction_omission_violations(state, messages))
     violations.extend(_premature_stage_content_violations(state, messages))
+    violations.extend(_domain_mixing_violations(state, last_text, messages))
 
     if violations and _guard_retry_count(messages) < 1:
         logger.info("[guard] 위반 감지, 재시도 유도: %s", violations)

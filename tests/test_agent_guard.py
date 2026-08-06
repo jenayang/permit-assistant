@@ -618,6 +618,109 @@ def test_correction_omission_ignores_reconfirmation():
     )
 
 
+def test_domain_mixing_triggers_retry_for_food_section_before_use_approval():
+    """회귀 테스트(세션 f9766c33ᆞ8f1ff65f, 2026-08-06/07) - "나 이제 뭐
+    해야해?"처럼 범용 질문에 답하면서 건축 인허가 안내와 별도로 "### 2.
+    식품위생 영업신고" 섹션을 통째로 설명하면, 아직 사용승인 전이라 신고
+    자체가 불가능한 시점인데도 절차를 안내한 것이므로 재시도를 유도해야
+    한다."""
+    state = _base_state()
+    state["food_result"] = "제과점영업"
+    state["task_progress"] = {}
+    state["messages"] = [
+        HumanMessage(content="나 이제 뭐 해야해?"),
+        AIMessage(content=(
+            "### 1. 건축 인허가 단계\n[Step 1-1: 건축사사무소 선정]\n"
+            "건축사사무소를 선정하세요.\n\n"
+            "### 2. 식품위생 영업신고 단계\n"
+            "**제과점영업**으로 판정되었습니다. 관할 보건소에 영업신고를 하셔야 하고, "
+            "위생교육도 이수해야 합니다."
+        )),
+    ]
+    update = guard_node(state)
+    guard_msgs = [m for m in update.get("messages", []) if isinstance(m, ToolMessage) and m.name == "_answer_guard"]
+    assert guard_msgs, "잠긴 식품위생 영업신고를 별도 섹션으로 설명했는데도 재시도가 유도되지 않음"
+    assert "식품위생" in guard_msgs[0].content
+
+
+def test_domain_mixing_allowed_after_use_approval():
+    """사용승인이 이미 끝났으면 식품위생 영업신고 잠금이 풀리므로, 같은 텍스트도
+    더 이상 위반이 아니다."""
+    state = _base_state()
+    state["food_result"] = "제과점영업"
+    state["task_progress"] = {"use_approval": True}
+    state["messages"] = [
+        HumanMessage(content="나 이제 뭐 해야해?"),
+        AIMessage(content=(
+            "### 2. 식품위생 영업신고 단계\n"
+            "**제과점영업**으로 판정되었습니다. 관할 보건소에 영업신고를 하세요."
+        )),
+    ]
+    update = guard_node(state)
+    assert not any(
+        isinstance(m, ToolMessage) and m.name == "_answer_guard" for m in update.get("messages", [])
+    )
+
+
+def test_domain_mixing_allowed_when_user_asks_about_food_directly():
+    """사용자가 식품위생을 직접 물어본 턴은 대상에서 뺀다 - "아직 이르지만
+    이런 절차입니다"처럼 전체 설명이 오히려 정상적인 응답이다."""
+    state = _base_state()
+    state["food_result"] = "제과점영업"
+    state["task_progress"] = {}
+    state["messages"] = [
+        HumanMessage(content="식품위생 영업신고는 어떻게 해야 해?"),
+        AIMessage(content=(
+            "### 2. 식품위생 영업신고 단계\n"
+            "**제과점영업**으로 판정되었습니다. 관할 보건소에 영업신고를 하세요."
+        )),
+    ]
+    update = guard_node(state)
+    assert not any(
+        isinstance(m, ToolMessage) and m.name == "_answer_guard" for m in update.get("messages", [])
+    )
+
+
+def test_domain_mixing_allows_one_line_mention_without_section_header():
+    """판정 결과를 답변 중간에 한 줄만 언급하는 것(_ANSWER_PERMIT_STAGES가
+    허용하는 방식)은 별도 섹션 헤더가 없으니 위반이 아니다."""
+    state = _base_state()
+    state["food_result"] = "제과점영업"
+    state["task_progress"] = {}
+    state["messages"] = [
+        HumanMessage(content="나 이제 뭐 해야해?"),
+        AIMessage(content=(
+            "### 1. 건축 인허가 단계\n[Step 1-1: 건축사사무소 선정]\n"
+            "건축사사무소를 선정하세요. 참고로 제과점영업으로 판정됐고, 사용승인 후 "
+            "식품위생 영업신고가 가능합니다."
+        )),
+    ]
+    update = guard_node(state)
+    assert not any(
+        isinstance(m, ToolMessage) and m.name == "_answer_guard" for m in update.get("messages", [])
+    )
+
+
+def test_domain_mixing_triggers_retry_for_signage_section_before_construction():
+    """간판도 같은 코드 경로(_resolve_signage)라 동일한 잠금ᆞ위반 패턴을
+    따른다 - 시공 시작 전에 별도 섹션으로 안내하면 위반."""
+    state = _base_state()
+    state["signage_result"] = "신고"
+    state["task_progress"] = {}
+    state["messages"] = [
+        HumanMessage(content="나 이제 뭐 해야해?"),
+        AIMessage(content=(
+            "### 1. 건축 인허가 단계\n[Step 1-1: 건축사사무소 선정]\n"
+            "건축사사무소를 선정하세요.\n\n"
+            "### 2. 간판ᆞ옥외광고물 신고 단계\n관할 구청에 간판 신고를 하세요."
+        )),
+    ]
+    update = guard_node(state)
+    guard_msgs = [m for m in update.get("messages", []) if isinstance(m, ToolMessage) and m.name == "_answer_guard"]
+    assert guard_msgs, "잠긴 간판 신고를 별도 섹션으로 설명했는데도 재시도가 유도되지 않음"
+    assert "간판" in guard_msgs[0].content
+
+
 def test_mentioned_construction_stages_excludes_question_lines():
     """물음표로 끝나는 제안 문장("~안내해 드릴까요?")은 실제 공개로 안 센다
     (_mentioned_stages와 동일 원칙)."""
