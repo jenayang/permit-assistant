@@ -326,14 +326,15 @@
   .step-checklist { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .step-checklist-item {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    gap: 4px;
     padding: 12px 16px;
     border-bottom: 1px solid var(--border);
     font-size: 13px;
   }
   .step-checklist-item:last-child { border-bottom: none; }
   .step-checklist-item.muted { color: var(--text-muted); }
+  .step-checklist-item-main { display: flex; align-items: center; gap: 10px; }
   .step-checklist-item input[type="checkbox"] {
     width: 14px;
     height: 14px;
@@ -342,11 +343,44 @@
     flex-shrink: 0;
   }
   .step-checklist-bullet { flex-shrink: 0; font-weight: 700; }
-  .step-checklist-item label { flex: 1; cursor: pointer; }
-  .step-checklist-item span:nth-last-child(2) { flex: 1; }
+  .step-checklist-item-main label { flex: 1; cursor: pointer; }
+  .step-checklist-item-main span:nth-last-child(2) { flex: 1; }
   .step-checklist-tag {
     font-size: 11px;
     color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  /* 비전문가용 "주체ᆞ법적근거" 캡션(2026-08-06) - 체크박스ᆞ불릿 폭(14px+gap)만큼
+     들여써서 항목 라벨과 줄을 맞춘다. */
+  .step-checklist-item-note {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin-left: 24px;
+  }
+  /* 하위 행위 목록(2026-08-06) - 부모와 한 카드 안에서 들여쓰기 + 항목 사이
+     옅은 줄로만 구분(부모 카드처럼 각자 테두리 상자를 만들지 않는다). */
+  .step-checklist-children {
+    margin: 4px 0 0 24px;
+    border-top: 1px solid var(--border);
+  }
+  .step-checklist-child {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .step-checklist-child:last-child { border-bottom: none; }
+  .step-checklist-child-actor {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--surface-2);
+    border-radius: 999px;
+    padding: 1px 8px;
     flex-shrink: 0;
   }
   .step-doc-card, .step-agency-card {
@@ -1147,25 +1181,70 @@
     }
     if (diag.length) {
       diag.forEach((d) => step1Substeps.push({ text: `🔍 ${d}`, info: true }));
-      step1Substeps.push({ text: "사전 검토 확인 완료", done: !!taskProgress.pre_diagnosis_checked, field: "pre_diagnosis_checked" });
+      step1Substeps.push({
+        text: "사전 검토 확인 완료",
+        done: !!taskProgress.pre_diagnosis_checked,
+        field: "pre_diagnosis_checked",
+        actorNote: "위 항목(주차ᆞ정화조ᆞ피난 등)은 건축사사무소가 설계도서에 반영합니다 - 건축주는 결과를 확인만 하면 됩니다.",
+      });
     } else {
       step1Substeps.push({ text: "사전 검토", done: false, notApplicable: permitNotNeeded, naReason: "인허가 대상이 아니라 사전 검토가 필요 없습니다" });
     }
     // 설계 착수 전 건축사사무소 선정ᆞ계약이 실제로 2~4주 걸리는 병목이라는
     // GPT 피드백(2026-08-06) - "설계ᆞ서류 준비" 한 항목에 뭉쳐 있던 걸
-    // 별도 substep으로 분리. requiresArchitect(건축법 제23조 대행 의무
-    // 판정, Step0 architect 배지와 같은 값)가 false면 직접 진행 가능하니
-    // 해당없음으로 닫는다.
-    step1Substeps.push({
-      text: "건축사사무소 선정ᆞ설계 계약",
-      done: !!taskProgress.architect_engaged,
-      field: "architect_engaged",
-      notApplicable: requiresArchitect === false,
-      naReason: "건축사 설계 의무 대상이 아니라 직접 진행할 수 있습니다",
-    });
+    // 별도 substep으로 분리. uses_agency/architect_selected는 이미 채팅
+    // 쪽(roadmap.py _pending_stage1_confirmation ᆞ permit_phase_directive)이
+    // 쓰는 실제 상태 필드 - 여기서 새 필드를 또 만들지 않고 그대로 재사용해서
+    // 채팅에서 "선정했다"고 답한 게 로드맵 체크에도 그대로 반영되게 한다.
+    if (requiresArchitect === true) {
+      step1Substeps.push({
+        text: "건축사사무소 선정ᆞ설계 계약",
+        done: !!taskProgress.architect_selected,
+        field: "architect_selected",
+        actorNote: "건축법 제23조상 설계 의무 대상 - 건축주가 건축사사무소와 계약합니다.",
+      });
+    } else if (requiresArchitect === false && taskProgress.uses_agency === false) {
+      step1Substeps.push({
+        text: "건축사사무소 선정ᆞ설계 계약",
+        done: true,
+        notApplicable: true,
+        naReason: "직접 진행하기로 하셔서 건축사사무소 선정이 필요 없습니다",
+      });
+    } else if (requiresArchitect === false && taskProgress.uses_agency === true) {
+      step1Substeps.push({
+        text: "대행업체(건축사사무소ᆞ행정사) 선정",
+        done: !!taskProgress.architect_selected,
+        field: "architect_selected",
+        actorNote: "설계 의무 대상은 아니지만 대행을 선택하셨습니다 - 건축주가 업체와 계약합니다.",
+      });
+    } else {
+      step1Substeps.push({
+        text: "건축사사무소 선정ᆞ설계 계약",
+        done: !!taskProgress.architect_selected,
+        field: "architect_selected",
+        actorNote: "법적 의무는 아닙니다(개인이 직접 진행 가능) - 직접 하실지 대행업체를 쓰실지는 채팅으로 말씀해주시면 이 항목에 반영됩니다.",
+      });
+    }
+    // "설계ᆞ서류 준비" 하위 실제 작업(GPT 피드백 2026-08-06) - 사용자가 직접
+    // 하는 일이 아니라 건축사사무소(대행 시) 몫이라 체크박스 없이 담당자만
+    // 표시(actor). 인허가 신청서만 법적 제출 명의가 건축주라 담당이 다르다
+    // (건축법 시행규칙 제12조의2 - 신청서 제출자는 항상 건축주, 실제 작성
+    // 대행은 실무 관행일 뿐 법적 요건은 아님, 2026-08-04 role-based 설계 조사).
+    // children으로 붙여서 부모(설계ᆞ서류 준비)와 한 카드 안에 렌더링(2026-08-06 피드백).
+    const designerActor = requiresArchitect === false && taskProgress.uses_agency === false ? "본인" : "건축사사무소";
+    const designWorkChildren = [
+      { text: "평면도(기본설계도) 작성", actor: designerActor },
+      { text: "구조ᆞ피난 안전 검토", actor: designerActor },
+      { text: "인허가 신청서 작성", actor: `${designerActor} 작성ᆞ건축주 명의로 제출` },
+    ];
     if (docs.length) {
       docs.forEach((d) => step1Substeps.push({ text: `📄 ${d}`, info: true }));
-      step1Substeps.push({ text: "설계ᆞ서류 준비", done: !!taskProgress.documents_prepared, field: "documents_prepared" });
+      step1Substeps.push({
+        text: "설계ᆞ서류 준비",
+        done: !!taskProgress.documents_prepared,
+        field: "documents_prepared",
+        children: permitNotNeeded ? undefined : designWorkChildren,
+      });
     } else {
       step1Substeps.push({ text: "설계ᆞ서류 준비", done: false, notApplicable: permitNotNeeded, naReason: "이 행위는 건축 인허가(신고ᆞ허가) 대상이 아닙니다" });
     }
@@ -1231,11 +1310,15 @@
             // 구조 공사 없이 인테리어만 하는 경우 착공신고 자체가 대상이 아니다.
             notApplicable: !!taskProgress.interior_only,
             naReason: "구조 공사 없이 인테리어만 진행하는 경우라 착공신고 대상이 아닙니다",
+            // 근거: 건축법 제21조(신고 명의는 건축주)ᆞ시행규칙 제14조(첨부서류 -
+            // 계약서 사본ᆞ설계도서ᆞ감리계약서). search_by_term("착공신고")로 확인(2026-08-06).
+            actorNote: "건축주 명의로 신고합니다(건축법 제21조ᆞ시행규칙 제14조) - 서류 작성은 건축사사무소ᆞ시공사가 대행하는 경우가 많습니다.",
           },
           {
             text: "시공", done: !!taskProgress.construction, field: "construction",
             notApplicable: !!taskProgress.interior_only,
             naReason: "구조 공사 없이 인테리어만 진행하는 경우라 해당 없습니다",
+            actorNote: "시공사(건설산업기본법 등록업체)가 진행하고, 공사감리자(건축사)가 별도로 감리ᆞ확인합니다.",
           },
           {
             text: latestFireResult && latestFireResult.length ? `소방시설: ${latestFireResult.join("ᆞ")}` : "소방시설",
@@ -1248,14 +1331,27 @@
             // 영원히 안 풀린다 - interior_only면 잠금 조건에서 제외.
             locked: !taskProgress.construction && !taskProgress.interior_only,
             lockReason: "공사(시공) 완료 후 설치ᆞ확인 가능",
+            // 근거: 소방시설공사업법(2026-08-04 role-based 설계 조사에서 확인) -
+            // 일반 시공사가 아니라 별도 면허의 소방시설공사업자가 설치합니다.
+            actorNote: "소방시설공사업법상 별도 면허를 가진 소방시설공사업자가 설치합니다(일반 시공사와 다름).",
           },
           { text: "인테리어ᆞ장비 설치", done: !!taskProgress.interior_equipment, field: "interior_equipment" },
           // GPT 피드백(2026-08-06)의 "사용승인 신청ᆞ현장검사ᆞ소방완공검사ᆞ
-          // 정화조 확인" - 개별 서브스텝으로 쪼개면 잠금ᆞ완료 조건을 각각
-          // 새로 설계해야 해서(백엔드 신호가 없음) factInfoLines와 같은
-          // 방식으로 참고용 한 줄에 압축.
-          { text: "사용승인 신청ᆞ현장검사ᆞ소방완공검사ᆞ정화조 확인", info: true },
-          { text: "사용승인", done: !!taskProgress.use_approval, field: "use_approval" },
+          // 정화조 확인" - 백엔드 신호가 없어 체크박스 대신 담당자 표시(actor)
+          // 참고 행으로 추가. 근거: 사용승인 건축법 제22조ᆞ시행규칙 제16조,
+          // 소방완공검사 소방시설공사업법, 정화조 준공검사 하수도법 제34ᆞ35조
+          // (모두 search_by_term으로 조문 대조, 2026-08-06). children으로 붙여서
+          // 부모(사용승인)와 한 카드 안에 렌더링(2026-08-06 피드백).
+          {
+            text: "사용승인", done: !!taskProgress.use_approval, field: "use_approval",
+            actorNote: "건축법 제22조ᆞ시행규칙 제16조 - 신청은 건축주 명의, 서류(공사감리완료보고서 등)는 감리자ᆞ시공사가 준비합니다.",
+            children: [
+              { text: "사용승인 신청서 제출", actor: "건축주 명의" },
+              { text: "현장검사", actor: "관할 관청" },
+              { text: "소방완공검사증명서 발급", actor: "관할 소방서" },
+              { text: "정화조 준공검사", actor: "관할 관청" },
+            ],
+          },
         ],
       },
       {
@@ -1283,6 +1379,7 @@
             naReason: "식품위생법상 별도 영업신고 대상이 아닙니다",
             locked: !taskProgress.use_approval,
             lockReason: "사용승인 완료 후 신고 가능",
+            actorNote: "영업자(사업주) 본인이 관할 보건소에 신고합니다.",
           },
           {
             text: latestSignageResult ? `간판: ${latestSignageResult}` : "간판ᆞ옥외광고물",
@@ -1295,6 +1392,7 @@
             // 영원히 안 풀린다 - interior_only면 잠금 조건에서 제외.
             locked: !taskProgress.construction && !taskProgress.interior_only,
             lockReason: "공사(시공) 완료 후 설치 가능",
+            actorNote: "영업자 본인 또는 간판 시공업체가 관할 구청에 신고ᆞ허가를 받습니다.",
           },
           // 사업자등록은 다른 Step3 항목과 달리 "아무 때나 시작 가능"이
           // 아니다 - 실제로는 임대차계약서(임차인 서류, Step1
@@ -1315,6 +1413,7 @@
             // (2026-08-04, 사용승인까지 끝났는데 Lock이 안 풀린다는 신고).
             locked: !((taskProgress.documents_prepared || permitNotNeeded) && latestFoodResult != null),
             lockReason: "임대차계약서ᆞ영업신고 확인 후 진행 가능",
+            actorNote: "사업주 본인이 관할 세무서(또는 홈택스ᆞ민원24)에 신청합니다.",
           },
           {
             text: "위생교육",
@@ -1325,6 +1424,7 @@
             // 대상이 아니다(식품위생 항목과 동일 판정 기준 재사용).
             notApplicable: latestFoodResult === "해당없음" || latestFoodResult === "신고대상제외",
             naReason: "식품위생법상 영업자가 아니라 위생교육 대상이 아닙니다",
+            actorNote: "영업자(또는 종업원) 본인이 식품위생교육 지정기관에서 이수합니다.",
           },
         ],
       },
@@ -1348,19 +1448,25 @@
             field: "staff_registration",
             locked: !taskProgress.business_registration,
             lockReason: "사업자등록 완료 후 진행 가능",
+            actorNote: "사업주 본인이 근로복지공단ᆞ4대 사회보험공단에 신고합니다.",
           },
-          // GPT 피드백(2026-08-06)의 오픈 준비 실무 항목 - 법령ᆞ백엔드 신호가
-          // 없는 순수 참고용 체크리스트라 info 줄로만.
-          { text: "POS·카드단말기 설치ᆞ식자재 발주ᆞ시범 운영", info: true },
           // 영업 시작은 로드맵의 마지막 관문 - Step3(식품위생ᆞ간판ᆞ사업자등록ᆞ
           // 위생교육)가 전부 끝나야 실제로 열 수 있다(2026-07-28). 소방시설은
           // Step2로 옮겨가서 이 게이트에서 빠졌다(2026-08-04, step3AllDone 참고).
+          // GPT 피드백(2026-08-06)의 오픈 준비 실무 항목(POS·카드단말기ᆞ
+          // 식자재ᆞ시범운영, 법령 근거 없음)은 "영업 시작" 직전 준비라
+          // children으로 붙여서 한 카드 안에 렌더링.
           {
             text: "영업 시작",
             done: !!taskProgress.opened,
             field: "opened",
             locked: !step3AllDone,
             lockReason: "식품위생ᆞ간판ᆞ사업자등록ᆞ위생교육 완료 후 가능",
+            children: [
+              { text: "POS·카드단말기 설치", actor: "본인ᆞ설치업체" },
+              { text: "식자재 발주", actor: "본인" },
+              { text: "시범 운영", actor: "본인" },
+            ],
           },
         ],
       },
@@ -1379,6 +1485,8 @@
     // info 항목(서류ᆞ사전진단 실제 목록처럼 참고용으로만 보여주는 줄)은
     // 완료 여부 개념이 없으니 done/total 집계에서 제외한다 - 안 그러면
     // "나열됨"이 "완료됨"으로 잘못 집계되는 문제가 재발한다.
+    // actor 하위 항목은 부모의 children 안에 있어 substeps 최상위 집계엔
+    // 안 잡힌다(2026-08-06) - renderStepDetail의 동일 필터와 같은 기준.
     const countable = (step) => step.substeps.filter((s) => !s.info);
     let currentIdx = steps.findIndex((step) => {
       const items = countable(step);
@@ -1887,6 +1995,9 @@
 
   function renderStepDetail(idx, title) {
     const step = lastRoadmapSteps[idx] || { substeps: [] };
+    // actor 하위 항목(평면도 작성 등)은 substeps 최상위가 아니라 부모의
+    // children 안에 있어(2026-08-06, 한 카드로 묶으면서 재배치) 여기 집계엔
+    // 애초에 안 잡힌다 - 진행률은 info만 빼면 된다.
     const items = step.substeps.filter((s) => !s.info);
     const doneCount = items.filter((s) => s.done).length;
     const allDone = items.length > 0 && doneCount === items.length;
@@ -1915,6 +2026,8 @@
       if (sub.notApplicable) tag = "해당없음";
       else if (lockedNow) tag = "선행조건 필요";
 
+      const main = document.createElement("div");
+      main.className = "step-checklist-item-main";
       if (sub.field && !lockedNow) {
         const checkboxId = `step-check-${sub.field}`;
         const checkbox = document.createElement("input");
@@ -1926,22 +2039,56 @@
         const label = document.createElement("label");
         label.htmlFor = checkboxId;
         label.textContent = sub.text;
-        row.appendChild(checkbox);
-        row.appendChild(label);
+        main.appendChild(checkbox);
+        main.appendChild(label);
       } else {
         const bullet = document.createElement("span");
         bullet.className = "step-checklist-bullet";
         bullet.textContent = sub.done ? "✓" : lockedNow ? "🔒" : "○";
         const text = document.createElement("span");
         text.textContent = sub.text;
-        row.appendChild(bullet);
-        row.appendChild(text);
+        main.appendChild(bullet);
+        main.appendChild(text);
       }
       if (sub.notApplicable || lockedNow) row.classList.add("muted");
       const tagEl = document.createElement("span");
       tagEl.className = "step-checklist-tag";
       tagEl.textContent = tag;
-      row.appendChild(tagEl);
+      main.appendChild(tagEl);
+      row.appendChild(main);
+      // 비전문가가 "이게 뭔지ᆞ누가 하는지"를 바로 볼 수 있게 하는 캡션
+      // (2026-08-06 피드백) - 근거 있는 항목만 채워뒀고(법령 조문은
+      // search_by_term으로 대조), 없으면 아예 안 보여준다.
+      if (sub.actorNote && !sub.notApplicable) {
+        const note = document.createElement("div");
+        note.className = "step-checklist-item-note";
+        note.textContent = sub.actorNote;
+        row.appendChild(note);
+      }
+      // 하위 행위(children) - 부모와 같은 카드(row) 안에 들여쓰기로 렌더링
+      // (2026-08-06 피드백: "하나의 행위와 하위 행위가 하나의 칸에서 보여질
+      // 수 있게"). 체크박스 없는 순수 참고 행이라 주체(actor)를 텍스트 바로
+      // 옆에 배지로 붙인다 - 기존 태그처럼 오른쪽 끝으로 밀려 눈에 안 띄는
+      // 문제를 피하려는 것.
+      if (sub.children && sub.children.length && !sub.notApplicable) {
+        const childList = document.createElement("div");
+        childList.className = "step-checklist-children";
+        sub.children.forEach((child) => {
+          const childRow = document.createElement("div");
+          childRow.className = "step-checklist-child";
+          const childText = document.createElement("span");
+          childText.textContent = child.text;
+          childRow.appendChild(childText);
+          if (child.actor) {
+            const actorEl = document.createElement("span");
+            actorEl.className = "step-checklist-child-actor";
+            actorEl.textContent = child.actor;
+            childRow.appendChild(actorEl);
+          }
+          childList.appendChild(childRow);
+        });
+        row.appendChild(childList);
+      }
       stepChecklistEl.appendChild(row);
     });
     if (!stepChecklistEl.children.length) {
