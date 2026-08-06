@@ -1290,11 +1290,15 @@
           },
           // 임차인이면 계약서가 이후 서류 준비(Step1)ᆞ사업자등록의 전제라
           // 초반에 확인해두는 게 GPT 피드백(2026-08-06)의 "건축주 여부 확인"
-          // 항목 - 판정 축과 달리 시스템이 알 방법이 없어 사용자 자기보고.
+          // 항목. 별도 자기보고(task_progress.owner_confirmed) 체크박스였는데,
+          // case_facts.ownership이 이미 폼ᆞ채팅에서 record_case_facts로
+          // 수집되는 같은 사실이라 - 사용자가 폼에서 이미 답했는데도 체크박스는
+          // 절대 자동으로 안 채워져 "또 물어보는" 것처럼 보이는 버그가 있었다
+          // (2026-08-06 재신고). case_facts.ownership을 그대로 판단 근거로 쓴다
+          // (Step3 식품위생ᆞ간판처럼 판정된 값을 라벨에 바로 반영하는 패턴과 동일).
           {
-            text: "건축주 여부 확인(임차 시 계약서 준비)",
-            done: !!taskProgress.owner_confirmed,
-            field: "owner_confirmed",
+            text: caseFacts.ownership ? `건축주 여부: ${caseFacts.ownership}` : "건축주 여부 확인(임차 시 계약서 준비)",
+            done: !!caseFacts.ownership,
           },
         ],
         // 건축법 제23조: 이 케이스가 건축사사무소 설계 의무 대상인지(백엔드

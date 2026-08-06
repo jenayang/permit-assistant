@@ -20,16 +20,16 @@ const endMarker = "\n    ];\n";
 const endIdx = html.indexOf(endMarker, startIdx) + endMarker.length;
 const block = html.slice(startIdx, endIdx);
 
-function buildSteps({ latestFoodResult, latestFireResult, latestSignageResult, taskProgress, actType, step1Substeps, latestPermitResult, caseTypeResult, requiresArchitect = null, permitNotNeeded = false }) {
+function buildSteps({ latestFoodResult, latestFireResult, latestSignageResult, taskProgress, actType, step1Substeps, latestPermitResult, caseTypeResult, requiresArchitect = null, permitNotNeeded = false, caseFacts = {} }) {
   // renderRoadmap()의 classified(801행 buildChecklists()와 동일 정의)를 그대로
   // 재현 - Step0의 "대상 판정" substep이 참조한다.
   const classified = !!(latestPermitResult && latestPermitResult.permit_type);
   const fn = new Function(
     "latestFoodResult", "latestFireResult", "latestSignageResult", "taskProgress",
-    "actType", "step1Substeps", "latestPermitResult", "caseTypeResult", "requiresArchitect", "permitNotNeeded", "classified",
+    "actType", "step1Substeps", "latestPermitResult", "caseTypeResult", "requiresArchitect", "permitNotNeeded", "classified", "caseFacts",
     block + "\nreturn steps;"
   );
-  return fn(latestFoodResult, latestFireResult, latestSignageResult, taskProgress, actType, step1Substeps, latestPermitResult, caseTypeResult, requiresArchitect, permitNotNeeded, classified);
+  return fn(latestFoodResult, latestFireResult, latestSignageResult, taskProgress, actType, step1Substeps, latestPermitResult, caseTypeResult, requiresArchitect, permitNotNeeded, classified, caseFacts);
 }
 
 // renderRoadmap()의 실제 분기(sub.field가 있으면 locked&&!done일 때만 잠금

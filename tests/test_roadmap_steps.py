@@ -26,19 +26,22 @@ def _state(case_facts=None, task_progress=None, **extra) -> dict:
     return {"case_facts": case_facts or {}, "task_progress": task_progress or {}, **extra}
 
 
-# === Step0 건축주 여부 확인 - task_progress 자기보고 ===
+# === Step0 건축주 여부 확인 - case_facts.ownership 기반(2026-08-06 수정) ===
+# 별도 task_progress 자기보고였다가, case_facts.ownership(record_case_facts로
+# 폼ᆞ채팅 공용 수집)이 이미 같은 사실이라 사용자가 폼에서 답해도 체크박스가
+# 절대 자동으로 안 채워져 "또 물어보는" 버그로 이어져 수정했다.
 
-def test_owner_confirmed_not_yet_reported():
+def test_owner_confirmed_unknown_when_ownership_not_recorded():
     result = _OWNER_CONFIRMED.resolve(_state())
     assert isinstance(result, ResolvedSubstep)
     assert result.done is False
-    assert "임대차계약서" in result.question
 
 
-def test_owner_confirmed_reported():
-    result = _OWNER_CONFIRMED.resolve(_state(task_progress={"owner_confirmed": True}))
+def test_owner_confirmed_done_when_ownership_already_recorded():
+    result = _OWNER_CONFIRMED.resolve(_state(case_facts={"ownership": "임차인"}))
     assert isinstance(result, ResolvedSubstep)
     assert result.done is True
+    assert "임차인" in result.label
 
 
 # === Step1 건축사사무소 선정 - 3갈래 + None ===

@@ -88,11 +88,16 @@ def _resolve_permit_classified(state: dict) -> ResolvedSubstep:
 
 
 def _resolve_owner_confirmed(state: dict) -> ResolvedSubstep:
-    task_progress = state.get("task_progress") or {}
+    # case_facts.ownership은 record_case_facts(폼ᆞ채팅 공용)로 이미 수집되는
+    # 사실이다 - 별도 task_progress 자기보고 플래그를 뒀더니, 사용자가 폼에서
+    # 이미 답했는데도 그 플래그는 자동으로 안 채워져 로드맵이 "또 물어보는"
+    # 것처럼 보이는 버그로 이어졌다(2026-08-06 재신고, index.html도 동일하게
+    # 수정). ownership이 이미 있으면 그대로 완료로 본다.
+    case_facts = state.get("case_facts") or {}
+    ownership = case_facts.get("ownership")
     return ResolvedSubstep(
-        label="건축주 여부 확인(임차 시 계약서 준비)",
-        done=bool(task_progress.get("owner_confirmed")),
-        question="건축주이신가요, 임차인이신가요? 임차인이면 임대차계약서를 준비해두시면 좋아요.",
+        label=f"건축주 여부: {ownership}" if ownership else "건축주 여부 확인(임차 시 계약서 준비)",
+        done=bool(ownership),
     )
 
 
