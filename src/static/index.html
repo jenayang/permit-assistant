@@ -1151,6 +1151,18 @@
     } else {
       step1Substeps.push({ text: "사전 검토", done: false, notApplicable: permitNotNeeded, naReason: "인허가 대상이 아니라 사전 검토가 필요 없습니다" });
     }
+    // 설계 착수 전 건축사사무소 선정ᆞ계약이 실제로 2~4주 걸리는 병목이라는
+    // GPT 피드백(2026-08-06) - "설계ᆞ서류 준비" 한 항목에 뭉쳐 있던 걸
+    // 별도 substep으로 분리. requiresArchitect(건축법 제23조 대행 의무
+    // 판정, Step0 architect 배지와 같은 값)가 false면 직접 진행 가능하니
+    // 해당없음으로 닫는다.
+    step1Substeps.push({
+      text: "건축사사무소 선정ᆞ설계 계약",
+      done: !!taskProgress.architect_engaged,
+      field: "architect_engaged",
+      notApplicable: requiresArchitect === false,
+      naReason: "건축사 설계 의무 대상이 아니라 직접 진행할 수 있습니다",
+    });
     if (docs.length) {
       docs.forEach((d) => step1Substeps.push({ text: `📄 ${d}`, info: true }));
       step1Substeps.push({ text: "설계ᆞ서류 준비", done: !!taskProgress.documents_prepared, field: "documents_prepared" });
@@ -1185,6 +1197,14 @@
           {
             text: latestPermitResult ? `판정: ${latestPermitResult.permit_type}` : (caseTypeResult ? `판정: ${caseTypeResult}` : "허가ᆞ신고ᆞ기재변경 대상 판정"),
             done: classified,
+          },
+          // 임차인이면 계약서가 이후 서류 준비(Step1)ᆞ사업자등록의 전제라
+          // 초반에 확인해두는 게 GPT 피드백(2026-08-06)의 "건축주 여부 확인"
+          // 항목 - 판정 축과 달리 시스템이 알 방법이 없어 사용자 자기보고.
+          {
+            text: "건축주 여부 확인(임차 시 계약서 준비)",
+            done: !!taskProgress.owner_confirmed,
+            field: "owner_confirmed",
           },
         ],
         // 건축법 제23조: 이 케이스가 건축사사무소 설계 의무 대상인지(백엔드
@@ -1230,6 +1250,11 @@
             lockReason: "공사(시공) 완료 후 설치ᆞ확인 가능",
           },
           { text: "인테리어ᆞ장비 설치", done: !!taskProgress.interior_equipment, field: "interior_equipment" },
+          // GPT 피드백(2026-08-06)의 "사용승인 신청ᆞ현장검사ᆞ소방완공검사ᆞ
+          // 정화조 확인" - 개별 서브스텝으로 쪼개면 잠금ᆞ완료 조건을 각각
+          // 새로 설계해야 해서(백엔드 신호가 없음) factInfoLines와 같은
+          // 방식으로 참고용 한 줄에 압축.
+          { text: "사용승인 신청ᆞ현장검사ᆞ소방완공검사ᆞ정화조 확인", info: true },
           { text: "사용승인", done: !!taskProgress.use_approval, field: "use_approval" },
         ],
       },
@@ -1324,6 +1349,9 @@
             locked: !taskProgress.business_registration,
             lockReason: "사업자등록 완료 후 진행 가능",
           },
+          // GPT 피드백(2026-08-06)의 오픈 준비 실무 항목 - 법령ᆞ백엔드 신호가
+          // 없는 순수 참고용 체크리스트라 info 줄로만.
+          { text: "POS·카드단말기 설치ᆞ식자재 발주ᆞ시범 운영", info: true },
           // 영업 시작은 로드맵의 마지막 관문 - Step3(식품위생ᆞ간판ᆞ사업자등록ᆞ
           // 위생교육)가 전부 끝나야 실제로 열 수 있다(2026-07-28). 소방시설은
           // Step2로 옮겨가서 이 게이트에서 빠졌다(2026-08-04, step3AllDone 참고).
