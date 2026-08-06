@@ -12,8 +12,9 @@ import re
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from src.agents.permit import requires_licensed_architect
+from src.agents.roadmap_progress import TASK_PROGRESS_FIELDS
 from src.message_utils import extract_text
+from src.roadmap_steps import ROADMAP_STEPS, NeedsInput, ResolvedSubstep, StepDef, SubstepDef
 
 if TYPE_CHECKING:
     from src.agent import AgentState
@@ -77,41 +78,116 @@ def _mentioned_construction_stages(text: str) -> list[int]:
     return mentioned
 
 
+# [Step N-M] 마커의 M(1~4)에 붙는 조사 - "일ᆞ삼ᆞ육ᆞ칠ᆞ팔ᆞ십"은 받침이 있어
+# "으로/을", "이ᆞ사ᆞ오ᆞ구"는 받침이 없어 "로/를"(예: "[Step 1-3]으로" vs
+# "[Step 1-2]로"). 이 시스템에서 마커 번호는 1~4만 쓰이지만 일반화해 둔다.
+_BATCHIM_DIGITS = frozenset({1, 3, 6, 7, 8, 10})
+
+
+def _euro(n: int) -> str:
+    return "으로" if n in _BATCHIM_DIGITS else "로"
+
+
+def _eul(n: int) -> str:
+    return "을" if n in _BATCHIM_DIGITS else "를"
+
+
+def _next_pending_substep(step: StepDef, state: dict) -> tuple[StepDef, SubstepDef, "ResolvedSubstep | NeedsInput"] | None:
+    """step.substeps를 순서대로 훑어 첫 번째로 안 끝난 항목을 반환한다.
+    resolve()가 None(해당없음)이거나 done=True인 substep은 건너뛴다. locked=True인
+    항목을 만나면 그 자리에서 멈추고 반환하지 않는다(아직 등장할 차례가 아니다 -
+    예: 사용승인 전엔 식품위생 영업신고 '접수' 자체가 아직 안 열렸으니, 뒤에
+    잠기지 않은 항목이 있어도 순서를 건너뛰어 먼저 안내하지 않는다).
+
+    Step3ᆞ4(병렬 트랙)의 소프트 유도 문구 계산에만 쓴다 - Step1ᆞ2(순차 트랙)는
+    마커 번호가 있는 특정 substep을 직접 인덱싱해서 확인하므로(위
+    _pending_stage1/2_confirmation 참고) 이 함수를 거치지 않는다.
+
+    substep.key가 record_task_progress의 필드(TASK_PROGRESS_FIELDS)가 아니면
+    건너뛴다(계속 스캔) - 식품위생ᆞ간판 확인처럼 key가 food_result/signage_result인
+    항목은 "완료했다고 답하면 기록하세요" 대상이 아니라 별도 판정 도메인(classify.py)이
+    처리하는 값이다. 이 필터가 없으면 _disclosure_text가
+    `record_task_progress(food_result=True)`처럼 실재하지 않는 지시를 만들어낸다
+    (실측으로 확인, 2026-08-06 - 실제 LLM 스모크 테스트 중 발견)."""
+    for substep in step.substeps:
+        result = substep.resolve(state)
+        if result is None:
+            continue
+        if isinstance(result, ResolvedSubstep):
+            if result.done:
+                continue
+            if substep.key not in TASK_PROGRESS_FIELDS:
+                continue
+            if result.locked:
+                return None
+        return (step, substep, result)
+    return None
+
+
+def _disclosure_text(step: StepDef, substep: SubstepDef, index: int | None, result: "ResolvedSubstep | NeedsInput") -> str:
+    """substep의 resolve() 결과를 "이번 턴에 뭘 해야 하는가" 지시문 하나로
+    변환한다 - Step1ᆞ2(하드 게이트)ᆞStep3ᆞ4(소프트 유도) 공용 템플릿.
+
+    NeedsInput: 다른 건 안 묻고 그 질문 하나만 낸다.
+    ResolvedSubstep(done=False): "[라벨] 안내까지 끝났습니다 → (주체ᆞ법적근거) →
+    완료 여부 확인 질문 → record_task_progress(key=True)로 기록" 순서로 조립한다.
+    step.hard_gate=True(Step1ᆞ2)면 라벨을 [Step {marker}-{index}] 마커로 감싸고
+    "다음 마커로 넘어가지 마세요" 캡을 건다(guard.py의 하드 차단과 같은 결론을
+    가리키게 함). hard_gate=False(Step3ᆞ4)면 마커 대신 "사용자가 다른 항목을
+    직접 물으면 그건 바로 답해도 됩니다"로 대체(병렬 트랙 원칙 유지)."""
+    if isinstance(result, NeedsInput):
+        return f"[진행 상태] {result.question}"
+
+    question = result.question or f"{result.label} 하셨어요?"
+    if step.hard_gate:
+        next_num = index + 1
+        label_tag = f"[{step.marker}-{index}: {result.label}]"
+        next_tag = f"[{step.marker}-{next_num}]"
+        parts = [f"[진행 상태] {label_tag} 안내까지 끝났습니다."]
+        if result.actor_note:
+            parts.append(result.actor_note)
+        parts.append(
+            f"이번 턴에는 {next_tag}{_euro(next_num)} 넘어가지 말고 \"{question}\"처럼 완료 여부부터 확인하세요."
+        )
+        parts.append(
+            f"완료했다고 답하면 record_task_progress({substep.key}=True)로 기록한 뒤 "
+            f"다음 턴부터 {next_tag}{_eul(next_num)} 안내하세요."
+        )
+    else:
+        parts = [f"[진행 상태] '{result.label}' 안내까지 끝났습니다."]
+        if result.actor_note:
+            parts.append(result.actor_note)
+        parts.append(
+            f"이번 턴에는 다음으로 넘어가지 말고 \"{question}\"처럼 완료 여부부터 확인하세요. "
+            "사용자가 다른 항목을 직접 물으면 그건 바로 답해도 됩니다."
+        )
+        parts.append(f"완료했다고 답하면 record_task_progress({substep.key}=True)로 기록하세요.")
+    return " ".join(parts)
+
+
 def _pending_stage1_confirmation(disclosed: int, task_progress: dict, case_facts: dict) -> int | None:
     """[Step 1-1]~[Step 1-3] 완료 확인이 아직 안 됐으면 그 단계 번호를 반환
     (이 이상 못 감), 다 확인됐으면 None.
 
     2026-08-04: Step0/Step1 재구성으로 [Step 1-1]의 의미가 "대상 판정"에서
     "건축사사무소 선정"으로 바뀌었다(판정 자체는 즉시 확정되는 사실이라 Step0으로
-    옮기고 페이싱 대상에서 뺐다 - Step1-3이 설계도서를 만들려면 그 전에 건축사가
-    정해져 있어야 하는데, 예전엔 이 선정이 Step2-1(착공 직전)에 있어 너무
-    늦었다). 건축사 선정 게이트는 requires_licensed_architect 판정에 따라 갈린다:
-      - True(의무): architect_selected 확인돼야 통과.
-      - False(선택): uses_agency(직접/대행) 결정부터 필요 - 대행이면
-        architect_selected까지, 직접이면 선정할 대상이 없어 바로 통과.
-      - None(정보 부족): 게이트 없음(막지 않음).
+    옮기고 페이싱 대상에서 뺐다). 판정 로직 자체(건축사 선정 3갈래ᆞ사전검토ᆞ
+    서류준비)는 `src/roadmap_steps.py`의 `ROADMAP_STEPS[1]`로 옮겼다(Phase 5,
+    2026-08-06) - 여기선 그 결과의 done 여부만 확인해 몇 번째 단계가 막혀 있는지
+    반환한다. guard.py가 이 함수를 직접 import해서 `pending == 1`/`== 2`로 비교하므로
+    시그니처ᆞ반환값(`int | None`)은 그대로 유지한다.
 
     _max_allowed_stage(하드 캡)ᆞpermit_phase_directive(안내 문구)가 반드시 같은
     소스를 봐야 한다 - 따로 두면 한쪽만 고치고 잊어버리는 드리프트가 실제로
     있었다(2026-08-04, 세션 3d2f20a1에서 재현: 1-2 확인 전에 1-3 내용이 새는
     버그로 확인됨)."""
-    if disclosed == 1:
-        verdict = requires_licensed_architect(case_facts)
-        if verdict is True:
-            if not task_progress.get("architect_selected"):
-                return 1
-        elif verdict is False:
-            uses_agency = task_progress.get("uses_agency")
-            if uses_agency is None:
-                return 1
-            if uses_agency and not task_progress.get("architect_selected"):
-                return 1
-        # verdict is None -> 정보 부족, 막지 않음
-    if disclosed == 2 and not task_progress.get("pre_diagnosis_checked"):
-        return 2
-    if disclosed == 3 and not task_progress.get("documents_prepared"):
-        return 3
-    return None
+    if disclosed not in (1, 2, 3):
+        return None
+    substep = ROADMAP_STEPS[1].substeps[disclosed - 1]
+    result = substep.resolve({"case_facts": case_facts, "task_progress": task_progress})
+    if result is None or (isinstance(result, ResolvedSubstep) and result.done):
+        return None
+    return disclosed
 
 
 def _max_allowed_stage(state: "AgentState") -> int:
@@ -136,18 +212,21 @@ def _max_allowed_stage(state: "AgentState") -> int:
 def _pending_stage2_confirmation(construction_disclosed: int, task_progress: dict) -> int | None:
     """[Step 2-1]/[Step 2-2] 완료 확인이 아직 안 됐으면 그 단계 번호를 반환,
     다 확인됐으면 None. _pending_stage1_confirmation과 동일한 이유로 하드
-    캡ᆞ안내 문구가 공유하는 단일 소스.
+    캡ᆞ안내 문구가 공유하는 단일 소스 - `ROADMAP_STEPS[2]`의 착공신고(idx0)ᆞ
+    시공(idx1) substep만 참조한다(인테리어ᆞ장비 설치ᆞ사용승인은 이 마커
+    체인에 없음, `src/roadmap_steps.py` 참고). `tests/test_agent_guard.py`가
+    이 함수를 직접 호출하므로 시그니처는 그대로 유지한다.
 
     2026-08-04: interior_only(구조 공사 없이 인테리어만 진행)면 착공신고ᆞ
-    시공 게이트 자체를 건너뛴다 - 해당 없는 확인을 강제로 물어보게 되는
-    문제를 막는다."""
-    if task_progress.get("interior_only"):
+    시공 게이트 자체를 건너뛴다(이제 substep의 resolve()가 None을 돌려주는
+    것으로 처리) - 해당 없는 확인을 강제로 물어보게 되는 문제를 막는다."""
+    if construction_disclosed not in (1, 2):
         return None
-    if construction_disclosed == 1 and not task_progress.get("construction_notice"):
-        return 1
-    if construction_disclosed == 2 and not task_progress.get("construction"):
-        return 2
-    return None
+    substep = ROADMAP_STEPS[2].substeps[construction_disclosed - 1]
+    result = substep.resolve({"task_progress": task_progress})
+    if result is None or (isinstance(result, ResolvedSubstep) and result.done):
+        return None
+    return construction_disclosed
 
 
 def _max_allowed_construction_stage(state: "AgentState") -> int:
@@ -227,7 +306,7 @@ def _roadmap_status_summary(state: "AgentState") -> str:
     if not step2_started:
         return summary
 
-    return summary + (
+    startup_text = (
         "창업 준비 트랙(Step 3: 식품위생ᆞ소방ᆞ간판ᆞ사업자등록ᆞ위생교육, "
         "Step 4: 오픈 준비) - 인허가 트랙과 병렬이지만 '아무거나 지금'이 아니라 "
         "실무 순서에 맞춰 안내하세요:\n"
@@ -238,17 +317,17 @@ def _roadmap_status_summary(state: "AgentState") -> str:
         "  · 공사(Step 2) 전ᆞ중에 미리 해둘 수 있는 것: 위생교육 이수, 사업자등록, 각종 판정 확인\n"
         "  · 공사 완료(사용승인) 후에 하는 것: 식품위생 영업신고 접수, 소방시설ᆞ간판 설치, "
         "직원등록, 영업시작\n"
-        "- 사용자가 특정 항목을 직접 물으면 그건 바로 안내해도 됩니다. 다만 묻지 않았는데 "
-        "먼저 꺼낼 때는 위 시점 구분(지금 미리 할 것 / 공사 후 할 것)을 함께 알려주세요 - "
-        "\"이건 공사 들어가면 그때 같이 진행하시면 돼요\"처럼.\n"
-        "- '공사 완료 후에 하는 것' 항목(영업신고 접수ᆞ소방시설ᆞ간판 설치ᆞ직원등록ᆞ영업시작)을 "
-        "안내하기 직전에는, 사용승인이 위 Step 2 상태에 아직 반영되지 않았으면 곧장 안내하지 "
-        "말고 \"사용승인은 받으셨어요?\"처럼 완료 여부부터 확인하세요. 완료했다고 답하면 "
-        "record_task_progress(use_approval=True)로 기록한 뒤 다음 턴부터 안내하세요.\n"
-        "- '사업자등록을 완료했다'는 말은 Step 3의 다섯 항목(식품위생ᆞ소방ᆞ간판ᆞ사업자등록ᆞ"
-        "위생교육) 중 하나일 뿐입니다. 사업자등록 완료만으로 창업 준비가 끝난 것처럼 답하지 "
-        "말고, 아직 미완료인 나머지 Step 3 항목을 함께 짚어주세요."
     )
+    # 창업 준비 트랙의 개별 항목별 안내(주체ᆞ법적근거ᆞ완료 확인 질문)는
+    # ROADMAP_STEPS[3](창업 행정)ᆞROADMAP_STEPS[4](오픈 준비)에서 다음으로 안 밝혀진
+    # 항목 하나만 소프트 유도로 덧붙인다(Phase 5, 2026-08-06) - 항목이 늘어나도
+    # 이 문단을 새로 쓸 필요가 없다. 둘 다 없으면(지금 당장 짚을 특정 항목이
+    # 없으면) 위 시점 구분 설명만으로 충분하니 그냥 끝낸다.
+    pending = _next_pending_substep(ROADMAP_STEPS[3], state) or _next_pending_substep(ROADMAP_STEPS[4], state)
+    if pending:
+        step, substep, result = pending
+        startup_text += _disclosure_text(step, substep, None, result)
+    return summary + startup_text
 
 
 def permit_phase_directive(state: "AgentState") -> str | None:
@@ -278,50 +357,14 @@ def permit_phase_directive(state: "AgentState") -> str | None:
 
     # 1-1(건축사 선정)ᆞ1-2(사전검토)ᆞ1-3(서류준비) 완료 확인 게이트 - 셋 다
     # _pending_stage1_confirmation 하나로 판단해서 하드 캡과 드리프트가 안 나게 한다.
+    # 실제 문구 조립은 ROADMAP_STEPS[1]의 resolve() 결과를 _disclosure_text에
+    # 넘겨서 만든다(Phase 5, 2026-08-06) - 건축사 선정의 3갈래 분기(의무/선택-대행/
+    # 선택-직접)는 resolve() 안에 남아있고, 여기선 그 결과를 문장으로 바꾸기만 한다.
     pending1 = _pending_stage1_confirmation(disclosed, task_progress, case_facts)
-    if pending1 == 1:
-        verdict = requires_licensed_architect(case_facts)
-        if verdict is True:
-            return (
-                "[진행 상태] [Step 1-1: 건축사사무소 선정] 안내까지 끝났습니다. 이 사례는 "
-                "건축법상 건축사사무소 설계가 필요한 대상(법적 의무)입니다 - 이 판정을 그대로 "
-                "전달하고 재판단하거나 흐리게 말하지 마세요. 이번 턴에는 [Step 1-2]로 넘어가지 "
-                "말고 \"건축사사무소는 선정하셨어요?\"처럼 완료 여부부터 확인하세요. 완료했다고 "
-                "답하면 record_task_progress(architect_selected=True)로 기록한 뒤 다음 턴부터 "
-                "[Step 1-2]를 안내하세요."
-            )
-        if verdict is False:
-            uses_agency = task_progress.get("uses_agency")
-            if uses_agency is None:
-                return (
-                    "[진행 상태] [Step 1-1: 건축사사무소 선정] 안내까지 끝났습니다. 이 사례는 "
-                    "건축사사무소 설계가 법적 의무는 아닙니다(개인이 직접 진행 가능) - \"법적 "
-                    "의무는 아닙니다\"라고 명확히 밝히세요. 이번 턴에는 [Step 1-2]로 넘어가지 "
-                    "말고 \"직접 진행하실 건가요, 건축사사무소ᆞ행정사 등 대행업체 도움을 받으실 "
-                    "건가요?\"처럼 물어보세요. 답변에 따라 record_task_progress(uses_agency=True "
-                    "또는 False)로 기록한 뒤 다음 턴부터 이어가세요."
-                )
-            return (
-                "[진행 상태] 대행업체 도움을 받기로 하셨습니다. 이번 턴에는 [Step 1-2]로 "
-                "넘어가지 말고 \"그 업체는 선정하셨어요?\"처럼 완료 여부부터 확인하세요. "
-                "완료했다고 답하면 record_task_progress(architect_selected=True)로 기록한 "
-                "뒤 다음 턴부터 [Step 1-2]를 안내하세요."
-            )
-    if pending1 == 2:
-        return (
-            "[진행 상태] [Step 1-2: 사전 검토] 안내까지 끝났습니다. 이번 턴에는 [Step 1-3]"
-            "(설계ᆞ서류 준비)로 넘어가지 말고 \"사전 검토 항목은 확인해 보셨어요?\"처럼 완료 "
-            "여부부터 확인하세요. 완료했다고 답하면 "
-            "record_task_progress(pre_diagnosis_checked=True)로 기록한 뒤 다음 턴부터 "
-            "[Step 1-3]을 안내하세요."
-        )
-    if pending1 == 3:
-        return (
-            "[진행 상태] [Step 1-3: 설계ᆞ서류 준비] 안내까지 끝났습니다. 이번 턴에는 [Step 1-4]"
-            "(신청ᆞ접수)로 넘어가지 말고 \"설계도서ᆞ서류 준비는 다 되셨어요?\"처럼 완료 여부부터 "
-            "확인하세요. 완료했다고 답하면 record_task_progress(documents_prepared=True)로 "
-            "기록한 뒤 다음 턴부터 [Step 1-4]를 안내하세요."
-        )
+    if pending1 in (1, 2, 3):
+        substep = ROADMAP_STEPS[1].substeps[pending1 - 1]
+        result = substep.resolve({"case_facts": case_facts, "task_progress": task_progress})
+        return _disclosure_text(ROADMAP_STEPS[1], substep, pending1, result)
     if disclosed < 4:
         return (
             f"[진행 상태] Step 1(건축 인허가)의 하위 단계 중 지금까지 [Step 1-{disclosed}]"
@@ -351,21 +394,10 @@ def permit_phase_directive(state: "AgentState") -> str | None:
     # construction/use_approval 게이트만 다룬다(2026-08-04).
     construction_disclosed = disclosed_stage.get("construction_stage", 0)
     pending2 = _pending_stage2_confirmation(construction_disclosed, task_progress)
-    if pending2 == 1:
-        return (
-            "[진행 상태] [Step 2-1: 착공신고] 안내까지 끝났습니다. 이번 턴에는 [Step 2-2]로 "
-            "넘어가지 말고 \"착공신고는 하셨어요?\"처럼 완료 여부부터 확인하세요. 완료했다고 "
-            "답하면 record_task_progress(construction_notice=True)로 기록한 뒤 다음 턴부터 "
-            "[Step 2-2]를 안내하세요."
-        )
-    if pending2 == 2:
-        return (
-            "[진행 상태] [Step 2-2: 시공ᆞ공사감리ᆞ소방시설ᆞ인테리어ᆞ장비 설치] 안내까지 "
-            "끝났습니다. 이번 턴에는 [Step 2-3]으로 넘어가지 말고 \"시공은 끝나셨어요?\"처럼 "
-            "완료 여부부터 확인하세요. 완료했다고 답하면 "
-            "record_task_progress(construction=True)로 기록한 뒤 다음 턴부터 [Step 2-3]을 "
-            "안내하세요."
-        )
+    if pending2 in (1, 2):
+        substep = ROADMAP_STEPS[2].substeps[pending2 - 1]
+        result = substep.resolve({"task_progress": task_progress})
+        return _disclosure_text(ROADMAP_STEPS[2], substep, pending2, result)
     if construction_disclosed < 3:
         return (
             f"[진행 상태] Step 2(공사)의 하위 단계 중 지금까지 "

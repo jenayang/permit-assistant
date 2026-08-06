@@ -71,8 +71,12 @@ def test_construction_track_fully_done_has_no_current_step():
         "case_facts": {"act_type": "신축"},
         "permit_result": {"permit_type": "건축신고"},
         "task_progress": {
+            # architect_selected/interior_equipment(2026-08-06 드리프트 수정 -
+            # ROADMAP_STEPS에 건축사선정이 Step1로, 인테리어ᆞ장비 설치가
+            # Step2로 새로 추가됨)도 채워야 두 트랙이 실제로 "완료"로 잡힌다.
+            "architect_selected": True,
             "pre_diagnosis_checked": True, "documents_prepared": True, "application_submitted": True,
-            "construction_notice": True, "construction": True, "use_approval": True,
+            "construction_notice": True, "construction": True, "interior_equipment": True, "use_approval": True,
         },
     }
     result = compute_project_status(state)
@@ -92,6 +96,7 @@ def test_all_steps_done_reaches_full_progress_and_celebration_summary():
         "fire_result": [],
         "signage_result": "허가ᆞ신고 불필요",
         "task_progress": {
+            "architect_selected": True,
             "pre_diagnosis_checked": True, "documents_prepared": True, "application_submitted": True,
             "construction_notice": True, "construction": True, "use_approval": True,
             "business_registration": True, "hygiene_education": True,
@@ -126,8 +131,10 @@ def test_hires_staff_false_counts_staff_registration_as_done():
 
 
 def test_progress_percentage_rounds_to_nearest_integer():
-    # 총 15개 하위 항목(2026-08-04: Step0 2ᆞStep1 3ᆞStep2 3ᆞStep3 4ᆞStep4 3)
-    # 중 8개 완료 -> 8/15*100 = 53.33 -> 반올림 53
+    # 총 16개 하위 항목(2026-08-06: Step0 2ᆞStep1 4(건축사선정 포함)ᆞ
+    # Step2 4(인테리어ᆞ장비 설치 포함)ᆞStep3 4ᆞStep4 2(인테리어는 Step2로 이동))
+    # 중 8개 완료(architect_selected 미기록이라 건축사선정은 미완료로 집계) ->
+    # 8/16*100 = 50
     state = {
         "case_facts": {"act_type": "신축"},
         "permit_result": {"permit_type": "건축신고"},
@@ -140,4 +147,4 @@ def test_progress_percentage_rounds_to_nearest_integer():
         },
     }
     result = compute_project_status(state)
-    assert result["progress"] == 53
+    assert result["progress"] == 50

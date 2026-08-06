@@ -26,6 +26,7 @@ current_step 하나만 계산했는데, 실사용 세션(79430043)에서 문제�
 from __future__ import annotations
 
 from src.agents.permit import requires_licensed_architect
+from src.roadmap_steps import ROADMAP_STEPS, NeedsInput
 
 STEP_LABELS = ["건축 유형 확인", "건축 인허가", "공사", "창업 행정", "오픈 준비"]
 
@@ -37,45 +38,27 @@ _STARTUP_TRACK_INDICES = (3, 4)
 
 
 def _step_substeps(state: dict) -> list[list[tuple[str, bool]]]:
-    """Step 0~4 각각의 [(라벨, 완료여부), ...]."""
-    case_facts = state.get("case_facts") or {}
-    permit_result = state.get("permit_result")
-    food_result = state.get("food_result")
-    signage_result = state.get("signage_result")
-    tp = state.get("task_progress") or {}
-    interior_only = bool(tp.get("interior_only"))
+    """Step 0~4 각각의 [(라벨, 완료여부), ...].
 
-    return [
-        [
-            ("행위 유형 확인", bool(case_facts.get("act_type"))),
-            ("허가ᆞ신고ᆞ기재변경 대상 판정", bool(permit_result)),
-        ],
-        [
-            ("사전 검토", bool(tp.get("pre_diagnosis_checked"))),
-            ("설계ᆞ서류 준비", bool(tp.get("documents_prepared"))),
-            ("신청ᆞ접수", bool(tp.get("application_submitted"))),
-        ],
-        [
-            ("착공신고", interior_only or bool(tp.get("construction_notice"))),
-            ("공사(시공)", interior_only or bool(tp.get("construction"))),
-            ("사용승인", bool(tp.get("use_approval"))),
-        ],
-        [
-            ("식품위생 영업신고 확인", food_result is not None),
-            ("간판ᆞ옥외광고물 확인", signage_result is not None),
-            ("사업자등록", bool(tp.get("business_registration"))),
-            ("위생교육 이수", bool(tp.get("hygiene_education"))),
-        ],
-        [
-            ("인테리어ᆞ장비 설치", bool(tp.get("interior_equipment"))),
-            # 직원을 안 두는 1인ᆞ가족 운영 사업자는 4대보험 가입 신고 자체가
-            # 대상이 아니다 - hires_staff=False로 명시되면 이 항목이 영원히
-            # 미완료로 남아 진행률이 100%를 못 채우는 문제가 있었다
-            # (2026-07-28, 세션 2cda4d67류에서 신고).
-            ("직원 등록(4대보험 가입)", bool(tp.get("staff_registration")) or tp.get("hires_staff") is False),
-            ("영업 시작", bool(tp.get("opened"))),
-        ],
-    ]
+    2026-08-06(Phase 5): 판정 로직을 `src/roadmap_steps.py`의 `ROADMAP_STEPS`로
+    옮겼다 - 챗봇(roadmap.py)과 이 함수가 같은 resolve()를 봐서, 예전에 실측으로
+    확인된 드리프트(건축사선정 항목 누락ᆞ인테리어장비 위치 불일치)가 재발하지
+    않는다. `resolve()`가 `None`(해당없음)을 돌려주면 그 항목 자체가 목록에서
+    빠지고(진행률 분모가 케이스별로 정확해짐), `NeedsInput`이면 아직 안 밝혀진
+    질문 자체를 라벨로 써서 미완료 항목으로 남긴다."""
+    steps: list[list[tuple[str, bool]]] = []
+    for step_def in ROADMAP_STEPS:
+        substeps: list[tuple[str, bool]] = []
+        for substep_def in step_def.substeps:
+            result = substep_def.resolve(state)
+            if result is None:
+                continue
+            if isinstance(result, NeedsInput):
+                substeps.append((result.question, False))
+            else:
+                substeps.append((result.label, result.done))
+        steps.append(substeps)
+    return steps
 
 
 def _track_status(steps: list[list[tuple[str, bool]]], indices: tuple[int, ...]) -> dict:
