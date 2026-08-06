@@ -27,20 +27,21 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; background: var(--bg); color: var(--text); }
   .layout { max-width: 560px; margin: 0 auto; padding: 24px 20px 60px; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  .sub { color: var(--text-muted); font-size: 13px; margin-bottom: 20px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  .sub { color: var(--text-muted); font-size: 15px; margin-bottom: 24px; }
   .step { display: none; }
   .step.active { display: block; }
-  .card { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow); padding: 20px; margin-bottom: 16px; }
+  .card { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); padding: 24px; margin-bottom: 20px; }
   .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; }
-  .field label { font-size: 14px; font-weight: 600; }
-  .field input, .field select { padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 14px; }
+  .field label { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+  .field input, .field select { padding: 14px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 15px; }
   .toggle { display: flex; gap: 8px; }
   .toggle button { flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 14px; cursor: pointer; }
   .toggle button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-  .primary-btn { cursor: pointer; border: none; border-radius: 6px; font-size: 14px; background: var(--accent); color: var(--accent-text); padding: 12px 20px; width: 100%; font-weight: 600; }
+  .primary-btn { cursor: pointer; border: none; border-radius: 8px; font-size: 15px; background: var(--accent); color: var(--accent-text); padding: 15px 20px; width: 100%; font-weight: 700; }
   .primary-btn:disabled { opacity: .6; cursor: default; }
-  #lookupStatus { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+  #lookupBtn { margin-top: 8px; }
+  #lookupStatus { font-size: 12.5px; color: var(--text-muted); margin-top: 8px; }
   .food-block { display: none; }
   .food-block.active { display: block; }
   #result { display: none; }
@@ -50,35 +51,61 @@
   #result dd { margin: 2px 0 0; font-size: 14px; }
   #resultLink { display: inline-block; margin-top: 14px; background: var(--accent); color: var(--accent-text); padding: 10px 16px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600; }
   #formError { color: var(--error); font-size: 13px; margin-top: 8px; display: none; }
-  .field-hint { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
+  .field-hint { font-size: 13px; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
   .area-input-row { display: flex; gap: 8px; }
   .area-input-row input { flex: 1; }
   .area-input-row select { padding: 10px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 14px; }
+  .biztype-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+  .biztype-btn { padding: 12px 20px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .biztype-btn.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  #bizTypeCustom { margin-top: 8px; }
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); align-items: center; justify-content: center; padding: 20px; z-index: 10; }
+  .modal-overlay.active { display: flex; }
+  .modal-card { background: var(--panel); border-radius: 10px; box-shadow: var(--shadow); padding: 20px; max-width: 420px; width: 100%; max-height: 80vh; overflow-y: auto; }
+  .modal-card h3 { margin: 0 0 12px; font-size: 15px; }
+  .modal-card pre { white-space: pre-wrap; font-family: inherit; font-size: 13.5px; line-height: 1.6; margin: 0; }
+  .modal-close-btn { margin-top: 16px; width: 100%; }
 </style>
 </head>
 <body>
 <div class="layout">
   <h1>로드맵 만들기</h1>
-  <div class="sub" id="stepHint">어떤 업종을 창업하시나요?</div>
+  <div class="sub" id="stepHint">사업 예정지 주소와 업종을 알려주세요.</div>
 
   <div class="step active" id="step1">
     <div class="card">
       <div class="field">
-        <label for="bizType">업종</label>
-        <select id="bizType">
-          <option value="카페">카페</option>
-          <option value="음식점">음식점</option>
-          <option value="사무실">사무실</option>
-          <option value="기타">기타</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="address">창업하고자 하는 주소</label>
-        <input id="address" placeholder="예: 서울특별시 강남구 테헤란로 123">
+        <label for="address">사업 예정지 주소</label>
+        <input id="address" placeholder="도로명 주소 입력 (예: 서울특별시 강남구 테헤란로 123)">
+        <div class="field-hint">주소를 입력하면 건축물 용도ᆞ연면적 등 기본 현황을 공공데이터(VWorld)로 조회해 팝업으로 보여드립니다. 신축(빈 대지) 예정이라 조회 결과가 없어도 정상이니 그대로 진행하시면 됩니다.</div>
+        <button type="button" id="lookupBtn" class="primary-btn">주소 조회 및 건축물 확인</button>
         <div id="lookupStatus"></div>
       </div>
     </div>
+
+    <div class="card">
+      <div class="field">
+        <label>업종</label>
+        <div class="biztype-grid" id="bizTypeGrid">
+          <button type="button" class="biztype-btn active" data-value="카페ᆞ음료">카페ᆞ음료</button>
+          <button type="button" class="biztype-btn" data-value="음식점">음식점</button>
+          <button type="button" class="biztype-btn" data-value="소매점">소매점</button>
+          <button type="button" class="biztype-btn" data-value="사무실">사무실</button>
+          <button type="button" class="biztype-btn" data-value="주거 리모델링">주거 리모델링</button>
+          <button type="button" class="biztype-btn" data-value="기타">기타</button>
+        </div>
+        <input id="bizTypeCustom" placeholder="업종을 입력하세요 (예: 미용실, 편의점)" style="display:none;">
+      </div>
+    </div>
     <button class="primary-btn" id="nextBtn" type="button">다음</button>
+  </div>
+
+  <div class="modal-overlay" id="ledgerModal">
+    <div class="modal-card">
+      <h3>건축물대장 조회 결과</h3>
+      <pre id="ledgerModalBody"></pre>
+      <button type="button" class="primary-btn modal-close-btn" id="ledgerModalCloseBtn">닫기</button>
+    </div>
   </div>
 
   <div class="step" id="step2">
@@ -90,6 +117,15 @@
           <button type="button" data-value="false">아니오</button>
         </div>
         <div class="field-hint">공사 없이 지금 있는 건물을 용도만 바꿔 쓰면 "예"를 선택하세요(용도변경으로 자동 판정됩니다). 새로 짓거나(신축ᆞ증축) 구조를 바꾸는 공사(대수선)가 필요하면 "아니오"를 선택하세요 - 이 경우는 판정이 더 복잡해 채팅으로 이어서 확인합니다.</div>
+      </div>
+
+      <div class="field">
+        <label>이 건물의 소유자이신가요, 임차인이신가요?</label>
+        <div class="toggle" data-key="ownership" data-type="string">
+          <button type="button" data-value="소유자">소유자</button>
+          <button type="button" data-value="임차인">임차인</button>
+        </div>
+        <div class="field-hint">허가ᆞ신고 신청 시 필요한 서류(소유권 증빙 또는 임대차계약서ᆞ소유자 동의서 등)가 달라져 미리 확인합니다.</div>
       </div>
 
       <div class="field" id="bizTypeUnknownField" style="display:none;">
@@ -168,13 +204,38 @@
   // 업종 → 희망 시설군(FACILITY_GROUPS, permit.py). 법령 해석이 필요 없는
   // 명확한 매핑만 넣는다 - 카페ᆞ음식점은 "제2종근린생활시설 중 대부분"이라고
   // FACILITY_GROUPS 주석에 이미 명시돼 있고, 사무실은 "업무시설"로 명확하다.
-  // 소매점처럼 면적ᆞ업태에 따라 시설군이 갈리는 애매한 업종은 넣지 않는다
-  // (여기 없는 업종=기타는 건축 인허가 판정을 채팅으로 넘긴다).
-  const FACILITY_GROUP_BY_BIZTYPE = { "카페": 7, "음식점": 7, "사무실": 8 };
-  const FOOD_BIZTYPES = new Set(["카페", "음식점"]);
+  // 소매점ᆞ주거 리모델링처럼 면적ᆞ업태ᆞ기존 용도에 따라 시설군이 갈리는
+  // 애매한 업종은 넣지 않는다(여기 없는 업종=기타처럼 건축 인허가 판정을
+  // 채팅으로 넘긴다).
+  const FACILITY_GROUP_BY_BIZTYPE = { "카페ᆞ음료": 7, "음식점": 7, "사무실": 8 };
+  const FOOD_BIZTYPES = new Set(["카페ᆞ음료", "음식점"]);
+  // 음식 취급 여부가 업종만으로 확정 안 되는 카테고리(소매점은 편의점처럼
+  // 식품을 팔 수도, 안 팔 수도 있음ᆞ기타는 아예 모름) - "기타"와 동일하게
+  // bizTypeUnknownField로 직접 물어본다.
+  const AMBIGUOUS_FOOD_BIZTYPES = new Set(["소매점", "기타"]);
 
   const answers = {}; // 토글 버튼 선택값 저장 (key -> true/false)
   let lookupCaseFacts = {}; // 1단계 주소 자동조회로 받은 case_facts(land_zone/current_facility_group)
+  let lastLookedUpAddress = null; // 같은 주소로 중복 조회(=대화 이력에 중복 폼제출 기록)를 막기 위한 캐시
+
+  // 업종 버튼 선택 상태(select → 버튼식으로 변경, 2026-08-06 피드백). "기타"를
+  // 고르면 자유 입력창을 보여주되, 아래 FACILITY_GROUP_BY_BIZTYPE/FOOD_BIZTYPES
+  // 판정 분기는 그대로 "기타" 카테고리로 취급한다 - 실제 업종명(getBizTypeLabel)은
+  // 로드맵 화면 표시용일 뿐 판정 로직에는 안 쓰인다.
+  let selectedBizType = "카페ᆞ음료";
+  function getBizType() { return selectedBizType; }
+  function getBizTypeLabel() {
+    if (selectedBizType !== "기타") return selectedBizType;
+    return document.getElementById("bizTypeCustom").value.trim() || "기타";
+  }
+  document.querySelectorAll(".biztype-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".biztype-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      selectedBizType = btn.dataset.value;
+      document.getElementById("bizTypeCustom").style.display = selectedBizType === "기타" ? "" : "none";
+    });
+  });
 
   // 영업장 면적 ㎡ᆞ평 변환(1평=3.305785㎡, 한국국토정보공사 고시 환산율) - 사용자가
   // 어느 단위로 입력해도 제출 시 store_area_sqm(㎡)로 변환해서 보낸다.
@@ -195,41 +256,69 @@
 
   document.querySelectorAll(".toggle").forEach((group) => {
     const key = group.dataset.key;
+    const isStringChoice = group.dataset.type === "string"; // ownership처럼 값 자체가 정답 문자열인 경우(예/아니오 불리언이 아님)
     group.querySelectorAll("button").forEach((btn) => {
       btn.addEventListener("click", () => {
         group.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
-        answers[key] = btn.dataset.value === "true";
+        answers[key] = isStringChoice ? btn.dataset.value : btn.dataset.value === "true";
       });
     });
   });
 
-  document.getElementById("nextBtn").addEventListener("click", async () => {
-    const bizType = document.getElementById("bizType").value;
-    const address = document.getElementById("address").value.trim();
+  // VWorld/건축물대장 조회 - "조회" 버튼과 "다음" 버튼이 공유한다. 같은
+  // 주소를 두 번 조회하면 대화 이력에 "[폼 제출] 주소 ..." 턴이 중복
+  // 남으므로(pipeline.submit_facts) lastLookedUpAddress로 스킵한다.
+  async function performAddressLookup(address) {
     const statusEl = document.getElementById("lookupStatus");
+    statusEl.textContent = "주소 조회 중...";
+    try {
+      const res = await fetch(`${API_BASE}/facts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: getUserId(), address }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+      const data = await res.json();
+      lookupCaseFacts = data.case_facts || {};
+      lastLookedUpAddress = address;
+      statusEl.textContent = lookupCaseFacts.current_facility_group
+        ? "주소 조회 완료 - 기존 건축물 정보를 확인했습니다."
+        : "자동조회 결과가 없습니다 - 계속 진행해도 됩니다.";
+      return data;
+    } catch (e) {
+      statusEl.textContent = `주소 조회 실패(계속 진행 가능): ${e.message}`;
+      return null;
+    }
+  }
+
+  function showLedgerModal(text) {
+    document.getElementById("ledgerModalBody").textContent = text || "조회된 건축물대장 정보가 없습니다(신축 예정 대지이거나 미등록 상태일 수 있음).";
+    document.getElementById("ledgerModal").classList.add("active");
+  }
+  document.getElementById("ledgerModalCloseBtn").addEventListener("click", () => {
+    document.getElementById("ledgerModal").classList.remove("active");
+  });
+
+  document.getElementById("lookupBtn").addEventListener("click", async () => {
+    const address = document.getElementById("address").value.trim();
+    if (!address) return;
+    const lookupBtn = document.getElementById("lookupBtn");
+    lookupBtn.disabled = true;
+    const data = await performAddressLookup(address);
+    lookupBtn.disabled = false;
+    if (data) showLedgerModal(data.ledger_text);
+  });
+
+  document.getElementById("nextBtn").addEventListener("click", async () => {
+    const bizType = getBizType();
+    const address = document.getElementById("address").value.trim();
     const nextBtn = document.getElementById("nextBtn");
 
-    if (address) {
+    if (address && address !== lastLookedUpAddress) {
       nextBtn.disabled = true;
-      statusEl.textContent = "주소 조회 중...";
-      try {
-        const res = await fetch(`${API_BASE}/facts`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: getUserId(), address }),
-        });
-        if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
-        const data = await res.json();
-        lookupCaseFacts = data.case_facts || {};
-        statusEl.textContent = lookupCaseFacts.current_facility_group
-          ? "주소 조회 완료 - 기존 건축물 정보를 확인했습니다."
-          : "자동조회 결과가 없습니다 - 계속 진행해도 됩니다.";
-      } catch (e) {
-        statusEl.textContent = `주소 조회 실패(계속 진행 가능): ${e.message}`;
-      } finally {
-        nextBtn.disabled = false;
-      }
+      await performAddressLookup(address);
+      nextBtn.disabled = false;
     }
 
     // 업종에 따라 2단계에서 보여줄 항목을 정한다.
@@ -238,11 +327,11 @@
     if (FOOD_BIZTYPES.has(bizType)) {
       foodBlock.classList.add("active");
       bizTypeUnknownField.style.display = "none";
-    } else if (bizType === "기타") {
+    } else if (AMBIGUOUS_FOOD_BIZTYPES.has(bizType)) {
       bizTypeUnknownField.style.display = "";
       foodBlock.classList.remove("active");
-      // "기타" 업종은 음식 취급 여부를 직접 물어본 뒤 그 답에 따라 식품 세부
-      // 질문을 보여준다.
+      // 음식 취급 여부가 업종만으로 안 갈리는 업종(소매점ᆞ기타)은 직접
+      // 물어본 뒤 그 답에 따라 식품 세부 질문을 보여준다.
       document.querySelector('.toggle[data-key="serves_food"]').querySelectorAll("button").forEach((btn) => {
         btn.addEventListener("click", () => {
           foodBlock.classList.toggle("active", btn.dataset.value === "true");
@@ -266,7 +355,7 @@
     btn.disabled = true;
     btn.textContent = "판정 중...";
 
-    const bizType = document.getElementById("bizType").value;
+    const bizType = getBizType();
     const body = { user_id: getUserId() };
 
     // 건축 인허가: "기존 건물 그대로" + 희망 시설군을 아는 업종일 때만
@@ -274,14 +363,21 @@
     // 1단계 주소 조회로 이미 서버에 반영돼 있어 다시 보낼 필요 없다(merge).
     // 그 외(신축ᆞ증축ᆞ대수선 등 구조공사)는 채팅으로 이어서 확인한다.
     const desired = FACILITY_GROUP_BY_BIZTYPE[bizType];
+    const caseFacts = {};
     if (answers.sameBuilding === true && desired) {
-      body.case_facts = { act_type: "용도변경", desired_facility_group: desired };
+      caseFacts.act_type = "용도변경";
+      caseFacts.desired_facility_group = desired;
     }
+    // ownership(소유자/임차인)은 판정 자체엔 안 쓰이고 절차 안내 시 필요서류
+    // 갈래(permit.py의 _walk_procedures)에만 쓰이므로, 판정 가능 여부와
+    // 무관하게 답했으면 항상 같이 보낸다.
+    if (answers.ownership) caseFacts.ownership = answers.ownership;
+    if (Object.keys(caseFacts).length) body.case_facts = caseFacts;
 
     // 식품위생: 업종이 비식품(사무실 등)이면 serves_food=false를 확정해서
     // 보낸다(법령 해석이 아니라 업종 자체가 식품과 무관하다는 사실 판단).
     const foodBlockActive = document.getElementById("foodBlock").classList.contains("active");
-    if (FOOD_BIZTYPES.has(bizType) || (bizType === "기타" && answers.serves_food === true)) {
+    if (FOOD_BIZTYPES.has(bizType) || (AMBIGUOUS_FOOD_BIZTYPES.has(bizType) && answers.serves_food === true)) {
       body.food_facts = { serves_food: true };
       if (foodBlockActive) {
         for (const k of ["manufactures_or_cooks", "primarily_bakery", "serves_alcohol"]) {
@@ -294,9 +390,9 @@
             : Number(area);
         }
       }
-    } else if (bizType === "기타" && answers.serves_food === false) {
+    } else if (AMBIGUOUS_FOOD_BIZTYPES.has(bizType) && answers.serves_food === false) {
       body.food_facts = { serves_food: false };
-    } else if (bizType !== "기타" && !FOOD_BIZTYPES.has(bizType)) {
+    } else if (!AMBIGUOUS_FOOD_BIZTYPES.has(bizType) && !FOOD_BIZTYPES.has(bizType)) {
       body.food_facts = { serves_food: false };
     }
 
@@ -335,7 +431,7 @@
     const address = document.getElementById("address").value.trim();
     if (address) localStorage.setItem("permit_assistant_address", address);
     // index.html의 "내 로드맵 요약" 카드가 업종을 보여줄 수 있도록 저장.
-    localStorage.setItem("permit_assistant_biz_type", document.getElementById("bizType").value);
+    localStorage.setItem("permit_assistant_biz_type", getBizTypeLabel());
   }
 
   function renderResult(data) {

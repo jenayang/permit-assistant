@@ -234,8 +234,31 @@ def submit_facts(
                 summary.append(f"{label} 정보 {len(facts)}건")
         turn_messages.append(HumanMessage(content="[폼 제출] " + ", ".join(summary)))
 
+    # case_facts/food_facts/fire_facts/signage_facts 각각을 실제 record_*_facts
+    # 호출처럼 tool_calls/ToolMessage 쌍으로 이력에 남긴다 - 위 HumanMessage는
+    # "건축 정보 2건"처럼 개수만 말해서, 어떤 필드가 무슨 값으로 기록됐는지는
+    # LLM이 대화 이력 어디서도 볼 수 없었다(2026-08-06 재신고: intake 폼으로
+    # ownership="소유자"를 넣었는데 챗봇이 소유자/임차인을 다시 물어봄 - 실제
+    # 채팅 중 LLM이 직접 record_case_facts를 부르면 그 tool_calls 자체가
+    # 이력에 남아 다음 턴에 "이미 물어봤다"는 걸 알 수 있는데, 폼 제출은 이
+    # 흔적이 없어서 항상 재질문으로 이어졌다). lookup_building_ledger가 이미
+    # 쓰는 것과 같은 패턴 - args에 실제 값이 그대로 담기므로 별도 텍스트
+    # 요약이 필요 없다.
+    for tool_name, facts in (
+        ("record_case_facts", case_facts),
+        ("record_food_facts", food_facts),
+        ("record_fire_facts", fire_facts),
+        ("record_signage_facts", signage_facts),
+    ):
+        if not facts:
+            continue
+        call_id = f"formrecord_{uuid.uuid4().hex[:8]}"
+        turn_messages.append(AIMessage(content="", tool_calls=[{"name": tool_name, "args": facts, "id": call_id}]))
+        turn_messages.append(ToolMessage(content="기록됨.", tool_call_id=call_id, name=tool_name))
+
     # 주소가 있으면 기존 site.py 조회 도구를 그대로 재사용해 용도지역ᆞ
     # 건축물대장을 자동으로 채운다(사용자가 이미 입력한 값은 덮지 않음).
+    ledger_text: Optional[str] = None
     if address:
         zone = get_land_zone_category(address)
         if zone and not (state.get("case_facts") or {}).get("land_zone"):
@@ -277,6 +300,7 @@ def submit_facts(
         "fire_result": final.get("fire_result"),
         "signage_result": final.get("signage_result"),
         "project_status": compute_project_status(final),
+        "ledger_text": ledger_text,
     }
 
 

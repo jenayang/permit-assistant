@@ -98,7 +98,7 @@
        챗봇(.app)이 그 좌측 내비 자리, 로드맵(.side-panel)이 메인 영역.
        카드처럼 감싸지 않고 옅은 구분선(border-right) 하나로만 나눈다
        (2026-08-04, "박스 안의 박스 느낌 없애고 화면 크게" 요청). */
-    grid-template-columns: 340px 1fr;
+    grid-template-columns: 400px 1fr;
   }
   .app {
     min-width: 0;
@@ -374,14 +374,27 @@
     font-weight: 600;
   }
   .roadmap-step-title { flex: 1; min-width: 0; }
+  /* 원형(pill) 테두리 배지 - 완료(파랑 테두리)ᆞ대기(회색 테두리, 기본값)ᆞ
+     진행중(주황, 배경까지 채워 가장 눈에 띄게) 색상 차별화. */
   .roadmap-step-status-text {
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 600;
     color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 10px;
     flex-shrink: 0;
   }
-  .roadmap-step.current .roadmap-step-status-text { color: var(--accent); }
-  .roadmap-step.done .roadmap-step-status-text { color: var(--done); }
+  .roadmap-step.done .roadmap-step-status-text {
+    color: var(--done);
+    border-color: color-mix(in srgb, var(--done) 45%, var(--border));
+  }
+  .roadmap-step.current .roadmap-step-status-text {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    font-weight: 700;
+  }
   .roadmap-step-subtitle {
     font-size: 12px;
     color: var(--text-muted);
@@ -1417,11 +1430,9 @@
   // 받아써서 같은 판정을 두 번 하지 않는다(로드맵 목록과 다른 숫자를
   // 말하면 안 된다는 기존 원칙, renderNextAction 주석 참고).
   function renderSummaryCards(steps, countable, currentIdx) {
-    // 상단 % 행 오른쪽 압축 요약 - intake.html에서 이미 확인시킨 값이라
-    // 사이드 패널에 큰 카드로 중복 표시하지 않는다(2026-08-05 피드백).
-    const bizTypeLabel = bizType || "업종 미입력";
-    const addressLabel = lastAddress || "주소 미입력";
-    const actTypeLabel = caseTypeResult || caseFacts.act_type || "판정 전";
+    // 업종ᆞ주소ᆞ판정 요약은 제목 아래 statusTagsEl(renderStatusTags)이 이미
+    // 좌측 상단에 보여주고 있어 여기 우측에 또 두면 중복이라 제거했다
+    // (2026-08-06 피드백). 예상 소요기간만 이 자리 고유 정보라 남긴다.
     let totalMin = 0, totalMax = 0;
     [0, 1, 2, 4].forEach((idx) => {
       const [min, max] = stepDurationDays(idx);
@@ -1429,7 +1440,6 @@
       totalMax += max;
     });
     nextActionSideEl.innerHTML = `
-      <div class="next-action-summary-line" title="${addressLabel}">🏪 ${bizTypeLabel} ᆞ 📍 ${addressLabel} ᆞ 🏗 ${actTypeLabel}</div>
       <div class="next-action-summary-sub">예상 총 소요기간 약 ${formatDurationDays([totalMin, totalMax])}</div>
     `;
 

@@ -19,14 +19,18 @@ def test_empty_state_is_not_started():
     assert result["completed"] == []
     assert "아직 시작 전" in result["summary"]
     assert result["construction_track"]["current_step"] == "건축 유형 확인"
-    assert result["startup_track"]["current_step"] == "창업 행정"
+    # 공사(Step2)가 시작되기 전엔 창업 준비 트랙의 "다음 할 일"을 노출하지
+    # 않는다(2026-08-06 - 재접속 요약 배너가 공사 시작 전부터 항상 "창업
+    # 준비 트랙은 '창업 행정' 단계"를 같이 말해주던 버그 재신고).
+    assert result["startup_track"]["current_step"] is None
 
 
 def test_construction_track_progress_does_not_leak_into_startup_track():
     """실사용 버그(세션 79430043) 회귀 - 건축 트랙이 안 끝난 채로 창업
     준비 트랙(식품위생 등)이 먼저 진행돼도, 두 트랙의 current_step은
-    서로 독립적으로 계산돼야 한다."""
-    state = {"food_result": "일반음식점영업"}
+    서로 독립적으로 계산돼야 한다. 공사가 시작된 상태로 줘야
+    startup_track이 노출된다(공사 전 게이트, 아래 다른 테스트 참고)."""
+    state = {"food_result": "일반음식점영업", "task_progress": {"construction": True}}
     result = compute_project_status(state)
     # 창업 트랙은 식품위생이 확인됐으니 다음 항목(간판ᆞ옥외광고물)으로 넘어가
     # 있어야 한다(2026-08-04: 소방시설은 Step2ᆞ공사로 옮겨가 이 트랙에서 빠짐).
@@ -35,6 +39,20 @@ def test_construction_track_progress_does_not_leak_into_startup_track():
     # 건축 트랙은 여전히 맨 처음(행위 유형 확인)이어야 한다 - "Step1"에
     # 멈춰 있던 옛날 버그처럼 창업 트랙 진행 상황에 영향받으면 안 된다.
     assert result["construction_track"]["current_step"] == "건축 유형 확인"
+
+
+def test_startup_track_hidden_before_construction_starts():
+    """2026-08-06 재신고 회귀 - intake 폼으로 판정만 마치고(공사 시작 전)
+    재접속하면, 요약 배너가 "창업 준비 트랙은 '창업 행정' 단계입니다"를
+    곧바로 말해버려 혼란을 준다는 신고. task_progress에 공사 시작 신호
+    (construction_notice/construction/use_approval)가 하나도 없으면
+    startup_track의 current_step/next_action은 None이어야 하고, summary
+    문장에도 "창업 준비 트랙" 문구가 없어야 한다."""
+    state = {"case_facts": {"act_type": "용도변경"}, "permit_result": {"permit_type": "용도변경허가"}}
+    result = compute_project_status(state)
+    assert result["startup_track"]["current_step"] is None
+    assert result["startup_track"]["next_action"] is None
+    assert "창업 준비 트랙" not in result["summary"]
 
 
 def test_step_completion_moves_current_step_forward_within_track():
@@ -97,6 +115,7 @@ def test_hires_staff_false_counts_staff_registration_as_done():
     state = {
         "food_result": "해당없음", "fire_result": [], "signage_result": "허가ᆞ신고 불필요",
         "task_progress": {
+            "construction": True,  # 창업 준비 트랙 노출 게이트(공사 시작) 통과용
             "business_registration": True, "hygiene_education": True,
             "interior_equipment": True, "hires_staff": False,
         },

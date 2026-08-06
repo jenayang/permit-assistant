@@ -18,6 +18,7 @@ from src.roadmap import (
     _max_allowed_stage,
     _mentioned_construction_stages,
     _pending_stage2_confirmation,
+    _roadmap_status_summary,
     _should_force_construction_guide,
     permit_phase_directive,
 )

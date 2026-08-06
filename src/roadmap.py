@@ -207,7 +207,7 @@ def _roadmap_status_summary(state: "AgentState") -> str:
             return "진행중"
         return "미착수"
 
-    return (
+    summary = (
         "[로드맵 상태]\n"
         "건축 인허가 트랙(순차 진행 - 앞 단계가 '완료'가 아니면 다음 단계 내용을 "
         "먼저 꺼내지 마세요. 이번 턴 사용자 말이 다음 단계 얘기여도, 앞 단계가 "
@@ -216,6 +216,18 @@ def _roadmap_status_summary(state: "AgentState") -> str:
         f"- Step 1(인허가 판정): {_status(step1_done, step0_done)}\n"
         f"- Step 2(공사: 착공신고ᆞ시공ᆞ사용승인, 사용자가 직접 완료를 "
         f"말해야 확인됨): {_status(step2_done, step2_started)}\n"
+    )
+
+    # 창업 준비 트랙(Step 3~4) 병렬 안내는 공사(Step 2)가 실제로 시작된 뒤에야
+    # 근거가 생긴다 - 그 전엔 "나중에 공사 들어가면 병렬로 하시면 돼요"라고
+    # 미리 말할 이유가 없다. 이 게이트가 없으면 Step 0조차 안 끝난 첫 턴부터
+    # LLM이 이 문단을 그대로 따라 "창업 준비는 병렬로..."를 꺼내는 조기 노출이
+    # 생긴다(허가/신고 종류 "판정ᆞ확인" 안내 자체는 build_system_prompt의 다른
+    # 블록이 담당하므로 이 게이트와 무관하게 계속 즉시 나간다).
+    if not step2_started:
+        return summary
+
+    return summary + (
         "창업 준비 트랙(Step 3: 식품위생ᆞ소방ᆞ간판ᆞ사업자등록ᆞ위생교육, "
         "Step 4: 오픈 준비) - 인허가 트랙과 병렬이지만 '아무거나 지금'이 아니라 "
         "실무 순서에 맞춰 안내하세요:\n"

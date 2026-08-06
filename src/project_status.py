@@ -117,6 +117,18 @@ def compute_project_status(state: dict) -> dict:
     total_all = sum(len(s) for s in steps)
     progress = round(total_done / total_all * 100) if total_all else 0
 
+    # 창업 준비 트랙(병렬) "지금 할 일" 노출은 공사(Step2)가 실제로 시작된
+    # 뒤부터만 - agent.py/roadmap.py의 _roadmap_status_summary와 정확히 같은
+    # 이유(공사 전엔 병렬 진행을 권할 근거가 없음, 2026-08-06 재신고: 이
+    # 함수가 재접속 요약 배너ᆞ상단 위젯에 항상 창업 행정을 같이 알려주고
+    # 있어서 챗봇 쪽 게이트와 무관하게 새는 걸 뒤늦게 발견). 이미 완료된
+    # 항목(completed/progress)은 실제로 한 일이라 그대로 인정하고, "다음
+    # 할 일"만 미룬다.
+    tp = state.get("task_progress") or {}
+    step2_started = any(tp.get(f) for f in ("construction_notice", "construction")) or bool(tp.get("use_approval"))
+    if not step2_started:
+        startup = {**startup, "current_step": None, "next_action": None}
+
     track_phrases = []
     if construction["current_step"]:
         track_phrases.append(f"건축 트랙은 '{construction['current_step']}' 단계(다음 할 일: '{construction['next_action']}')")

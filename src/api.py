@@ -160,6 +160,7 @@ class FactsSubmitResponse(BaseModel):
     fire_result: Optional[list[str]] = None
     signage_result: Optional[str] = None
     project_status: dict
+    ledger_text: Optional[str] = Field(None, description="address 입력 시 조회된 건축물대장 원문(팝업 표시용)")
 
 
 class IngestResponse(BaseModel):
