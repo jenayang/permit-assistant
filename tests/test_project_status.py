@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+from src.agents.permit import PermitResult
 from src.project_status import compute_project_status
 
 
@@ -48,7 +49,10 @@ def test_startup_track_hidden_before_construction_starts():
     (construction_notice/construction/use_approval)가 하나도 없으면
     startup_track의 current_step/next_action은 None이어야 하고, summary
     문장에도 "창업 준비 트랙" 문구가 없어야 한다."""
-    state = {"case_facts": {"act_type": "용도변경"}, "permit_result": {"permit_type": "용도변경허가"}}
+    state = {
+        "case_facts": {"act_type": "용도변경"},
+        "permit_result": PermitResult(permit_type="용도변경허가", procedures=[]),
+    }
     result = compute_project_status(state)
     assert result["startup_track"]["current_step"] is None
     assert result["startup_track"]["next_action"] is None
@@ -69,7 +73,7 @@ def test_step_completion_moves_current_step_forward_within_track():
 def test_construction_track_fully_done_has_no_current_step():
     state = {
         "case_facts": {"act_type": "신축"},
-        "permit_result": {"permit_type": "건축신고"},
+        "permit_result": PermitResult(permit_type="건축신고", procedures=[]),
         "task_progress": {
             # architect_selected/interior_equipment(2026-08-06 드리프트 수정 -
             # ROADMAP_STEPS에 건축사선정이 Step1로, 인테리어ᆞ장비 설치가
@@ -91,7 +95,7 @@ def test_construction_track_fully_done_has_no_current_step():
 def test_all_steps_done_reaches_full_progress_and_celebration_summary():
     state = {
         "case_facts": {"act_type": "신축"},
-        "permit_result": {"permit_type": "건축신고"},
+        "permit_result": PermitResult(permit_type="건축신고", procedures=[]),
         "food_result": "일반음식점영업",
         "fire_result": [],
         "signage_result": "허가ᆞ신고 불필요",
@@ -137,7 +141,7 @@ def test_progress_percentage_rounds_to_nearest_integer():
     # 8/16*100 = 50
     state = {
         "case_facts": {"act_type": "신축"},
-        "permit_result": {"permit_type": "건축신고"},
+        "permit_result": PermitResult(permit_type="건축신고", procedures=[]),
         "food_result": "일반음식점영업",
         "fire_result": [],
         "signage_result": "허가ᆞ신고 불필요",

@@ -59,8 +59,10 @@ class StepDef:
 
 
 def _permit_not_needed(state: dict) -> bool:
-    permit_result = state.get("permit_result") or {}
-    return permit_result.get("permit_type") == "인허가불필요"
+    permit_result = state.get("permit_result")
+    if permit_result is None:
+        return False
+    return permit_result.permit_type == "인허가불필요"
 
 
 # === Step 0: 건축 유형 확인 ===

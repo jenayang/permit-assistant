@@ -5,6 +5,7 @@ roadmap.py(챗봇 안내)ᆞproject_status.py(진행률 계산)가 공유하는 
 순수 함수라 상태 dict만 흉내내면 결정론적으로 재현 가능하다."""
 from __future__ import annotations
 
+from src.agents.permit import PermitResult
 from src.roadmap import _next_pending_substep
 from src.roadmap_steps import ROADMAP_STEPS, NeedsInput, ResolvedSubstep
 
@@ -142,7 +143,10 @@ def test_business_registration_unlocked_when_documents_and_food_known():
 
 def test_business_registration_unlocked_when_permit_not_needed():
     result = _BUSINESS_REGISTRATION.resolve(
-        _state(food_result="일반음식점영업", permit_result={"permit_type": "인허가불필요"})
+        _state(
+            food_result="일반음식점영업",
+            permit_result=PermitResult(permit_type="인허가불필요", procedures=[]),
+        )
     )
     assert result.locked is False
 
