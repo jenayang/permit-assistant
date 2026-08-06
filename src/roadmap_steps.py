@@ -325,28 +325,39 @@ def _resolve_use_approval(state: dict) -> ResolvedSubstep:
 # === Step 3: 창업 행정 (병렬) ===
 
 def _resolve_food_registration(state: dict) -> ResolvedSubstep | None:
+    # done은 food_result(판정 여부)가 아니라 실제 신고 접수 자기보고
+    # (task_progress.food_report_filed)로 판단한다 - 판정은 사실이 모이는 대로
+    # Step0 시점에 즉시 나오지만, 신고 접수 자체는 사용승인(시설 완비) 후에나
+    # 가능하다. 예전엔 food_result가 있으면 바로 done=True로 처리해서, 공사도
+    # 시작 안 한 시점에 로드맵ᆞ진행률이 "식품위생 영업신고"를 이미 끝난 것처럼
+    # 보여주는 버그가 있었다(locked 게이트가 있어도 done이 먼저 True가 돼
+    # 무의미해짐 - 세션 f9766c33, 2026-08-06 재신고로 발견).
     food_result = state.get("food_result")
     if food_result in NO_REPORT_RESULTS:
         return None
     task_progress = state.get("task_progress") or {}
     return ResolvedSubstep(
         label=f"식품위생: {food_result}" if food_result else "식품위생 영업신고",
-        done=food_result is not None,
+        done=bool(task_progress.get("food_report_filed")),
         locked=not bool(task_progress.get("use_approval")),
         lock_reason="사용승인 완료 후 신고 가능",
         actor_note="영업자(사업주) 본인이 관할 보건소에 신고합니다.",
+        question="영업신고 접수는 완료하셨어요?",
     )
 
 
 def _resolve_signage(state: dict) -> ResolvedSubstep:
+    # done도 food_registration과 같은 이유로 signage_result(판정 여부)가 아니라
+    # 실제 설치ᆞ신고 완료 자기보고(task_progress.signage_installed)로 판단한다.
     signage_result = state.get("signage_result")
     task_progress = state.get("task_progress") or {}
     return ResolvedSubstep(
         label=f"간판: {signage_result}" if signage_result else "간판ᆞ옥외광고물 확인",
-        done=signage_result is not None,
+        done=bool(task_progress.get("signage_installed")),
         locked=not (bool(task_progress.get("construction")) or bool(task_progress.get("interior_only"))),
         lock_reason="공사(시공) 완료 후 설치 가능",
         actor_note="영업자 본인 또는 간판 시공업체가 관할 구청에 신고ᆞ허가를 받습니다.",
+        question="간판 설치ᆞ신고는 완료하셨어요?",
     )
 
 

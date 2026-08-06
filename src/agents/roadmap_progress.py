@@ -35,6 +35,7 @@ TASK_PROGRESS_FIELDS: list[str] = [
     "business_registration", "hygiene_education",
     "interior_equipment", "staff_registration", "opened",
     "hires_staff", "uses_agency", "architect_selected", "interior_only",
+    "food_report_filed", "signage_installed",
 ]
 
 
@@ -55,6 +56,8 @@ def record_task_progress(
     uses_agency: bool | None = None,
     architect_selected: bool | None = None,
     interior_only: bool | None = None,
+    food_report_filed: bool | None = None,
+    signage_installed: bool | None = None,
 ) -> str:
     """사용자가 실제로 완료했다고 명시적으로 말한 창업 절차 항목을 기록하세요.
 
@@ -87,6 +90,14 @@ def record_task_progress(
       기록하세요.
     - **구조 공사 없이 인테리어만 진행한다고 명확히 밝히면 interior_only=True로
       기록하세요** - 착공신고ᆞ시공 항목 자체가 대상이 아니게 됩니다.
+    - **food_report_filed/signage_installed는 record_food_facts/record_signage_facts로
+      기록되는 food_result/signage_result(어떤 종류의 신고인지 판정)와 다릅니다** -
+      판정은 사실을 알게 되는 대로 즉시 나오지만, 그 판정에 따라 실제로 관할
+      보건소에 영업신고를 접수했는지ᆞ간판을 설치ᆞ신고했는지는 완전히 별개의
+      실물 행위입니다. 특히 food_report_filed는 사용승인 완료 후에나 접수
+      가능하므로, 판정이 나왔다고 또는 접수 방법을 안내했다고 자동으로
+      True 처리하지 마세요 - 사용자가 "영업신고 냈어요"처럼 실제 접수를
+      직접 말해줬을 때만 기록하세요.
 
     Args:
         pre_diagnosis_checked: 사전 진단 항목(주차ᆞ정화조ᆞ소방시설 등) 확인을 완료했는지
@@ -105,6 +116,8 @@ def record_task_progress(
             도움을 받는지(True) 직접 진행하는지(False)
         architect_selected: 건축사사무소(또는 대행업체)를 실제로 선정 완료했는지
         interior_only: 구조 공사(신축ᆞ증축ᆞ대수선 등) 없이 인테리어만 진행하는지
+        food_report_filed: 식품위생법상 영업신고를 관할 보건소에 실제로 접수했는지
+        signage_installed: 간판ᆞ옥외광고물 설치(허가ᆞ신고 포함)를 완료했는지
     """
     logger.info("[도구] record_task_progress(%r)", {
         k: v for k, v in locals().items() if v is not None

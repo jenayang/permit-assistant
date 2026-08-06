@@ -11,7 +11,7 @@ const path = require("path");
 const INDEX_HTML = path.join(__dirname, "..", "..", "src", "static", "index.html");
 const html = fs.readFileSync(INDEX_HTML, "utf8");
 
-const startMarker = "const step3AllDone = latestFoodResult != null";
+const startMarker = "const step3AllDone = !!taskProgress.food_report_filed";
 const startIdx = html.indexOf(startMarker);
 if (startIdx === -1) {
   throw new Error("index.html에서 'const step3AllDone = ...' 블록을 못 찾았습니다 - 코드가 바뀌었으면 이 fixture의 startMarker도 같이 갱신하세요.");
@@ -116,19 +116,28 @@ function check(label, passed) {
   check("staff: hires_staff=false면 사업자등록 전이어도 안 잠김(done 우회)", !isVisuallyLocked(findSub(steps, "Step 4 · 오픈 준비", "직원 등록")));
 }
 
-// 영업 시작 - Step3 5개 항목 전부 완료해야 해제
+// 영업 시작 - Step3 4개 항목(식품위생 신고 접수ᆞ간판 설치ᆞ사업자등록ᆞ위생교육)
+// 전부 완료해야 해제. food_report_filed/signage_installed(실제 신고 접수ᆞ설치
+// 자기보고)로 판단하도록 고쳤다(2026-08-06 - latestFoodResult/latestSignageResult는
+// "판정 여부"일 뿐이라 신고ᆞ설치 전에도 해제되던 버그, 세션 f9766c33).
 {
   let steps = buildSteps({
     ...commonArgs, latestFoodResult: "일반음식점", latestFireResult: [], latestSignageResult: "신고불필요",
-    taskProgress: { business_registration: true, hygiene_education: false },
+    taskProgress: { food_report_filed: true, signage_installed: true, business_registration: true, hygiene_education: false },
   });
-  check("opened: 5개 중 1개(위생교육)만 빠져도 잠김", isVisuallyLocked(findSub(steps, "Step 4 · 오픈 준비", "영업 시작")));
+  check("opened: 4개 중 1개(위생교육)만 빠져도 잠김", isVisuallyLocked(findSub(steps, "Step 4 · 오픈 준비", "영업 시작")));
 
   steps = buildSteps({
     ...commonArgs, latestFoodResult: "일반음식점", latestFireResult: [], latestSignageResult: "신고불필요",
-    taskProgress: { business_registration: true, hygiene_education: true },
+    taskProgress: { food_report_filed: true, signage_installed: true, business_registration: true, hygiene_education: true },
   });
-  check("opened: 5개 전부 충족되면 해제", !isVisuallyLocked(findSub(steps, "Step 4 · 오픈 준비", "영업 시작")));
+  check("opened: 4개 전부 충족되면 해제", !isVisuallyLocked(findSub(steps, "Step 4 · 오픈 준비", "영업 시작")));
+
+  steps = buildSteps({
+    ...commonArgs, latestFoodResult: "일반음식점", latestFireResult: [], latestSignageResult: "신고불필요",
+    taskProgress: { food_report_filed: false, signage_installed: true, business_registration: true, hygiene_education: true },
+  });
+  check("opened: 판정만 나고 영업신고 접수 전이면 여전히 잠김", isVisuallyLocked(findSub(steps, "Step 4 · 오픈 준비", "영업 시작")));
 }
 
 // 건축사 대행 배지(Step 0) - requiresArchitect 값이 Step 0의 architect 필드로

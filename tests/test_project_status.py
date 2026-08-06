@@ -33,13 +33,42 @@ def test_construction_track_progress_does_not_leak_into_startup_track():
     startup_track이 노출된다(공사 전 게이트, 아래 다른 테스트 참고)."""
     state = {"food_result": "일반음식점영업", "task_progress": {"construction": True}}
     result = compute_project_status(state)
-    # 창업 트랙은 식품위생이 확인됐으니 다음 항목(간판ᆞ옥외광고물)으로 넘어가
-    # 있어야 한다(2026-08-04: 소방시설은 Step2ᆞ공사로 옮겨가 이 트랙에서 빠짐).
+    # 창업 트랙의 다음 할 일은 간판ᆞ옥외광고물이어야 한다 - 식품위생은 아직
+    # 사용승인 전이라 잠겨 있어(2026-08-06) 건너뛰고, 간판은 시공이 시작됐으니
+    # (construction=True) 잠금이 풀려 있다(2026-08-04: 소방시설은 Step2ᆞ공사로
+    # 옮겨가 이 트랙에서 빠짐).
     assert result["startup_track"]["current_step"] == "창업 행정"
     assert result["startup_track"]["next_action"] == "간판ᆞ옥외광고물 확인"
     # 건축 트랙은 여전히 맨 처음(행위 유형 확인)이어야 한다 - "Step1"에
     # 멈춰 있던 옛날 버그처럼 창업 트랙 진행 상황에 영향받으면 안 된다.
     assert result["construction_track"]["current_step"] == "건축 유형 확인"
+
+
+def test_food_registration_not_shown_as_next_action_before_construction_starts():
+    """세션 f9766c33(2026-08-06) 회귀 - 폼 제출로 건축ᆞ식품위생 판정이 동시에
+    난 직후(공사 시작 전) "지금 뭐해야 돼?"를 물었더니 챗봇이 식품위생 영업신고를
+    지금 당장 할 일처럼 안내한 사고. startup_track 자체는 공사 시작 전엔 노출되지
+    않아야 하고(기존 게이트), 공사가 시작된 뒤에도 사용승인 전까지는 식품위생
+    영업신고가 '다음 할 일'로 뜨면 안 된다(같은 상태에서 사용승인까지 나면 그때는
+    떠야 한다 - 완전히 숨기는 게 아니라 시점이 맞을 때만 노출)."""
+    before_construction = {"food_result": "제과점영업", "task_progress": {}}
+    result = compute_project_status(before_construction)
+    assert result["startup_track"]["current_step"] is None
+    assert result["startup_track"]["next_action"] is None
+
+    mid_construction = {
+        "food_result": "제과점영업",
+        "task_progress": {"construction": True, "construction_notice": True},
+    }
+    result = compute_project_status(mid_construction)
+    assert result["startup_track"]["next_action"] != "식품위생: 제과점영업"
+
+    after_use_approval = {
+        "food_result": "제과점영업",
+        "task_progress": {"construction": True, "construction_notice": True, "use_approval": True},
+    }
+    result = compute_project_status(after_use_approval)
+    assert result["startup_track"]["next_action"] == "식품위생: 제과점영업"
 
 
 def test_startup_track_hidden_before_construction_starts():
@@ -107,6 +136,7 @@ def test_all_steps_done_reaches_full_progress_and_celebration_summary():
             "pre_diagnosis_checked": True, "documents_prepared": True, "application_submitted": True,
             "construction_notice": True, "construction": True, "use_approval": True,
             "business_registration": True, "hygiene_education": True,
+            "food_report_filed": True, "signage_installed": True,
             "interior_equipment": True, "staff_registration": True, "opened": True,
         },
     }
@@ -129,6 +159,7 @@ def test_hires_staff_false_counts_staff_registration_as_done():
         "task_progress": {
             "construction": True,  # 창업 준비 트랙 노출 게이트(공사 시작) 통과용
             "business_registration": True, "hygiene_education": True,
+            "signage_installed": True,  # 간판도 실제 설치 완료까지 밝혀야 done(2026-08-06)
             "interior_equipment": True, "hires_staff": False,
         },
     }
@@ -140,9 +171,12 @@ def test_hires_staff_false_counts_staff_registration_as_done():
 def test_progress_percentage_rounds_to_nearest_integer():
     # 총 17개 하위 항목(2026-08-06: Step0 3(건축주 여부 확인 포함)ᆞStep1 4
     # (건축사선정 포함)ᆞStep2 4(인테리어ᆞ장비 설치 포함)ᆞStep3 4ᆞStep4 2
-    # (인테리어는 Step2로 이동)) 중 8개 완료(architect_selected 미기록ᆞ
-    # case_facts.ownership 미기록이라 둘 다 미완료로 집계) -> 8/17*100 = 47.05...
-    # -> 반올림 47
+    # (인테리어는 Step2로 이동)) 중 6개 완료 - Step0(행위유형ᆞ대상판정=2,
+    # architect_selected/ownership 미기록) + Step1(사전검토ᆞ서류준비ᆞ신청접수=3) +
+    # Step2(착공신고=1). 식품위생ᆞ간판은 판정(food_result/signage_result)만 났을 뿐
+    # 실제 신고 접수ᆞ설치 자기보고(food_report_filed/signage_installed)가 없어
+    # 미완료로 집계된다(2026-08-06 수정 - 판정 여부로 done을 잘못 세던 버그).
+    # -> 6/17*100 = 35.29... -> 반올림 35
     state = {
         "case_facts": {"act_type": "신축"},
         "permit_result": PermitResult(permit_type="건축신고", procedures=[]),
@@ -155,4 +189,4 @@ def test_progress_percentage_rounds_to_nearest_integer():
         },
     }
     result = compute_project_status(state)
-    assert result["progress"] == 47
+    assert result["progress"] == 35

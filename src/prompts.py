@@ -142,16 +142,22 @@ _COLLECT_SIGNAGE = """사용자가 간판ᆞ현수막ᆞ외부 광고물 설치�
 
 # --- 로드맵 진행률(task_progress) 자기보고 수집 규칙 ---
 _COLLECT_PROGRESS = """사용자가 사전 진단 항목 확인ᆞ필요 서류 준비ᆞ신청서 접수ᆞ착공신고ᆞ시공ᆞ
-사용승인ᆞ사업자등록ᆞ위생교육ᆞ인테리어ᆞ장비설치ᆞ직원등록ᆞ영업개시 중 **실제로
-완료했다고 명확히 밝힌 항목**이 있으면 record_task_progress로 기록하세요.
-**판정(record_case_facts 등)이나 안내 도구(get_business_registration_guide
-등)를 호출했다고, 또는 record_permit_synthesis로 서류ᆞ사전진단 항목을
-설명했다고 해서 자동으로 완료 처리하지 마세요** - "~하려고요"/"~해야
+사용승인ᆞ영업신고 접수ᆞ간판 설치ᆞ사업자등록ᆞ위생교육ᆞ인테리어ᆞ장비설치ᆞ직원등록ᆞ
+영업개시 중 **실제로 완료했다고 명확히 밝힌 항목**이 있으면 record_task_progress로
+기록하세요.
+**판정(record_case_facts/record_food_facts/record_signage_facts 등)이나 안내
+도구(get_business_registration_guide 등)를 호출했다고, 또는 record_permit_synthesis로
+서류ᆞ사전진단 항목을 설명했다고 해서 자동으로 완료 처리하지 마세요** - "~하려고요"/"~해야
 하나요?" 같은 계획ᆞ질문 표현은 완료가 아니고, [Step 1-2]/[Step 1-3]에서
 사전진단ᆞ서류 항목을 "안내"한 것도 완료가 아닙니다(pre_diagnosis_checked/
 documents_prepared는 사용자가 "사전 진단 확인했어요"/"서류 다 준비했어요"처럼
 직접 확인해줬을 때만, application_submitted는 [Step 1-4] 안내와 무관하게
 사용자가 "접수했어요"/"신청서 냈어요"처럼 실제 접수를 직접 말해줬을 때만).
+**food_result/signage_result 판정이 나온 것도 마찬가지로 완료가 아닙니다** -
+"제과점영업으로 신고하셔야 해요" 같은 판정 안내와 별개로, 사용자가 "영업신고
+냈어요"/"간판 달았어요"처럼 실제 접수ᆞ설치를 직접 말해줬을 때만
+food_report_filed/signage_installed를 기록하세요(food_report_filed는 사용승인
+전에는 애초에 접수 자체가 불가능하니 더더욱 안내만으로 앞서 기록하지 마세요).
 이 항목들은 실물 세계에서 벌어지는 일이라 오직 사용자가 직접 완료를 말해준
 경우에만 기록하세요.
 

@@ -189,6 +189,21 @@ def test_hygiene_education_none_when_food_not_applicable():
     assert _HYGIENE.resolve(_state(food_result="신고대상제외")) is None
 
 
+def test_food_registration_done_requires_actual_filing_not_just_classification():
+    """판정(food_result)만 나온 상태는 아직 '완료'가 아니다 - 실제 신고 접수를
+    자기보고(food_report_filed)해야만 done이 된다. 세션 f9766c33(2026-08-06)
+    회귀 - done이 food_result 존재 여부로 잘못 계산돼, 공사도 시작 안 한
+    시점부터 로드맵ᆞ진행률이 영업신고를 이미 끝난 것처럼 보여준 버그."""
+    result = _FOOD.resolve(_state(food_result="일반음식점영업"))
+    assert isinstance(result, ResolvedSubstep)
+    assert result.done is False
+
+    result = _FOOD.resolve(
+        _state(food_result="일반음식점영업", task_progress={"food_report_filed": True})
+    )
+    assert result.done is True
+
+
 def test_food_registration_locked_until_use_approval():
     result = _FOOD.resolve(_state(food_result="일반음식점영업"))
     assert isinstance(result, ResolvedSubstep)

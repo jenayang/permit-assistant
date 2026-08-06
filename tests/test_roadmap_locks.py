@@ -61,8 +61,9 @@ def test_staff_registration_hires_staff_false_bypasses_lock(roadmap_lock_results
 
 
 def test_opening_locked_until_all_step3_items_done(roadmap_lock_results):
-    assert roadmap_lock_results["opened: 5개 중 1개(위생교육)만 빠져도 잠김"]
-    assert roadmap_lock_results["opened: 5개 전부 충족되면 해제"]
+    assert roadmap_lock_results["opened: 4개 중 1개(위생교육)만 빠져도 잠김"]
+    assert roadmap_lock_results["opened: 4개 전부 충족되면 해제"]
+    assert roadmap_lock_results["opened: 판정만 나고 영업신고 접수 전이면 여전히 잠김"]
 
 
 def test_architect_badge_reflects_requires_architect(roadmap_lock_results):

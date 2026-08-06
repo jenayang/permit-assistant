@@ -37,45 +37,58 @@ _CONSTRUCTION_TRACK_INDICES = (0, 1, 2)
 _STARTUP_TRACK_INDICES = (3, 4)
 
 
-def _step_substeps(state: dict) -> list[list[tuple[str, bool]]]:
-    """Step 0~4 각각의 [(라벨, 완료여부), ...].
+def _step_substeps(state: dict) -> list[list[tuple[str, bool, bool]]]:
+    """Step 0~4 각각의 [(라벨, 완료여부, 잠김여부), ...].
 
     2026-08-06(Phase 5): 판정 로직을 `src/roadmap_steps.py`의 `ROADMAP_STEPS`로
     옮겼다 - 챗봇(roadmap.py)과 이 함수가 같은 resolve()를 봐서, 예전에 실측으로
     확인된 드리프트(건축사선정 항목 누락ᆞ인테리어장비 위치 불일치)가 재발하지
     않는다. `resolve()`가 `None`(해당없음)을 돌려주면 그 항목 자체가 목록에서
     빠지고(진행률 분모가 케이스별로 정확해짐), `NeedsInput`이면 아직 안 밝혀진
-    질문 자체를 라벨로 써서 미완료 항목으로 남긴다."""
-    steps: list[list[tuple[str, bool]]] = []
+    질문 자체를 라벨로 써서 미완료 항목으로 남긴다.
+
+    잠김여부(locked)도 함께 실어야 한다 - 식품위생 영업신고처럼 판정은 먼저
+    나오지만 실제 신고는 사용승인 후에나 가능한 항목이 있는데, 예전엔 done만
+    보고 next_action을 골라서 사용승인 전에도 "다음 할 일: 식품위생 영업신고"를
+    보여주는 문제가 있었다(세션 f9766c33, 2026-08-06 - done을 판정 여부가 아닌
+    실제 신고 접수 자기보고로 고치면서 이 게이트가 없으면 새로 드러남)."""
+    steps: list[list[tuple[str, bool, bool]]] = []
     for step_def in ROADMAP_STEPS:
-        substeps: list[tuple[str, bool]] = []
+        substeps: list[tuple[str, bool, bool]] = []
         for substep_def in step_def.substeps:
             result = substep_def.resolve(state)
             if result is None:
                 continue
             if isinstance(result, NeedsInput):
-                substeps.append((result.question, False))
+                substeps.append((result.question, False, False))
             else:
-                substeps.append((result.label, result.done))
+                substeps.append((result.label, result.done, result.locked))
         steps.append(substeps)
     return steps
 
 
-def _track_status(steps: list[list[tuple[str, bool]]], indices: tuple[int, ...]) -> dict:
+def _track_status(steps: list[list[tuple[str, bool, bool]]], indices: tuple[int, ...]) -> dict:
     """트랙(Step 인덱스 목록) 하나의 진행 상태 - 그 트랙 안에서만 순서대로
     훑어 첫 미완료 단계를 current_step으로 잡는다(트랙 간에는 서로 훑지
-    않는다 - 이게 이번에 고친 핵심)."""
+    않는다 - 이게 이번에 고친 핵심).
+
+    next_action은 미완료 항목 중에서도 **잠기지 않은(locked=False)** 항목만
+    고른다 - 사용승인 전 식품위생 영업신고처럼 아직 실행 자체가 불가능한
+    항목을 "다음 할 일"로 보여주면 roadmap.py의 _next_pending_substep과
+    같은 원칙(잠긴 항목은 안내하지 않는다)이 이 위젯에서만 깨진다."""
     current_step = None
     next_action = None
     completed = []
     for i in indices:
         label, substeps = STEP_LABELS[i], steps[i]
-        done_count = sum(1 for _, done in substeps if done)
+        done_count = sum(1 for _, done, _locked in substeps if done)
         if done_count == len(substeps):
             completed.append(label)
         elif current_step is None:
-            current_step = label
-            next_action = next(text for text, done in substeps if not done)
+            pending = next((text for text, done, locked in substeps if not done and not locked), None)
+            if pending is not None:
+                current_step = label
+                next_action = pending
     return {"current_step": current_step, "next_action": next_action, "completed": completed}
 
 
@@ -96,7 +109,7 @@ def compute_project_status(state: dict) -> dict:
     startup = _track_status(steps, _STARTUP_TRACK_INDICES)
     completed = construction["completed"] + startup["completed"]
 
-    total_done = sum(sum(1 for _, done in s if done) for s in steps)
+    total_done = sum(sum(1 for _, done, _locked in s if done) for s in steps)
     total_all = sum(len(s) for s in steps)
     progress = round(total_done / total_all * 100) if total_all else 0
 

@@ -1286,8 +1286,12 @@
     // Step 4 "영업 시작" 잠금 기준 - 소방시설은 Step2로 옮겨갔으므로
     // step3AllDone에서 제외(이중 게이트 방지, 2026-08-04). 나머지 4항목
     // (식품위생ᆞ간판ᆞ사업자등록ᆞ위생교육)은 그대로.
-    const step3AllDone = latestFoodResult != null
-      && latestSignageResult != null
+    // food_report_filed/signage_installed(실제 신고 접수ᆞ설치 자기보고)로
+    // 판단한다 - latestFoodResult/latestSignageResult(판정 여부)만으로는
+    // 아직 신고ᆞ설치를 하지 않았어도 "영업 시작"이 잠금 해제되는 버그였다
+    // (2026-08-06, 세션 f9766c33 - Python roadmap_steps.py와 동일한 수정).
+    const step3AllDone = !!taskProgress.food_report_filed
+      && !!taskProgress.signage_installed
       && !!taskProgress.business_registration
       && !!taskProgress.hygiene_education;
 
@@ -1398,12 +1402,15 @@
         substeps: [
           // 식품위생 영업신고는 "어떤 종류인지 판정"은 사용승인 전에도 할 수
           // 있지만, 실제 신고 접수는 건물이 적법하게 사용 가능한 상태(사용승인
-          // 완료)여야 가능하다(2026-07-28 피드백). 그래서 판정 자체는 그대로
-          // 라벨에 보여주되(done 여부와 무관하게 잠금), 사용승인 전까지는
-          // 🔒로 표시해 "신고까지는 아직" 임을 나타낸다.
+          // 완료)여야 가능하다(2026-07-28 피드백). 판정(latestFoodResult)과
+          // 실제 접수 완료는 별개라 done은 자기보고(task_progress.food_report_filed)로만
+          // 판단한다 - 판정만 나면 바로 done으로 잡혀서 공사 시작 전부터
+          // 로드맵ᆞ진행률이 신고를 이미 끝낸 것처럼 보여주는 버그가 있었다
+          // (2026-08-06, 세션 f9766c33). 사용승인 전까지는 여전히 🔒로 표시.
           {
             text: latestFoodResult ? `식품위생: ${latestFoodResult}` : "식품위생 영업신고",
-            done: latestFoodResult != null,
+            done: !!taskProgress.food_report_filed,
+            field: "food_report_filed",
             // 대화로 "식품위생법 비대상"이 확정되면(해당없음ᆞ완제품 소매 신고대상제외)
             // 신고 자체가 필요 없으니 ✕로 닫는다.
             notApplicable: latestFoodResult === "해당없음" || latestFoodResult === "신고대상제외",
@@ -1414,7 +1421,8 @@
           },
           {
             text: latestSignageResult ? `간판: ${latestSignageResult}` : "간판ᆞ옥외광고물",
-            done: latestSignageResult != null,
+            done: !!taskProgress.signage_installed,
+            field: "signage_installed",
             // 허가ᆞ신고가 필요 없는 간판이면 ✕로 닫는다.
             notApplicable: latestSignageResult != null && latestSignageResult.includes("불필요"),
             naReason: "허가ᆞ신고가 필요 없는 간판입니다",
