@@ -1173,6 +1173,9 @@
     // 먼저다. "신청서 제출"에 뭉쳐 있던 서류 준비ᆞ접수 행위도 별도 항목으로
     // 분리했다.)
     const permitNotNeeded = (latestPermitResult?.permit_type || caseTypeResult) === "인허가불필요";
+    // 사전검토ᆞ설계서류 준비 둘 다 "건축사사무소가 대행 시 실제로 하는 일"
+    // 표시에 쓰는 담당자 - 직접 진행(설계 의무 아님ᆞ대행 안 씀)일 때만 본인.
+    const designerActor = requiresArchitect === false && taskProgress.uses_agency === false ? "본인" : "건축사사무소";
     const step1Substeps = [];
     if (factInfoLines.length) {
       // 판정 입력값(연면적ᆞ용도지역 등 참고 정보)은 Step0로 옮긴 판정 항목이
@@ -1225,6 +1228,19 @@
         children: architectSelectionChildren,
       });
     }
+    // "사전 검토" 하위 실제 확인 항목(2026-08-06 보강) - 예전엔 체크박스 하나로
+    // 뭉쳐 있어 뭘 보는 단계인지 막연했다. 항목별 근거 법령은 search_regulations로
+    // 대조(2026-08-06): 주차-서울시 주차장 설치 및 관리 조례(부설주차장 설치기준
+    // 별표), 정화조-하수도법 제34ᆞ35조, 소방시설-소방시설 설치 및 관리에 관한
+    // 법률 시행령(별표4), 장애인 편의시설-장애인ᆞ노인ᆞ임산부 등의 편의증진
+    // 보장에 관한 법률(장애인등편의법). 전부 대행 시 건축사사무소가 확인하는
+    // 항목이라 designWorkChildren과 같은 담당자(designerActor)를 쓴다.
+    const preDiagnosisChildren = [
+      { text: "법정 주차대수 확인(서울시 주차장 설치 및 관리 조례)", actor: designerActor },
+      { text: "정화조 용량ᆞ설치기준 확인(하수도법 제34ᆞ35조)", actor: designerActor },
+      { text: "소방시설 설치대상 확인(소방시설법 시행령)", actor: designerActor },
+      { text: "장애인 편의시설 대상 여부 확인(장애인등편의법)", actor: designerActor },
+    ];
     if (diag.length) {
       diag.forEach((d) => step1Substeps.push({ text: `🔍 ${d}`, info: true }));
       step1Substeps.push({
@@ -1232,6 +1248,7 @@
         done: !!taskProgress.pre_diagnosis_checked,
         field: "pre_diagnosis_checked",
         actorNote: "위 항목(주차ᆞ정화조ᆞ피난 등)은 건축사사무소가 설계도서에 반영합니다 - 건축주는 결과를 확인만 하면 됩니다.",
+        children: preDiagnosisChildren,
       });
     } else {
       step1Substeps.push({ text: "사전 검토", done: false, notApplicable: permitNotNeeded, naReason: "인허가 대상이 아니라 사전 검토가 필요 없습니다" });
@@ -1242,7 +1259,6 @@
     // (건축법 시행규칙 제12조의2 - 신청서 제출자는 항상 건축주, 실제 작성
     // 대행은 실무 관행일 뿐 법적 요건은 아님, 2026-08-04 role-based 설계 조사).
     // children으로 붙여서 부모(설계ᆞ서류 준비)와 한 카드 안에 렌더링(2026-08-06 피드백).
-    const designerActor = requiresArchitect === false && taskProgress.uses_agency === false ? "본인" : "건축사사무소";
     const designWorkChildren = [
       { text: "평면도(기본설계도) 작성", actor: designerActor },
       { text: "구조ᆞ피난 안전 검토", actor: designerActor },

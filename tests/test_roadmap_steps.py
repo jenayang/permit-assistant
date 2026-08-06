@@ -99,6 +99,15 @@ def test_pre_diagnosis_mentions_self_consultation_when_not_mandatory():
     assert "사전 상담" in result.content_guide
 
 
+def test_pre_diagnosis_content_guide_cites_specific_laws_per_item():
+    # 항목별 근거 법령이 구체적으로 명시돼 있어야 LLM이 엉뚱한 조문을 검색하지 않는다.
+    result = _PRE_DIAGNOSIS.resolve(_state(case_facts={"act_type": "신축"}))
+    assert "주차장 설치 및 관리 조례" in result.content_guide
+    assert "하수도법 제34ᆞ35조" in result.content_guide
+    assert "소방시설 설치 및 관리에 관한 법률 시행령" in result.content_guide
+    assert "장애인등편의법" in result.content_guide
+
+
 # === Step1 설계ᆞ서류 준비 - 대행 여부에 따라 예시 서식이 갈린다 ===
 
 def test_documents_prepared_shows_agency_example_when_mandatory():
@@ -111,6 +120,11 @@ def test_documents_prepared_shows_direct_example_when_self_managed():
         _state(case_facts={"act_type": "일반수선"}, task_progress={"uses_agency": False})
     )
     assert "본인이 직접 작성ᆞ준비" in result.content_guide
+
+
+def test_documents_prepared_cites_application_rule():
+    result = _DOCUMENTS_PREPARED.resolve(_state(case_facts={"act_type": "신축"}))
+    assert "건축법 시행규칙 제6조" in result.content_guide
 
 
 # === Step1 신청ᆞ접수 ===
