@@ -15,6 +15,7 @@ from src.agents.permit import (
     PermitResult,
     _act_type_reason,
     _architect_note,
+    _compute_cautions,
     _facility_group_reason,
     _walk_procedures,
     build_permit_result,
@@ -66,6 +67,24 @@ def test_build_permit_result_matches_classify_case_and_walks_tree():
     assert isinstance(result, PermitResult)
     assert result.permit_type == "건축신고"
     assert result.procedures[0] == "신고 (토지사용승낙서 등)"
+
+
+# --- _compute_cautions -------------------------------------------------------
+
+def test_cautions_empty_when_permit_not_needed():
+    assert _compute_cautions({}, "인허가불필요") == []
+
+
+def test_cautions_present_for_owner_without_tenant_note():
+    cautions = _compute_cautions({"ownership": "소유자"}, "건축신고")
+    assert len(cautions) == 2
+    assert all("임차인" not in c for c in cautions)
+
+
+def test_cautions_add_tenant_note_for_tenant():
+    cautions = _compute_cautions({"ownership": "임차인"}, "건축허가")
+    assert len(cautions) == 3
+    assert "임차인" in cautions[-1]
 
 
 # --- _facility_group_reason: 용도변경 방향 문구(2026-07-24 회귀 이력) -------

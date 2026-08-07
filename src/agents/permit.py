@@ -352,6 +352,10 @@ class PermitResult(BaseModel):
     related_agencies: list[str] = Field(
         default_factory=list, description="협의ᆞ접수 관련 기관 목록 - record_permit_synthesis(related_agencies=[...])로 LLM이 기록"
     )
+    cautions: list[str] = Field(
+        default_factory=list,
+        description="발급 전 착공ᆞ영업 금지 등 주의사항 - permit_type/ownership만으로 결정론적으로 계산(§1, LLM 미개입)",
+    )
     explanation: str = Field(default="", description="LLM이 생성할 설명 텍스트 - 아직 미채움")
 
 
@@ -377,6 +381,27 @@ def _walk_procedures(result_type: str, ownership: str | None) -> list[str]:
     return labels
 
 
+def _compute_cautions(facts: dict, permit_type: str) -> list[str]:
+    """주의사항을 permit_type/ownership 등 이미 확정된 사실만으로 결정론적으로
+    조합한다 - 판정과 같은 원칙(§1, LLM이 매번 다르게 안내하는 문제를 피함).
+    벌칙 조번호는 prompts.py의 _PROMPT_ACCURACY가 이미 검증해 쓰는 것과
+    동일한 조문(건축법 제80ᆞ108ᆞ110조)만 재사용하고, 새 법령 해석은 넣지 않는다.
+    """
+    if permit_type == "인허가불필요":
+        return []
+    cautions = [
+        "허가서ᆞ신고필증을 발급받기 전에는 착공ᆞ영업을 시작하지 마세요 - "
+        "무허가ᆞ무신고 건축ᆞ용도변경은 벌칙(건축법 제108ᆞ110조) 대상이 될 수 있습니다.",
+        "시정명령을 따르지 않으면 이행강제금(건축법 제80조)이 부과될 수 있습니다.",
+    ]
+    if facts.get("ownership") == "임차인":
+        cautions.append(
+            "임차인은 건물주(소유자) 동의 없이 공사ᆞ용도변경을 진행하면 계약 분쟁의 "
+            "소지가 있으니 사전에 동의를 받아두세요."
+        )
+    return cautions
+
+
 def build_permit_result(facts: dict) -> PermitResult | None:
     """case_facts로 PermitResult를 만든다. classify_case()가 아직 판정을 못 내리면
     (정보 부족) None을 반환 - 호출 쪽에서 이걸로 "아직 판정 전" 여부를 판단한다.
@@ -387,6 +412,7 @@ def build_permit_result(facts: dict) -> PermitResult | None:
     return PermitResult(
         permit_type=permit_type,
         procedures=_walk_procedures(permit_type, facts.get("ownership")),
+        cautions=_compute_cautions(facts, permit_type),
     )
 
 
