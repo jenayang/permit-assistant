@@ -1,0 +1,13 @@
+.venv/
+chroma_db/
+.git/
+.cache/
+eval_results/
+tests/
+docs/
+.pytest_cache/
+.ruff_cache/
+.ua/
+.env
+*.log
+.DS_Store

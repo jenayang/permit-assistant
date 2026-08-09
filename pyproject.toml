@@ -22,6 +22,8 @@ dependencies = [
     # 벡터DB / 임베딩
     "chromadb>=0.5.0",
     "sentence-transformers>=3.0.0",
+    "torch>=2.0.0",  # sentence-transformers의 간접 의존성이지만, CPU 전용 wheel(tool.uv.sources)을
+                      # 강제하려면 직접 선언이 필요함(간접 의존성엔 소스 오버라이드가 안 먹음)
     # 문서 로더
     "pypdf>=5.0.0",
     "pymupdf>=1.24.0",
@@ -66,3 +68,14 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# GPU 안 쓰는 배포용(Docker/Linux)에서 torch가 CUDA 의존성(수 GB)까지 같이
+# 받아오는 걸 막기 위해 CPU 전용 wheel을 씀. 맥 로컬 개발은 그대로 기본 인덱스 사용
+# (darwin엔 애초에 CUDA wheel이 없어서 이 설정의 영향을 안 받음).
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
