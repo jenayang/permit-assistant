@@ -844,6 +844,12 @@
 </div>
 
 <script>
+  // 첫 접속(대화 이력 없음)이면 로드맵 결과 화면 대신 주소ᆞ업종을 입력하는
+  // "로드맵 만들기" 화면을 먼저 보여준다. getUserId()가 없으면 새로
+  // 만들어버려서 이 판정에 못 쓰므로, 그 전에 원본 값을 직접 확인한다.
+  if (!localStorage.getItem("permit_assistant_user_id")) {
+    window.location.replace("/ui/intake.html");
+  }
   const API_BASE = "";
   const chatEl = document.getElementById("chat");
   const emptyHint = document.getElementById("emptyHint");
@@ -1219,12 +1225,25 @@
         actorNote: "설계 의무 대상은 아니지만 대행을 선택하셨습니다 - 건축주가 업체와 계약합니다.",
         children: architectSelectionChildren,
       });
-    } else {
+    } else if (requiresArchitect === false) {
       step1Substeps.push({
         text: "건축사사무소 선정ᆞ설계 계약",
         done: !!taskProgress.architect_selected,
         field: "architect_selected",
         actorNote: "법적 의무는 아닙니다(개인이 직접 진행 가능) - 직접 하실지 대행업체를 쓰실지는 채팅으로 말씀해주시면 이 항목에 반영됩니다.",
+        children: architectSelectionChildren,
+      });
+    } else {
+      // requiresArchitect === null - 판정에 필요한 사실(면적 등)이 아직 부족해
+      // "필수"도 "의무 아님"도 단정할 수 없는 상태. 여기서 false 취급하면
+      // 정보부족을 확정된 "의무 없음"으로 잘못 안내하게 된다(실제 사례:
+      // 세션 3d834b3c - 용도변경 허가 대상인데 size_sqm을 몰라 requires_licensed_architect()가
+      // None을 반환했는데도 "법적 의무는 아닙니다"로 표시됨, 2026-08-09 재신고).
+      step1Substeps.push({
+        text: "건축사사무소 선정ᆞ설계 계약",
+        done: !!taskProgress.architect_selected,
+        field: "architect_selected",
+        actorNote: "설계 의무 대상 여부를 아직 확정할 수 없습니다(면적 등 정보 부족) - 채팅으로 규모를 알려주시면 필수ᆞ선택 여부를 정확히 안내해드립니다.",
         children: architectSelectionChildren,
       });
     }
