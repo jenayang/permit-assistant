@@ -37,3 +37,11 @@ eval_results/
 # test
 test_retriever.py
 test_generator.py
+
+# 내부 개발 과정 문서 (로컬에는 유지, 공개 레포에는 비공개)
+/CLAUDE.md
+/MEMORY.md
+docs/dev_log_*.md
+docs/idea_notes.md
+docs/memory/
+docs/superpowers/
