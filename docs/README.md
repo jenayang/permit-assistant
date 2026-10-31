@@ -15,6 +15,7 @@
 | `idea_notes.md` | 외부 자료 리뷰에서 나온 아이디어(대부분 미착수) — 로컬 전용(git 비공개) | 새 레포ᆞ자료를 검토할 때 |
 | [`use_cases.md`](use_cases.md) / [`test_scenarios.md`](test_scenarios.md) | 사용자 사례ᆞ판정 시나리오 | 규칙 엔진을 고칠 때 |
 | [`data_sources.md`](data_sources.md) | 법령ᆞ조례 출처 | 데이터를 추가할 때 |
+| [`adr/`](adr/README.md) | 트러블슈팅ᆞ아키텍처 결정 기록(ADR 양식, 소급 작성) | 특정 결정의 대안ᆞ트레이드오프가 궁금할 때 |
 | [`project_portfolio.md`](project_portfolio.md) | 취업용 회고(독자가 다름) | 포트폴리오 정리 |
 
 > `CLAUDE.md`ᆞ`MEMORY.md`ᆞ`memory/*.md`ᆞ`dev_log_*.md`ᆞ`idea_notes.md`ᆞ`superpowers/`는
