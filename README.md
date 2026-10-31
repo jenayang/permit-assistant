@@ -16,7 +16,8 @@
 
 ## 데모
 
-<!-- 여기에 시연 영상을 드래그 앤 드롭으로 삽입하세요 (GitHub 웹 UI 편집 모드) -->
+https://github.com/user-attachments/assets/e87e592c-a873-43dc-90f8-827c80a101b9
+
 
 ## 배경
 
